@@ -1,0 +1,118 @@
+import net from "node:net";
+import process from "node:process";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const wsUrl = process.env.VITE_CODEX_WS_URL ?? "ws://127.0.0.1:3901";
+const uiPort = process.env.VITE_CODEX_UI_PORT ?? "3784";
+const url = new URL(wsUrl);
+const host = url.hostname;
+const port = Number(url.port || (url.protocol === "wss:" ? 443 : 80));
+const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+const children = [];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isPortOpen = (targetHost, targetPort) =>
+  new Promise((resolve) => {
+    const socket = new net.Socket();
+
+    socket.setTimeout(400);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+
+    socket.connect(targetPort, targetHost);
+  });
+
+const stopChildren = () => {
+  for (const child of children) {
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+  }
+};
+
+process.on("SIGINT", () => {
+  stopChildren();
+  process.exit(130);
+});
+
+process.on("SIGTERM", () => {
+  stopChildren();
+  process.exit(143);
+});
+
+const ensureAppServer = async () => {
+  if (await isPortOpen(host, port)) {
+    console.log(`[codex-cli-ui] Reusing Codex app-server at ${wsUrl}`);
+    return;
+  }
+
+  console.log(`[codex-cli-ui] Starting Codex app-server at ${wsUrl}`);
+  const appServer = spawn("codex", ["app-server", "--listen", wsUrl], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  children.push(appServer);
+
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (await isPortOpen(host, port)) {
+      return;
+    }
+
+    if (appServer.exitCode !== null) {
+      throw new Error(`Codex app-server exited with code ${appServer.exitCode}`);
+    }
+
+    await sleep(200);
+  }
+
+  throw new Error(`Timed out waiting for Codex app-server at ${wsUrl}`);
+};
+
+const startVite = () => {
+  console.log(`[codex-cli-ui] Starting Vite dev server on http://127.0.0.1:${uiPort}`);
+
+  const viteEnv = {
+    ...process.env,
+    VITE_CODEX_WS_PROXY_TARGET: wsUrl,
+  };
+
+  delete viteEnv.VITE_CODEX_WS_URL;
+
+  const vite = spawn(npmBin, ["run", "dev", "--", "--host", "0.0.0.0", "--port", uiPort], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: viteEnv,
+  });
+
+  children.push(vite);
+
+  vite.on("exit", (code) => {
+    stopChildren();
+    process.exit(code ?? 0);
+  });
+};
+
+try {
+  await ensureAppServer();
+  startVite();
+} catch (error) {
+  stopChildren();
+  console.error(`[codex-cli-ui] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
