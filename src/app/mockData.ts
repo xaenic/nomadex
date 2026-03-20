@@ -120,9 +120,21 @@ export type AccountState = {
   planType: string;
   workspace: string;
   authMode: string;
+  loggedIn: boolean;
+  requiresOpenaiAuth: boolean;
+  loginInProgress: boolean;
+  pendingLoginId: string | null;
+  loginError: string | null;
   rateUsed: number;
   rateLimit: number;
   credits: string;
+  usageWindows: Array<{
+    id: string;
+    label: string;
+    usedPercent: number;
+    windowDurationMins: number | null;
+    resetsAt: number | null;
+  }>;
 };
 
 export type StreamSpec = {
@@ -495,7 +507,7 @@ const settings: SettingsState = {
   reasoningEffort: "xhigh",
   approvalPolicy: "on-request",
   sandboxMode: "workspace-write",
-  collaborationMode: "plan",
+  collaborationMode: "default",
   personality: "pragmatic",
   webSearch: true,
   analytics: true,
@@ -521,9 +533,30 @@ const account: AccountState = {
   planType: "ChatGPT Pro",
   workspace: "allan@local",
   authMode: "chatgpt",
+  loggedIn: true,
+  requiresOpenaiAuth: false,
+  loginInProgress: false,
+  pendingLoginId: null,
+  loginError: null,
   rateUsed: 68,
   rateLimit: 100,
   credits: "Remote metered, local tools unrestricted",
+  usageWindows: [
+    {
+      id: "five-hour",
+      label: "5-hour",
+      usedPercent: 68,
+      windowDurationMins: 300,
+      resetsAt: now + 60 * 90,
+    },
+    {
+      id: "weekly",
+      label: "Weekly",
+      usedPercent: 41,
+      windowDurationMins: 60 * 24 * 7,
+      resetsAt: now + 60 * 60 * 24 * 3,
+    },
+  ],
 };
 
 const textInput = (text: string): UserInput => ({

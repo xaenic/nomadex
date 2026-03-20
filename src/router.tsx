@@ -1,18 +1,11 @@
-import { Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
-import { BlankWorkspacePage, CodexWorkspaceProvider } from "./app/CodexWorkspace";
+import { BlankWorkspacePage } from "./app/CodexWorkspace";
+import { RootLayout } from "./app/RootLayout";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
 });
-
-function RootLayout() {
-  return (
-    <CodexWorkspaceProvider>
-      <Outlet />
-    </CodexWorkspaceProvider>
-  );
-}
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,

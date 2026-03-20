@@ -1,6 +1,5 @@
 import {
   createContext,
-  memo,
   startTransition,
   useCallback,
   useContext,
@@ -10,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PropsWithChildren,
@@ -18,17 +16,9 @@ import {
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import clsx from "clsx";
 
-import type { Thread, ThreadItem, Turn, TurnError } from "../protocol/v2";
+import type { ThreadItem, Turn } from "../protocol/v2";
 import { CodexLiveRuntime } from "./codexLive";
-import {
-  deriveLiveOverlay,
-  getUserMessageDisplay,
-  parseInlineSegments,
-  parseMessageBlocks,
-  toBrowseUrl,
-  toRenderableImageUrl,
-  type UiLiveOverlay,
-} from "./codexUiBridge";
+import { deriveLiveOverlay, toBrowseUrl } from "./codexUiBridge";
 import {
   createBlankThreadRecord,
   createFallbackDashboardData,
@@ -39,664 +29,95 @@ import {
   type MentionAttachment,
   type SettingsState,
   type SkillCard,
-  type StreamSpec,
   type ThreadRecord,
   type WorkspaceMode,
 } from "./mockData";
-
-type UiApprovalMode = "auto" | "ro" | "fa";
-type PanelTab = "files" | "diff" | "terminal" | "agents" | "config";
-type QuickMode = "slash" | "mention" | "skill";
-type RouteSection = "chat" | "ops" | "agents" | "review" | "skills" | "mcp" | "settings";
-type ToastTone = "" | "ok" | "warn" | "err";
-
-type ToastItem = {
-  id: string;
-  message: string;
-  tone: ToastTone;
-};
-
-type ComposerPayload = {
-  prompt: string;
-  mentions: Array<MentionAttachment>;
-  skills: Array<SkillCard>;
-  images: Array<ComposerImage>;
-  files: Array<ComposerFile>;
-};
-
-type QueuedComposerMessage = ComposerPayload & {
-  id: string;
-  mode: WorkspaceMode;
-};
-
-type WorkspaceActions = {
-  createThread: (settings: SettingsState, title?: string) => Promise<string>;
-  resumeThread: (threadId: string) => Promise<void>;
-  interruptTurn: (threadId: string) => Promise<boolean>;
-  sendComposer: (args: ComposerPayload & {
-    threadId: string;
-    mode: WorkspaceMode;
-    settings: SettingsState;
-  }) => Promise<void>;
-  applySteer: (args: ComposerPayload & { threadId: string }) => Promise<boolean>;
-  searchMentions: (cwd: string, query: string) => Promise<void>;
-  loadDirectory: (cwd: string) => Promise<void>;
-  readFile: (path: string) => Promise<string>;
-  updateSettings: (patch: Partial<SettingsState>) => Promise<void>;
-  toggleFeatureFlag: (name: string) => Promise<void>;
-  toggleInstalledSkill: (skillId: string) => Promise<void>;
-  installSkill: (skillId: string) => Promise<void>;
-  toggleMcpAuth: (serverName: string) => Promise<void>;
-  cleanTerminals: (threadId: string) => Promise<void>;
-  resolveApproval: (requestId: string, approved: boolean) => Promise<void>;
-  submitQuestion: (requestId: string, answers: string[]) => Promise<void>;
-  submitMcp: (requestId: string, action: "accept" | "decline" | "cancel", contentText: string) => Promise<void>;
-  forkThread: (threadId: string) => Promise<string>;
-  compactThread: (threadId: string) => Promise<void>;
-};
-
-type WorkspaceContextValue = {
-  snapshot: DashboardData;
-  actions: WorkspaceActions;
-};
-
-type ParsedRoute = {
-  threadId: string | null;
-  section: RouteSection;
-};
-
-type QuickEntry = {
-  id: string;
-  label: string;
-  description: string;
-  mode: QuickMode;
-  value: string;
-};
-
-type FilePreviewState = {
-  path: string;
-  name: string;
-  content: string;
-  loading: boolean;
-  error: string | null;
-};
-
-type FileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;
-type FileChangeDiff = FileChangeItem["changes"][number];
-type DiffReviewEntry = {
-  id: string;
-  itemId: string;
-  path: string;
-  diff: string;
-  kind: FileChangeDiff["kind"];
-  status: FileChangeItem["status"];
-  additions: number;
-  removals: number;
-  hunks: number;
-};
-
-type DiffReviewLine = {
-  id: string;
-  kind: "meta" | "hunk" | "add" | "rem" | "ctx";
-  text: string;
-  oldLine: number | null;
-  newLine: number | null;
-};
-
-type ComposerHighlightSegment = {
-  text: string;
-  mention: MentionAttachment | null;
-};
+import {
+  APPROVAL_CLASS,
+  APPROVAL_LABELS,
+  APPROVAL_ORDER,
+  PANEL_TITLE,
+  QUICK_HINTS,
+  SLASH_COMMANDS,
+  approvalModeFromSettings,
+  countDiffStats,
+  deriveLocalDirectoryCatalog,
+  diffEntryId,
+  diffKindLabel,
+  formatClock,
+  formatUploadSize,
+  getStreamTarget,
+  getUserText,
+  insertInlineMentionToken,
+  isDesktopViewport,
+  isExistingThreadHistoryPending,
+  isPathWithinRoot,
+  latestThreadLabel,
+  localUploadedFilesToMentions,
+  nextId,
+  normalizeDiffPath,
+  panelToSection,
+  parseRoute,
+  sectionToPanel,
+  settingsPatchFromApprovalMode,
+  shorten,
+  sortThreads,
+  sortTurnsById,
+  statusTone,
+  stopStreamsForThreadTurn,
+  composerHasMentionToken,
+  mentionInlineToken,
+  threadDayGroup,
+  threadLabel,
+} from "./workspaceHelpers";
+import type {
+  DiffReviewEntry,
+  FilePreviewState,
+  PanelTab,
+  QuickEntry,
+  QuickMode,
+  QueuedComposerMessage,
+  RouteSection,
+  ToastItem,
+  ToastTone,
+  UiApprovalMode,
+  WorkspaceActions,
+  WorkspaceContextValue,
+} from "./workspaceTypes";
+import {
+  ChatTranscript,
+  ComposerTextarea,
+  ConfigPanel,
+  DiffPatchViewer,
+  FileEditorPreview,
+  QueuedMessagesStrip,
+} from "./WorkspaceView";
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+type CommandPaletteAction =
+  | { type: "createSession" }
+  | { type: "forkSession" }
+  | { type: "compactSession" }
+  | { type: "resetComposer" }
+  | { type: "openPanel"; tab: PanelTab }
+  | { type: "runSlash"; slash: string }
+  | { type: "selectModel"; modelId: string };
+
+type CommandPaletteItem = {
+  icon: string;
+  name: string;
+  key: string;
+  command: CommandPaletteAction;
+};
+
+type CommandPaletteGroup = {
+  label: string;
+  items: Array<CommandPaletteItem>;
+};
+
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
-const APPROVAL_ORDER: Array<UiApprovalMode> = ["auto", "ro", "fa"];
-const APPROVAL_LABELS: Record<UiApprovalMode, string> = {
-  auto: "Auto",
-  ro: "Read-only",
-  fa: "Full Access",
-};
-const APPROVAL_CLASS: Record<UiApprovalMode, string> = {
-  auto: "auto",
-  ro: "ro",
-  fa: "fa",
-};
-const PANEL_TITLE: Record<PanelTab, string> = {
-  files: "Files",
-  diff: "Diff",
-  terminal: "Terminal",
-  agents: "Agents",
-  config: "Config",
-};
-const QUICK_HINTS = {
-  slash:
-    "Ask Codex… / for slash commands · @ mention · $ skills · ! shell · Ctrl+G editor",
-  mention: "Attach a file or folder to the conversation",
-  skill: "Attach an installed or marketplace skill",
-};
-const SLASH_COMMANDS: Array<{ cmd: string; dsc: string }> = [
-  { cmd: "/permissions", dsc: "Switch Auto, Read-only, or Full Access approval mode" },
-  { cmd: "/apps", dsc: "Browse connectors and insert $app-slug into the prompt" },
-  { cmd: "/compact", dsc: "Summarize the conversation and free context" },
-  { cmd: "/diff", dsc: "Open the git diff view in the right panel" },
-  { cmd: "/exit", dsc: "End the current session" },
-  { cmd: "/feedback", dsc: "Send logs and feedback to maintainers" },
-  { cmd: "/fork", dsc: "Fork the current session into a new thread" },
-  { cmd: "/init", dsc: "Generate AGENTS.md in the workspace" },
-  { cmd: "/logout", dsc: "Sign out of Codex" },
-  { cmd: "/mcp", dsc: "Open Model Context Protocol server controls" },
-  { cmd: "/mention", dsc: "Attach a file or folder to the current message" },
-  { cmd: "/model", dsc: "Choose the active model and effort" },
-  { cmd: "/new", dsc: "Start a fresh conversation" },
-  { cmd: "/plan", dsc: "Switch to plan-first collaboration mode" },
-  { cmd: "/personality", dsc: "Choose the assistant communication style" },
-  { cmd: "/ps", dsc: "Open background terminal sessions" },
-  { cmd: "/quit", dsc: "End the current session" },
-  { cmd: "/resume", dsc: "Resume a saved session" },
-  { cmd: "/review", dsc: "Run a review pass against the working tree" },
-  { cmd: "/clear", dsc: "Clear the current conversation view" },
-  { cmd: "/copy", dsc: "Copy the latest Codex response" },
-  { cmd: "/skills", dsc: "Open installed and marketplace skills" },
-  { cmd: "/status", dsc: "Show model, tokens, approvals, git, and MCP state" },
-  { cmd: "/theme", dsc: "Preview and save UI theme variants" },
-  { cmd: "/experimental", dsc: "Toggle experimental feature flags" },
-];
-
-const nextId = (prefix: string) =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-
-const isDesktopViewport = () => (typeof window === "undefined" ? true : window.innerWidth >= 768);
-
-const sortThreads = (threads: Array<ThreadRecord>) => [...threads].sort((a, b) => b.thread.updatedAt - a.thread.updatedAt);
-const sortTurnsById = (turns: Array<Turn>) => [...turns].sort((left, right) => left.id.localeCompare(right.id));
-
-const approvalModeFromSettings = (settings: SettingsState): UiApprovalMode => {
-  if (settings.approvalPolicy === "untrusted") {
-    return "ro";
-  }
-
-  if (settings.approvalPolicy === "never") {
-    return "fa";
-  }
-
-  return "auto";
-};
-
-const settingsPatchFromApprovalMode = (mode: UiApprovalMode): Partial<SettingsState> => {
-  if (mode === "ro") {
-    return {
-      approvalPolicy: "untrusted",
-      sandboxMode: "read-only",
-    };
-  }
-
-  if (mode === "fa") {
-    return {
-      approvalPolicy: "never",
-      sandboxMode: "danger-full-access",
-    };
-  }
-
-  return {
-    approvalPolicy: "on-request",
-    sandboxMode: "workspace-write",
-  };
-};
-
-const sectionToPanel = (section: RouteSection): PanelTab | null => {
-  switch (section) {
-    case "ops":
-      return "files";
-    case "agents":
-      return "agents";
-    case "review":
-      return "diff";
-    case "skills":
-    case "mcp":
-    case "settings":
-      return "config";
-    default:
-      return null;
-  }
-};
-
-const panelToSection = (tab: PanelTab): RouteSection => {
-  switch (tab) {
-    case "files":
-    case "terminal":
-      return "ops";
-    case "agents":
-      return "agents";
-    case "diff":
-      return "review";
-    case "config":
-      return "settings";
-  }
-};
-
-const statusTone = (status: DashboardData["transport"]["status"]) => {
-  if (status === "connected") {
-    return "gn";
-  }
-
-  if (status === "error") {
-    return "rd";
-  }
-
-  return "yw";
-};
-
-const parseRoute = (pathname: string): ParsedRoute => {
-  const parts = pathname.split("/").filter(Boolean);
-
-  if (parts[0] === "thread" && parts[1]) {
-    return {
-      threadId: parts[1],
-      section: "chat",
-    };
-  }
-
-  if (parts[0] === "threads" && parts[1] && parts[2]) {
-    return {
-      threadId: parts[1],
-      section: parts[2] as RouteSection,
-    };
-  }
-
-  if (parts[0] === "threads" && parts[1]) {
-    return {
-      threadId: parts[1],
-      section: "chat",
-    };
-  }
-
-  return {
-    threadId: null,
-    section: "chat",
-  };
-};
-
-const threadDayGroup = (updatedAt: number) => {
-  const updated = new Date(updatedAt * 1000);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const value = new Date(updated.getFullYear(), updated.getMonth(), updated.getDate());
-  const days = Math.round((today.getTime() - value.getTime()) / 86400000);
-
-  if (days <= 0) {
-    return "Today";
-  }
-
-  if (days === 1) {
-    return "Yesterday";
-  }
-
-  return "Earlier";
-};
-
-const threadLabel = (thread: Thread) => thread.name ?? thread.preview ?? "Untitled Session";
-
-const formatClock = (value: number) =>
-  new Date(value * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-const shorten = (value: string, max = 76) => (value.length <= max ? value : `${value.slice(0, max - 3)}...`);
-const formatUploadSize = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`;
-const localUploadedFilesToMentions = (cwd: string, files: Array<ComposerFile>): Array<MentionAttachment> =>
-  files.map((file) => ({
-    id: `upload-${file.id}`,
-    name: file.name,
-    path: `${cwd}/.codex-web/uploads/${file.name}`,
-    kind: "file",
-  }));
-
-const OMIT_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
-
-const sortMentionAttachments = (entries: Array<MentionAttachment>) =>
-  [...entries].sort((left, right) => {
-    if (left.kind !== right.kind) {
-      return left.kind === "directory" ? -1 : 1;
-    }
-
-    return left.name.localeCompare(right.name);
-  });
-
-const deriveLocalDirectoryCatalog = (cwd: string): Array<MentionAttachment> => {
-  const prefix = `${cwd.replace(/\/+$/u, "")}/`;
-  const entries = new Map<string, MentionAttachment>();
-
-  ALL_MENTIONS.forEach((entry) => {
-    if (!entry.path.startsWith(prefix)) {
-      return;
-    }
-
-    const relative = entry.path.slice(prefix.length);
-    if (!relative) {
-      return;
-    }
-
-    const [head, ...rest] = relative.split("/");
-    if (!head || OMIT_DIRECTORY_NAMES.has(head)) {
-      return;
-    }
-
-    if (rest.length === 0) {
-      entries.set(head, {
-        ...entry,
-        id: `${cwd}:${head}`,
-        name: head,
-      });
-      return;
-    }
-
-    if (!entries.has(head)) {
-      entries.set(head, {
-        id: `${cwd}:${head}`,
-        name: head,
-        path: `${prefix}${head}`,
-        kind: "directory",
-      });
-    }
-  });
-
-  return sortMentionAttachments([...entries.values()]);
-};
-
-const isPathWithinRoot = (root: string, value: string) => {
-  const normalizedRoot = root.replace(/\/+$/u, "");
-  return value === normalizedRoot || value.startsWith(`${normalizedRoot}/`);
-};
-
-const getUserText = (item: Extract<ThreadItem, { type: "userMessage" }>) => getUserMessageDisplay(item).text;
-
-const latestThreadLabel = (record: ThreadRecord) => {
-  if (record.thread.name?.trim()) {
-    return record.thread.name.trim();
-  }
-
-  const turns = sortTurnsById(record.thread.turns);
-  for (const turn of [...turns].reverse()) {
-    for (const item of [...turn.items].reverse()) {
-      if (item.type === "userMessage") {
-        const text = getUserText(item).trim();
-        if (text) {
-          return text;
-        }
-      }
-
-      if (item.type === "agentMessage") {
-        const text = item.text.trim();
-        if (text) {
-          return text;
-        }
-      }
-    }
-  }
-
-  return threadLabel(record.thread);
-};
-
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-
-const mentionInlineLabel = (mention: MentionAttachment) => {
-  const baseName = mention.name.split("/").filter(Boolean).at(-1) ?? mention.name;
-  return baseName.replace(/\s+/gu, "-");
-};
-
-const mentionInlineToken = (mention: MentionAttachment) => `@${mentionInlineLabel(mention)}`;
-
-const composerHasMentionToken = (value: string, mention: MentionAttachment) => {
-  const token = mentionInlineToken(mention);
-  const pattern = new RegExp(`(^|\\s)${escapeRegExp(token)}(?=$|\\s|[.,!?;:])`, "u");
-  return pattern.test(value);
-};
-
-const insertInlineMentionToken = (value: string, mention: MentionAttachment) => {
-  const token = mentionInlineToken(mention);
-  const tokenQueryPattern = /(?:^|\s)@[^\s]*$/u;
-  const hasTokenAlready = composerHasMentionToken(value, mention);
-
-  if (tokenQueryPattern.test(value)) {
-    return value.replace(tokenQueryPattern, (match) => `${match.startsWith(" ") ? " " : ""}${token} `);
-  }
-
-  if (hasTokenAlready) {
-    return value;
-  }
-
-  const spacer = value && !/\s$/u.test(value) ? " " : "";
-  return `${value}${spacer}${token} `;
-};
-
-const buildComposerHighlightSegments = (value: string, mentions: Array<MentionAttachment>) => {
-  if (!value) {
-    return [] as Array<ComposerHighlightSegment>;
-  }
-
-  const tokenMap = new Map(mentions.map((mention) => [mentionInlineToken(mention), mention]));
-  const segments: Array<ComposerHighlightSegment> = [];
-  const tokenPattern = /@[\w./-]+/gu;
-  let cursor = 0;
-
-  for (const match of value.matchAll(tokenPattern)) {
-    const token = match[0];
-    const mention = tokenMap.get(token) ?? null;
-    const index = match.index ?? 0;
-
-    if (index > cursor) {
-      segments.push({
-        text: value.slice(cursor, index),
-        mention: null,
-      });
-    }
-
-    segments.push({
-      text: token,
-      mention,
-    });
-    cursor = index + token.length;
-  }
-
-  if (cursor < value.length) {
-    segments.push({
-      text: value.slice(cursor),
-      mention: null,
-    });
-  }
-
-  return segments;
-};
-
-const attachmentDisplayLabel = (label: string, path: string) => {
-  const trimmedLabel = label.trim();
-  if (trimmedLabel && !trimmedLabel.startsWith("/") && !trimmedLabel.includes("\\")) {
-    return `@${trimmedLabel}`;
-  }
-
-  return `@${path.replace(/\\/gu, "/").split("/").filter(Boolean).pop() ?? path}`;
-};
-
-const isExistingThreadHistoryPending = (record: ThreadRecord | null, turns: Array<Turn>) => {
-  if (!record) {
-    return false;
-  }
-
-  if (turns.length > 0) {
-    return false;
-  }
-
-  const threadName = record.thread.name?.trim();
-  if (threadName && threadName !== "New Session" && threadName !== "New Thread" && threadName !== "Untitled Session") {
-    return true;
-  }
-
-  return Boolean(record.thread.preview?.trim());
-};
-
-const turnErrorText = (turn: Turn) => {
-  if (!turn.error?.message) {
-    return "";
-  }
-
-  const details = turn.error.additionalDetails?.trim();
-  return details ? `${turn.error.message}\n\n${details}` : turn.error.message;
-};
-
-const formatTurnErrorCode = (code: TurnError["codexErrorInfo"] | null) => {
-  if (!code) {
-    return null;
-  }
-
-  if (typeof code === "string") {
-    return code;
-  }
-
-  return Object.keys(code)[0] ?? null;
-};
-
-const diffEntryId = (itemId: string, changeIndex: number, path: string) => `${itemId}:${changeIndex}:${path}`;
-
-const normalizeDiffPath = (value: string) => value.replace(/^\.?\//u, "").replace(/\\/gu, "/");
-
-const diffKindLabel = (kind: FileChangeDiff["kind"]) => {
-  if (kind.type === "add") {
-    return "new";
-  }
-
-  if (kind.type === "delete") {
-    return "deleted";
-  }
-
-  if (kind.move_path) {
-    return "renamed";
-  }
-
-  return "modified";
-};
-
-const countDiffStats = (diff: string) => {
-  if (!diff.trim()) {
-    return {
-      additions: 0,
-      removals: 0,
-      hunks: 0,
-    };
-  }
-
-  return diff.split("\n").reduce(
-    (stats, line) => {
-      if (line.startsWith("@@")) {
-        stats.hunks += 1;
-      } else if (line.startsWith("+") && !line.startsWith("+++")) {
-        stats.additions += 1;
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        stats.removals += 1;
-      }
-
-      return stats;
-    },
-    { additions: 0, removals: 0, hunks: 0 },
-  );
-};
-
-const buildDiffReviewLines = (diff: string) => {
-  if (!diff.trim()) {
-    return [] as Array<DiffReviewLine>;
-  }
-
-  const rows: Array<DiffReviewLine> = [];
-  let oldLine = 0;
-  let newLine = 0;
-
-  diff.split("\n").forEach((line, index) => {
-    const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
-    if (hunkMatch) {
-      oldLine = Number(hunkMatch[1]);
-      newLine = Number(hunkMatch[2]);
-      rows.push({
-        id: `hunk-${index}`,
-        kind: "hunk",
-        text: line,
-        oldLine: null,
-        newLine: null,
-      });
-      return;
-    }
-
-    if (
-      line.startsWith("diff --git ") ||
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ") ||
-      line.startsWith("new file mode ") ||
-      line.startsWith("deleted file mode ") ||
-      line.startsWith("rename from ") ||
-      line.startsWith("rename to ")
-    ) {
-      rows.push({
-        id: `meta-${index}`,
-        kind: "meta",
-        text: line,
-        oldLine: null,
-        newLine: null,
-      });
-      return;
-    }
-
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      rows.push({
-        id: `add-${index}`,
-        kind: "add",
-        text: line,
-        oldLine: null,
-        newLine,
-      });
-      newLine += 1;
-      return;
-    }
-
-    if (line.startsWith("-") && !line.startsWith("---")) {
-      rows.push({
-        id: `rem-${index}`,
-        kind: "rem",
-        text: line,
-        oldLine,
-        newLine: null,
-      });
-      oldLine += 1;
-      return;
-    }
-
-    rows.push({
-      id: `ctx-${index}`,
-      kind: "ctx",
-      text: line,
-      oldLine,
-      newLine,
-    });
-    oldLine += 1;
-    newLine += 1;
-  });
-
-  return rows;
-};
-
-const getStreamTarget = (entry: StreamSpec) => (entry.visible === 0 ? entry.total : entry.visible);
-
-const stopStreamsForThreadTurn = (draft: DashboardData, threadId: string, turnId: string) => {
-  draft.streams = draft.streams.map((entry) =>
-    entry.threadId === threadId && entry.turnId === turnId
-      ? {
-          ...entry,
-          total: entry.visible,
-        }
-      : entry,
-  );
-};
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -1258,6 +679,111 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
             });
           },
         ),
+      startChatGptLogin: async () =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.startChatGptLogin();
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.account.loginInProgress = true;
+              draft.account.pendingLoginId = nextId("login");
+              draft.account.loginError = null;
+            });
+            return "https://chatgpt.com/";
+          },
+        ),
+      completeChatGptLogin: async (callbackUrl) =>
+        await withLiveFallback(
+          async () => {
+            const response = await fetch("/codex-auth/complete", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ callbackUrl }),
+            });
+
+            const payload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+            if (!response.ok) {
+              throw new Error(payload?.error ?? payload?.message ?? "Failed to complete mobile login");
+            }
+
+            const runtime = runtimeRef.current!;
+            await runtime.refreshAccount();
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.account = {
+                ...draft.account,
+                planType: "ChatGPT Pro",
+                workspace: "mobile relay account",
+                authMode: "chatgpt",
+                loggedIn: true,
+                requiresOpenaiAuth: false,
+                loginInProgress: false,
+                pendingLoginId: null,
+                loginError: null,
+              };
+            });
+          },
+        ),
+      loginWithApiKey: async (apiKey) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.loginWithApiKey(apiKey);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.account = {
+                ...draft.account,
+                planType: "API key",
+                workspace: "API key session",
+                authMode: "apiKey",
+                loggedIn: true,
+                requiresOpenaiAuth: false,
+                loginInProgress: false,
+                pendingLoginId: null,
+                loginError: null,
+              };
+            });
+          },
+        ),
+      logoutAccount: async () =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.logoutAccount();
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.account = {
+                ...draft.account,
+                planType: "Signed out",
+                workspace: "No active account",
+                authMode: "signedOut",
+                loggedIn: false,
+                loginInProgress: false,
+                pendingLoginId: null,
+                loginError: null,
+                usageWindows: [],
+                rateUsed: 0,
+                rateLimit: 100,
+                credits: "Sign in to view rate limits",
+              };
+            });
+          },
+        ),
+      refreshAccount: async () =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.refreshAccount();
+          },
+          async () => undefined,
+        ),
       cleanTerminals: async (threadId) =>
         await withLiveFallback(
           async () => {
@@ -1472,6 +998,8 @@ export function CodexWorkspacePage() {
   const [explorerPath, setExplorerPath] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
+  const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
+  const [sessionClockSeed] = useState(() => Math.floor(Date.now() / 1000));
 
   const chatRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -1487,6 +1015,33 @@ export function CodexWorkspacePage() {
   const deferredComposer = useDeferredValue(composer);
   const deferredQuickQuery = useDeferredValue(quickQuery);
 
+  const updateModelPickerPosition = useCallback(() => {
+    const rect = modelButtonRef.current?.getBoundingClientRect();
+    setModelPickerPosition({
+      top: (rect?.bottom ?? 48) + 4,
+      right: Math.max(12, window.innerWidth - (rect?.right ?? window.innerWidth - 12)),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!modelPickerOpen) {
+      return;
+    }
+
+    const update = () => {
+      updateModelPickerPosition();
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [modelPickerOpen, updateModelPickerPosition]);
+
   const visibleTabIds = useMemo(() => {
     const availableIds = new Set(uniqueThreads.map((entry) => entry.thread.id));
     return [...new Set(tabIds.filter((id) => availableIds.has(id)))].slice(0, 6);
@@ -1496,7 +1051,9 @@ export function CodexWorkspacePage() {
   const activeQueuedMessages = activeThreadId ? queuedByThreadId[activeThreadId] ?? [] : [];
   const liveOverlay = useMemo(() => deriveLiveOverlay(activeTurn), [activeTurn]);
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
-  const activeThreadTimeLabel = activeThread ? formatClock(activeThread.thread.updatedAt) : formatClock(Math.floor(Date.now() / 1000));
+  const activeThreadTimeLabel = activeThread
+    ? formatClock(activeThread.thread.updatedAt)
+    : formatClock(sessionClockSeed);
   const activeExplorerPath = useMemo(() => {
     const cwd = activeThread?.thread.cwd ?? null;
     if (!cwd) {
@@ -1680,71 +1237,24 @@ export function CodexWorkspacePage() {
       .slice(0, 12);
   }, [deferredQuickQuery, quickEntries]);
 
-  const commandPaletteGroups = useMemo(() => {
-    const groups = [
-      {
-        label: "Session",
-        items: [
-          { icon: "💬", name: "New Session (/new)", key: "⌘N", action: () => void createSession() },
-          { icon: "⑂", name: "Fork Session (/fork)", key: "", action: () => void forkSession() },
-          { icon: "🗜", name: "Compact Transcript (/compact)", key: "", action: () => void compactSession() },
-          { icon: "🗑", name: "Clear Composer", key: "", action: () => resetComposer() },
-        ],
-      },
-      {
-        label: "Navigate",
-        items: [
-          { icon: "📁", name: "Files Panel", key: "", action: () => openPanel("files") },
-          { icon: "⬛", name: "Terminal Output (/ps)", key: "", action: () => openPanel("terminal") },
-          { icon: "⑂", name: "Multi-agent Panel", key: "", action: () => openPanel("agents") },
-          { icon: "⚙", name: "Config & Feature Flags", key: "⌘,", action: () => openPanel("config") },
-        ],
-      },
-      {
-        label: "Slash",
-        items: SLASH_COMMANDS.map((entry) => ({
-          icon: "/",
-          name: `${entry.cmd} — ${entry.dsc}`,
-          key: "",
-          action: () => runSlash(entry.cmd),
-        })),
-      },
-      {
-        label: "Model",
-        items: modelOptions.map((entry) => ({
-          icon: "🤖",
-          name: entry.displayName,
-          key: "",
-          action: () => void selectModel(entry.id),
-        })),
-      },
-    ];
-
-    const query = commandQuery.trim().toLowerCase();
-    if (!query) {
-      return groups;
-    }
-
-    return groups
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) => `${item.name} ${group.label}`.toLowerCase().includes(query)),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [commandQuery, modelOptions]);
-
   useEffect(() => {
     if (!activeThreadId) {
       return;
     }
 
-    setTabIds((current) => {
-      if (current.includes(activeThreadId)) {
-        return current;
-      }
+    const frame = window.requestAnimationFrame(() => {
+      setTabIds((current) => {
+        if (current.includes(activeThreadId)) {
+          return current;
+        }
 
-      return [activeThreadId, ...current.filter((entry) => entry !== activeThreadId)].slice(0, 6);
+        return [activeThreadId, ...current.filter((entry) => entry !== activeThreadId)].slice(0, 6);
+      });
     });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [activeThreadId]);
 
   const existingThreadHistoryPending = useMemo(
@@ -1797,7 +1307,13 @@ export function CodexWorkspacePage() {
 
   useEffect(() => {
     if (!selectedDiffEntryId || !diffEntries.some((entry) => entry.id === selectedDiffEntryId)) {
-      setSelectedDiffEntryId(diffEntries[0]?.id ?? null);
+      const frame = window.requestAnimationFrame(() => {
+        setSelectedDiffEntryId(diffEntries[0]?.id ?? null);
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frame);
+      };
     }
   }, [diffEntries, selectedDiffEntryId]);
 
@@ -1828,7 +1344,8 @@ export function CodexWorkspacePage() {
 
         const rest = currentQueue.slice(1);
         if (rest.length === 0) {
-          const { [threadId]: _removed, ...remaining } = current;
+          const remaining = { ...current };
+          delete remaining[threadId];
           return remaining;
         }
 
@@ -1862,15 +1379,21 @@ export function CodexWorkspacePage() {
   }, [actions, effectiveComposerSettings, queuedByThreadId, snapshot.threads]);
 
   useEffect(() => {
-    if (!routePanel) {
-      if (!isDesktopViewport()) {
-        setPanelOpen(false);
+    const frame = window.requestAnimationFrame(() => {
+      if (!routePanel) {
+        if (!isDesktopViewport()) {
+          setPanelOpen(false);
+        }
+        return;
       }
-      return;
-    }
 
-    setPanelTab(routePanel);
-    setPanelOpen(true);
+      setPanelTab(routePanel);
+      setPanelOpen(true);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [routePanel]);
 
   useEffect(() => {
@@ -1896,8 +1419,14 @@ export function CodexWorkspacePage() {
       return;
     }
 
-    setExplorerPath((current) => (current && isPathWithinRoot(cwd, current) ? current : cwd));
-    setFilePreview((current) => (current && isPathWithinRoot(cwd, current.path) ? current : null));
+    const frame = window.requestAnimationFrame(() => {
+      setExplorerPath((current) => (current && isPathWithinRoot(cwd, current) ? current : cwd));
+      setFilePreview((current) => (current && isPathWithinRoot(cwd, current.path) ? current : null));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [activeThread?.thread.cwd]);
 
   useEffect(() => {
@@ -1911,22 +1440,29 @@ export function CodexWorkspacePage() {
   useEffect(() => {
     if (snapshot.transport.mode === "live") {
       const nextVisible = Object.fromEntries(snapshot.streams.map((entry) => [entry.key, entry.visible]));
-      setStreamVisible(nextVisible);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setStreamVisible(nextVisible);
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frame);
+      };
     }
 
     const nextTargets = Object.fromEntries(snapshot.streams.map((entry) => [entry.key, getStreamTarget(entry)]));
 
-    setStreamVisible((current) => {
-      const next = { ...current };
-      for (const [key, value] of Object.entries(nextTargets)) {
-        if (!(key in next)) {
-          next[key] = 0;
-        } else if (next[key] > value) {
-          next[key] = value;
+    const frame = window.requestAnimationFrame(() => {
+      setStreamVisible((current) => {
+        const next = { ...current };
+        for (const [key, value] of Object.entries(nextTargets)) {
+          if (!(key in next)) {
+            next[key] = 0;
+          } else if (next[key] > value) {
+            next[key] = value;
+          }
         }
-      }
-      return next;
+        return next;
+      });
     });
 
     const timer = window.setInterval(() => {
@@ -1951,74 +1487,13 @@ export function CodexWorkspacePage() {
       });
     }, 24);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(timer);
+    };
   }, [snapshot.streams, snapshot.transport.mode]);
 
-  useLayoutEffect(() => {
-    if (!chatRef.current) {
-      return;
-    }
-
-    return scrollChatToBottom();
-  }, [activeTurns, streamVisible]);
-
-  useLayoutEffect(() => {
-    if (!activeThreadId) {
-      hydratedScrollKeyRef.current = null;
-      return;
-    }
-
-    if (existingThreadHistoryPending || activeTurns.length === 0) {
-      hydratedScrollKeyRef.current = null;
-      return;
-    }
-
-    const latestTurnId = activeTurns.at(-1)?.id ?? "empty";
-    const scrollKey = `${activeThreadId}:${latestTurnId}:${activeTurns.length}`;
-    if (hydratedScrollKeyRef.current === scrollKey) {
-      return;
-    }
-
-    hydratedScrollKeyRef.current = scrollKey;
-    return scrollChatToBottom(true);
-  }, [activeThreadId, activeTurns, existingThreadHistoryPending]);
-
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandOpen(true);
-        setSidebarOpen(false);
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        void createSession();
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
-        event.preventDefault();
-        pushToast("Ctrl+G — opening editor bridge", "");
-        return;
-      }
-
-      if (event.key === "Escape") {
-        setCommandOpen(false);
-        setModelPickerOpen(false);
-        setContextMenu(null);
-        closeQuickPicker();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [commandQuery]);
-
-  useEffect(() => () => selectedImages.forEach((image) => image.url.startsWith("blob:") && URL.revokeObjectURL(image.url)), [selectedImages]);
-
-  function scrollChatToBottom(extraDelay = false) {
+  const scrollChatToBottom = useCallback((extraDelay = false) => {
     const run = () => {
       if (chatEndRef.current) {
         chatEndRef.current.scrollIntoView({ block: "end" });
@@ -2040,7 +1515,38 @@ export function CodexWorkspacePage() {
       window.clearTimeout(timeoutA);
       window.clearTimeout(timeoutB);
     };
-  }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!chatRef.current) {
+      return;
+    }
+
+    return scrollChatToBottom();
+  }, [activeTurns, scrollChatToBottom, streamVisible]);
+
+  useLayoutEffect(() => {
+    if (!activeThreadId) {
+      hydratedScrollKeyRef.current = null;
+      return;
+    }
+
+    if (existingThreadHistoryPending || activeTurns.length === 0) {
+      hydratedScrollKeyRef.current = null;
+      return;
+    }
+
+    const latestTurnId = activeTurns.at(-1)?.id ?? "empty";
+    const scrollKey = `${activeThreadId}:${latestTurnId}:${activeTurns.length}`;
+    if (hydratedScrollKeyRef.current === scrollKey) {
+      return;
+    }
+
+    hydratedScrollKeyRef.current = scrollKey;
+    return scrollChatToBottom(true);
+  }, [activeThreadId, activeTurns, existingThreadHistoryPending, scrollChatToBottom]);
+
+  useEffect(() => () => selectedImages.forEach((image) => image.url.startsWith("blob:") && URL.revokeObjectURL(image.url)), [selectedImages]);
 
   const pushToast = useCallback((message: string, tone: ToastTone) => {
     const id = nextId("toast");
@@ -2124,7 +1630,8 @@ export function CodexWorkspacePage() {
       }
 
       if (next.length === 0) {
-        const { [threadId]: _removed, ...rest } = current;
+        const rest = { ...current };
+        delete rest[threadId];
         return rest;
       }
 
@@ -2239,6 +1746,39 @@ export function CodexWorkspacePage() {
     setQuickQuery("");
     setQuickIndex(0);
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen(true);
+        setSidebarOpen(false);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        void createSession();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        pushToast("Ctrl+G — opening editor bridge", "");
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setCommandOpen(false);
+        setModelPickerOpen(false);
+        setContextMenu(null);
+        closeQuickPicker();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeQuickPicker, createSession, pushToast]);
 
   useEffect(() => {
     const onPointerDown = (event: globalThis.MouseEvent) => {
@@ -2411,12 +1951,15 @@ export function CodexWorkspacePage() {
         case "/resume":
         case "/theme":
         case "/feedback":
-        case "/logout":
         case "/apps":
         case "/exit":
         case "/quit":
         case "/personality":
           pushToast(`${command} queued`, "");
+          break;
+        case "/logout":
+          await actions.logoutAccount();
+          pushToast("Signed out of Codex", "ok");
           break;
         default:
           if (inline && activeThreadId) {
@@ -2453,9 +1996,90 @@ export function CodexWorkspacePage() {
       activeComposerMentions,
       selectedSkills,
       setComposerFromInput,
-      snapshot.settings,
-      snapshot.threads,
+      effectiveComposerSettings,
     ],
+  );
+
+  const commandPaletteGroups = useMemo<Array<CommandPaletteGroup>>(() => {
+    const groups: Array<CommandPaletteGroup> = [
+      {
+        label: "Session",
+        items: [
+          { icon: "💬", name: "New Session (/new)", key: "⌘N", command: { type: "createSession" } },
+          { icon: "⑂", name: "Fork Session (/fork)", key: "", command: { type: "forkSession" } },
+          { icon: "🗜", name: "Compact Transcript (/compact)", key: "", command: { type: "compactSession" } },
+          { icon: "🗑", name: "Clear Composer", key: "", command: { type: "resetComposer" } },
+        ],
+      },
+      {
+        label: "Navigate",
+        items: [
+          { icon: "📁", name: "Files Panel", key: "", command: { type: "openPanel", tab: "files" } },
+          { icon: "⬛", name: "Terminal Output (/ps)", key: "", command: { type: "openPanel", tab: "terminal" } },
+          { icon: "⑂", name: "Multi-agent Panel", key: "", command: { type: "openPanel", tab: "agents" } },
+          { icon: "⚙", name: "Config & Feature Flags", key: "⌘,", command: { type: "openPanel", tab: "config" } },
+        ],
+      },
+      {
+        label: "Slash",
+        items: SLASH_COMMANDS.map((entry) => ({
+          icon: "/",
+          name: `${entry.cmd} — ${entry.dsc}`,
+          key: "",
+          command: { type: "runSlash", slash: entry.cmd },
+        })),
+      },
+      {
+        label: "Model",
+        items: modelOptions.map((entry) => ({
+          icon: "🤖",
+          name: entry.displayName,
+          key: "",
+          command: { type: "selectModel", modelId: entry.id },
+        })),
+      },
+    ];
+
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) {
+      return groups;
+    }
+
+    return groups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => `${item.name} ${group.label}`.toLowerCase().includes(query)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [commandQuery, modelOptions]);
+
+  const runCommandPaletteItem = useCallback(
+    (command: CommandPaletteAction) => {
+      switch (command.type) {
+        case "createSession":
+          void createSession();
+          break;
+        case "forkSession":
+          void forkSession();
+          break;
+        case "compactSession":
+          void compactSession();
+          break;
+        case "resetComposer":
+          resetComposer();
+          break;
+        case "openPanel":
+          openPanel(command.tab);
+          break;
+        case "runSlash":
+          void runSlash(command.slash);
+          break;
+        case "selectModel":
+          void selectModel(command.modelId);
+          break;
+      }
+    },
+    [compactSession, createSession, forkSession, openPanel, resetComposer, runSlash, selectModel],
   );
 
   const removeImage = useCallback((imageId: string) => {
@@ -2529,47 +2153,6 @@ export function CodexWorkspacePage() {
     [attachMention, attachSkill, closeQuickPicker, replaceCurrentToken, snapshot.mentionCatalog],
   );
 
-  const onComposerKeyDown = useCallback(
-    async (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (quickMode && filteredQuickEntries.length > 0) {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setQuickIndex((current) => Math.min(filteredQuickEntries.length - 1, current + 1));
-          return;
-        }
-
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          setQuickIndex((current) => Math.max(0, current - 1));
-          return;
-        }
-
-        if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
-          event.preventDefault();
-          onQuickPick(filteredQuickEntries[quickIndex]);
-          return;
-        }
-
-        if (event.key === "Escape") {
-          closeQuickPicker();
-          return;
-        }
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
-        event.preventDefault();
-        pushToast("Ctrl+G — opening editor bridge", "");
-        return;
-      }
-
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        await submitComposer(event.currentTarget.value);
-      }
-    },
-    [closeQuickPicker, filteredQuickEntries, onQuickPick, pushToast, quickIndex, quickMode],
-  );
-
   const submitComposer = useCallback(async (rawValue?: string) => {
     const composerValue = rawValue ?? textareaRef.current?.value ?? composer;
     const prompt = composerValue.trim();
@@ -2641,9 +2224,50 @@ export function CodexWorkspacePage() {
     selectedImages,
     selectedFiles,
     selectedSkills,
-    snapshot.settings,
+    effectiveComposerSettings,
     toolbarShell,
   ]);
+
+  const onComposerKeyDown = useCallback(
+    async (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (quickMode && filteredQuickEntries.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setQuickIndex((current) => Math.min(filteredQuickEntries.length - 1, current + 1));
+          return;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setQuickIndex((current) => Math.max(0, current - 1));
+          return;
+        }
+
+        if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+          event.preventDefault();
+          onQuickPick(filteredQuickEntries[quickIndex]);
+          return;
+        }
+
+        if (event.key === "Escape") {
+          closeQuickPicker();
+          return;
+        }
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        pushToast("Ctrl+G — opening editor bridge", "");
+        return;
+      }
+
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        await submitComposer(event.currentTarget.value);
+      }
+    },
+    [closeQuickPicker, filteredQuickEntries, onQuickPick, pushToast, quickIndex, quickMode, submitComposer],
+  );
 
   const onImagesChosen = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -3546,8 +3170,8 @@ export function CodexWorkspacePage() {
           id="mpicker"
           style={{
             display: "block",
-            top: `${(modelButtonRef.current?.getBoundingClientRect().bottom ?? 48) + 4}px`,
-            right: `${Math.max(12, window.innerWidth - (modelButtonRef.current?.getBoundingClientRect().right ?? window.innerWidth - 12))}px`,
+            top: `${modelPickerPosition.top}px`,
+            right: `${modelPickerPosition.right}px`,
             left: "auto",
           }}
         >
@@ -3589,7 +3213,7 @@ export function CodexWorkspacePage() {
                     const first = commandPaletteGroups[0]?.items[0];
                     if (first) {
                       setCommandOpen(false);
-                      first.action();
+                      runCommandPaletteItem(first.command);
                     }
                   }
                 }}
@@ -3609,7 +3233,7 @@ export function CodexWorkspacePage() {
                         type="button"
                         onClick={() => {
                           setCommandOpen(false);
-                          item.action();
+                          runCommandPaletteItem(item.command);
                         }}
                       >
                         <span>{item.icon}</span>
@@ -3726,1087 +3350,5 @@ export function CodexWorkspacePage() {
         onChange={onImagesChosen}
       />
     </main>
-  );
-}
-
-function WelcomeState({
-  onFill,
-  onSlash,
-}: {
-  onFill: (value: string) => void;
-  onSlash: (value: string) => void;
-}) {
-  return (
-    <div className="ww">
-      <div className="wico">⬡</div>
-      <h1>Codex CLI</h1>
-      <p>Agentic coding assistant — reads repos, patches files, runs sandboxed commands, streams live turns, and tracks operational state inline.</p>
-      <div className="wbadges">
-        <div className="wbadge">⚡ Live stream</div>
-        <div className="wbadge">🔍 Web search</div>
-        <div className="wbadge">⑂ Multi-agent</div>
-        <div className="wbadge">🔧 MCP tools</div>
-        <div className="wbadge">📋 Skills ($)</div>
-        <div className="wbadge">apply_patch</div>
-        <div className="wbadge">/ 25 slash cmds</div>
-      </div>
-      <div className="wsug">
-        <button className="sug" type="button" onClick={() => onFill("Refactor the auth middleware to use JWT properly with full TypeScript types")}>
-          <div className="sug-i">⚡</div>
-          <div className="sug-t">Refactor code</div>
-          <div className="sug-d">apply_patch + diffs</div>
-        </button>
-        <button className="sug" type="button" onClick={() => onSlash("/review")}>
-          <div className="sug-i">🔍</div>
-          <div className="sug-t">/review</div>
-          <div className="sug-d">Audit working tree</div>
-        </button>
-        <button className="sug" type="button" onClick={() => onFill("Write Jest unit tests for the auth service with 80%+ coverage")}>
-          <div className="sug-i">🧪</div>
-          <div className="sug-t">Write tests</div>
-          <div className="sug-d">Jest + coverage</div>
-        </button>
-        <button className="sug" type="button" onClick={() => onSlash("/init")}>
-          <div className="sug-i">📋</div>
-          <div className="sug-t">/init</div>
-          <div className="sug-d">Generate AGENTS.md</div>
-        </button>
-      </div>
-      <p className="welcome-foot">/slash cmds · $skills · @file or /mention · !shell · ⌘K palette · Ctrl+G editor</p>
-    </div>
-  );
-}
-
-function LoadingConversationState({ threadLabelText }: { threadLabelText: string }) {
-  return (
-    <div className="ww">
-      <div className="wico">…</div>
-      <h1>Loading conversation</h1>
-      <p>
-        Reattaching this saved thread and pulling its history into the transcript.
-      </p>
-      <div className="wbadges">
-        <div className="wbadge">Thread</div>
-        <div className="wbadge">{shorten(threadLabelText, 42)}</div>
-        <div className="wbadge">History sync</div>
-      </div>
-      <p className="welcome-foot">The starter cards are hidden until the saved turns are loaded.</p>
-    </div>
-  );
-}
-
-function QueuedMessagesStrip({
-  messages,
-  onSteer,
-  onDelete,
-}: {
-  messages: Array<QueuedComposerMessage>;
-  onSteer: (messageId: string) => void;
-  onDelete: (messageId: string) => void;
-}) {
-  if (messages.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="queued-messages">
-      <div className="queued-messages-inner">
-        {messages.map((message) => {
-          const fallbackText =
-            message.prompt.trim() ||
-            [
-              message.images.length > 0 ? `${message.images.length} image` : "",
-              message.files.length > 0 ? `${message.files.length} upload` : "",
-              message.mentions.length > 0 ? `${message.mentions.length} file` : "",
-              message.skills.length > 0 ? `${message.skills.length} skill` : "",
-            ]
-              .filter(Boolean)
-              .join(" · ");
-
-          return (
-            <div className="queued-row" key={message.id}>
-              <span className="queued-row-icon">💬</span>
-              <span className="queued-row-text">{shorten(fallbackText || "Queued follow-up", 96)}</span>
-              <div className="queued-row-actions">
-                <button className="queued-row-steer" type="button" onClick={() => onSteer(message.id)}>
-                  Steer
-                </button>
-                <button className="queued-row-delete" type="button" aria-label="Delete queued message" onClick={() => onDelete(message.id)}>
-                  ×
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-const ComposerTextarea = memo(function ComposerTextarea({
-  value,
-  mentions,
-  placeholder,
-  textareaRef,
-  composerMirrorRef,
-  onValueChange,
-  onKeyDown,
-}: {
-  value: string;
-  mentions: Array<MentionAttachment>;
-  placeholder: string;
-  textareaRef: { current: HTMLTextAreaElement | null };
-  composerMirrorRef: { current: HTMLDivElement | null };
-  onValueChange: (value: string) => void;
-  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void | Promise<void>;
-}) {
-  const [draft, setDraft] = useState(value);
-  const pendingDraftRef = useRef(value);
-
-  useEffect(() => {
-    if (value === pendingDraftRef.current) {
-      return;
-    }
-
-    pendingDraftRef.current = value;
-    setDraft(value);
-  }, [value]);
-
-  const activeMentions = useMemo(
-    () => mentions.filter((mention) => composerHasMentionToken(draft, mention)),
-    [draft, mentions],
-  );
-  const highlightSegments = useMemo(
-    () => (activeMentions.length > 0 ? buildComposerHighlightSegments(draft, activeMentions) : []),
-    [activeMentions, draft],
-  );
-
-  const syncMirrorScroll = useCallback(() => {
-    if (activeMentions.length === 0) {
-      return;
-    }
-
-    const textarea = textareaRef.current;
-    const mirror = composerMirrorRef.current;
-    if (!textarea || !mirror) {
-      return;
-    }
-
-    mirror.scrollTop = textarea.scrollTop;
-    mirror.scrollLeft = textarea.scrollLeft;
-  }, [activeMentions.length, composerMirrorRef, textareaRef]);
-
-  useEffect(() => {
-    const node = textareaRef.current;
-    if (!node) {
-      return;
-    }
-
-    if (!draft) {
-      node.style.height = "24px";
-    } else {
-      node.style.height = "auto";
-      node.style.height = `${Math.min(node.scrollHeight, 140)}px`;
-    }
-
-    syncMirrorScroll();
-  }, [draft, syncMirrorScroll, textareaRef]);
-
-  const handleChange = useCallback(
-    (event: ReactChangeEvent<HTMLTextAreaElement>) => {
-      const next = event.target.value;
-      pendingDraftRef.current = next;
-      setDraft(next);
-      onValueChange(next);
-    },
-    [onValueChange],
-  );
-
-  return (
-    <div className="composer-text-shell">
-      {activeMentions.length > 0 ? (
-        <div className="composer-mirror" ref={composerMirrorRef} aria-hidden="true">
-          {draft
-            ? highlightSegments.map((segment, index) => (
-                <span className={clsx("composer-segment", segment.mention && "file")} key={`${segment.text}-${index}`}>
-                  {segment.text}
-                </span>
-              ))
-            : null}
-        </div>
-      ) : null}
-      {!draft ? <span className="composer-placeholder">{placeholder}</span> : null}
-      <textarea
-        id="ta"
-        ref={textareaRef}
-        rows={1}
-        autoCapitalize="off"
-        autoComplete="off"
-        autoCorrect="off"
-        placeholder=""
-        spellCheck={false}
-        value={draft}
-        onChange={handleChange}
-        onKeyDown={onKeyDown}
-        onScroll={syncMirrorScroll}
-      />
-    </div>
-  );
-});
-
-const ChatTranscript = memo(function ChatTranscript({
-  activeThread,
-  activeThreadLabel,
-  activeTurns,
-  existingThreadHistoryPending,
-  activeThreadTimeLabel,
-  streamVisible,
-  liveOverlay,
-  onReview,
-  onFill,
-  onSlash,
-  onCopy,
-  onFork,
-  onPlan,
-  onEdit,
-  onContext,
-}: {
-  activeThread: ThreadRecord | null;
-  activeThreadLabel: string;
-  activeTurns: Array<Turn>;
-  existingThreadHistoryPending: boolean;
-  activeThreadTimeLabel: string;
-  streamVisible: Record<string, number>;
-  liveOverlay: UiLiveOverlay | null;
-  onReview: (diffId?: string) => void;
-  onFill: (value: string) => void;
-  onSlash: (value: string) => void;
-  onCopy: (value: string) => void;
-  onFork: () => void;
-  onPlan: () => void;
-  onEdit: (value: string) => void;
-  onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
-}) {
-  if (!activeThread) {
-    return <WelcomeState onFill={onFill} onSlash={onSlash} />;
-  }
-
-  if (existingThreadHistoryPending) {
-    return <LoadingConversationState threadLabelText={activeThreadLabel} />;
-  }
-
-  if (activeTurns.length === 0) {
-    return <WelcomeState onFill={onFill} onSlash={onSlash} />;
-  }
-
-  const liveTurn = [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ?? null;
-  const hasRenderableLiveItems =
-    liveTurn?.items.some((item) => {
-      if (item.type === "agentMessage") {
-        return item.text.trim().length > 0;
-      }
-
-      return item.type === "commandExecution" || item.type === "fileChange";
-    }) ?? false;
-  const shouldShowLiveOverlay = Boolean(
-    liveOverlay && (liveOverlay.reasoningText || liveOverlay.errorText || !hasRenderableLiveItems),
-  );
-
-  return (
-    <>
-      {activeTurns.map((turn) => {
-        const errorText = turnErrorText(turn);
-
-        return (
-          <div className="turn-block" key={turn.id}>
-            {turn.items.map((item) => (
-              <ThreadItemView
-                item={item}
-                key={item.id}
-                turnStatus={turn.status}
-                threadTimeLabel={activeThreadTimeLabel}
-                textVisible={item.type === "agentMessage" ? streamVisible[`${item.id}:text`] : undefined}
-                outputVisible={item.type === "commandExecution" ? streamVisible[`${item.id}:aggregatedOutput`] : undefined}
-                onCopy={onCopy}
-                onFork={onFork}
-                onPlan={onPlan}
-                onReview={onReview}
-                onEdit={onEdit}
-                onContext={onContext}
-              />
-            ))}
-            {errorText ? <TurnErrorCard status={turn.status} text={errorText} code={formatTurnErrorCode(turn.error?.codexErrorInfo ?? null)} /> : null}
-          </div>
-        );
-      })}
-      {shouldShowLiveOverlay ? <LiveOverlayCard overlay={liveOverlay!} /> : null}
-    </>
-  );
-});
-
-const commandStatusLabel = (item: Extract<ThreadItem, { type: "commandExecution" }>) => {
-  switch (item.status) {
-    case "inProgress":
-      return "⟳ Running";
-    case "completed":
-      return item.exitCode === 0 ? "✓ Completed" : `✗ Exit ${item.exitCode ?? "?"}`;
-    case "failed":
-      return "✗ Failed";
-    case "declined":
-      return "⊘ Declined";
-    default:
-      return item.status;
-  }
-};
-
-const commandStatusTone = (item: Extract<ThreadItem, { type: "commandExecution" }>) => {
-  if (item.status === "inProgress") {
-    return "run";
-  }
-
-  if (item.status === "completed" && item.exitCode === 0) {
-    return "ok";
-  }
-
-  return "err";
-};
-
-const LiveOverlayCard = memo(function LiveOverlayCard({ overlay }: { overlay: UiLiveOverlay }) {
-  const reasoningRef = useRef<HTMLParagraphElement | null>(null);
-
-  useEffect(() => {
-    if (reasoningRef.current) {
-      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
-    }
-  }, [overlay.reasoningText]);
-
-  return (
-    <div className="live-overlay-card">
-      <div className="live-overlay-label">{overlay.activityLabel}</div>
-      {overlay.activityDetails.length > 0 ? (
-        <div className="live-overlay-details">
-          {overlay.activityDetails.map((detail, index) => (
-            <code className="live-overlay-detail" key={`${detail}-${index}`}>
-              {detail}
-            </code>
-          ))}
-        </div>
-      ) : null}
-      {overlay.reasoningText ? (
-        <p className="live-overlay-reasoning" ref={reasoningRef}>
-          {overlay.reasoningText}
-        </p>
-      ) : null}
-      {overlay.errorText ? <p className="live-overlay-error">{overlay.errorText}</p> : null}
-    </div>
-  );
-});
-
-const TurnErrorCard = memo(function TurnErrorCard({
-  status,
-  text,
-  code,
-}: {
-  status: Turn["status"];
-  text: string;
-  code: string | null;
-}) {
-  return (
-    <div className="msg">
-      <div className="mh">
-        <div className="mav a">⬡</div>
-        <span className="mn">Codex</span>
-        <span className="mt">{status}</span>
-      </div>
-      <div className="mb">
-        <div className="turn-error-card">
-          <MessageTextFlow text={text} />
-          {code ? <div className="turn-error-code">{code}</div> : null}
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const MessageInlineFlow = memo(function MessageInlineFlow({ text }: { text: string }) {
-  const segments = useMemo(() => parseInlineSegments(text), [text]);
-
-  return (
-    <>
-      {segments.map((segment, index) => {
-        if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.value}</span>;
-        }
-
-        if (segment.kind === "code") {
-          return (
-            <code className="message-inline-code" key={`code-${index}`}>
-              {segment.value}
-            </code>
-          );
-        }
-
-        const href = toBrowseUrl(segment.path);
-        if (href === "#") {
-          return (
-            <code className="message-inline-code" key={`file-${index}`}>
-              {segment.displayPath}
-            </code>
-          );
-        }
-
-        return (
-          <a
-            className="message-file-link"
-            href={href}
-            key={`file-${index}`}
-            rel="noreferrer noopener"
-            target="_blank"
-            title={segment.path}
-          >
-            {segment.displayPath}
-          </a>
-        );
-      })}
-    </>
-  );
-});
-
-function MessageImagePreview({
-  url,
-  alt,
-  markdown,
-  className,
-}: {
-  url: string;
-  alt: string;
-  markdown?: string;
-  className?: string;
-}) {
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  if (loadFailed && markdown) {
-    return <p className="message-text">{markdown}</p>;
-  }
-
-  return (
-    <a className="message-image-link" href={url} rel="noreferrer noopener" target="_blank">
-      <img
-        alt={alt}
-        className={clsx("message-image-preview", className)}
-        loading="lazy"
-        onError={() => setLoadFailed(true)}
-        src={url}
-      />
-    </a>
-  );
-}
-
-const MessageTextFlow = memo(function MessageTextFlow({ text }: { text: string }) {
-  const blocks = useMemo(() => parseMessageBlocks(text), [text]);
-
-  return (
-    <div className="message-text-flow">
-      {blocks.map((block, index) => {
-        if (block.kind === "image") {
-          return (
-            <MessageImagePreview
-              alt={block.alt || "Embedded message image"}
-              className="message-markdown-image"
-              key={`image-${index}`}
-              markdown={block.markdown}
-              url={block.url}
-            />
-          );
-        }
-
-        if (!block.value) {
-          return null;
-        }
-
-        return (
-          <p className="message-text" key={`text-${index}`}>
-            <MessageInlineFlow text={block.value} />
-          </p>
-        );
-      })}
-    </div>
-  );
-});
-
-const ThreadItemView = memo(function ThreadItemView({
-  item,
-  turnStatus,
-  threadTimeLabel,
-  textVisible,
-  outputVisible,
-  onCopy,
-  onFork,
-  onPlan,
-  onReview,
-  onEdit,
-  onContext,
-}: {
-  item: ThreadItem;
-  turnStatus: Turn["status"];
-  threadTimeLabel: string;
-  textVisible?: number;
-  outputVisible?: number;
-  onCopy: (value: string) => void;
-  onFork: () => void;
-  onPlan: () => void;
-  onReview: (diffId?: string) => void;
-  onEdit: (value: string) => void;
-  onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
-}) {
-  const [commandExpanded, setCommandExpanded] = useState(item.type === "commandExecution" ? item.status === "inProgress" : false);
-  const previousCommandStatusRef = useRef<string | null>(item.type === "commandExecution" ? item.status : null);
-
-  useEffect(() => {
-    if (item.type !== "commandExecution") {
-      previousCommandStatusRef.current = null;
-      return;
-    }
-
-    let collapseTimer: number | null = null;
-
-    if (item.status === "inProgress") {
-      setCommandExpanded(true);
-    } else if (previousCommandStatusRef.current === "inProgress") {
-      collapseTimer = window.setTimeout(() => setCommandExpanded(false), 1000);
-    }
-
-    previousCommandStatusRef.current = item.status;
-
-    return () => {
-      if (collapseTimer !== null) {
-        window.clearTimeout(collapseTimer);
-      }
-    };
-  }, [item.type, item.type === "commandExecution" ? item.status : null]);
-
-  if (item.type === "userMessage") {
-    const display = getUserMessageDisplay(item);
-    const extraAttachments = item.content.filter((entry) => entry.type === "mention" || entry.type === "skill");
-
-    return (
-      <div className="msg user" onContextMenu={(event) => onContext(event, item)}>
-        <div className="mb">
-          {display.images.length > 0 ? (
-            <div className="message-image-list">
-              {display.images.map((imageUrl, index) => {
-                const renderableUrl = toRenderableImageUrl(imageUrl);
-                if (!renderableUrl) {
-                  return null;
-                }
-
-                return (
-                  <MessageImagePreview
-                    alt="Message image preview"
-                    key={`${item.id}-image-${index}`}
-                    url={renderableUrl}
-                  />
-                );
-              })}
-            </div>
-          ) : null}
-          {display.fileAttachments.length > 0 || extraAttachments.length > 0 ? (
-            <div className="attachment-row">
-              {display.fileAttachments.map((attachment) => {
-                const href = toBrowseUrl(attachment.path);
-                const attachmentLabel = attachmentDisplayLabel(attachment.label, attachment.path);
-                return (
-                  <span className="attachment-chip" key={`${item.id}-file-${attachment.path}`}>
-                    <span>📄</span>
-                    {href === "#" ? (
-                      <span>{attachmentLabel}</span>
-                    ) : (
-                      <a className="message-file-link attachment-chip-link" href={href} rel="noreferrer noopener" target="_blank" title={attachment.path}>
-                        {attachmentLabel}
-                      </a>
-                    )}
-                  </span>
-                );
-              })}
-              {extraAttachments.map((attachment) => (
-                <span className="attachment-chip" key={`${item.id}-${attachment.type}-${attachment.name}`}>
-                  <span>{attachment.type === "skill" ? "📋" : "📄"}</span>
-                  <span>{attachment.name}</span>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {display.text ? <MessageTextFlow text={display.text} /> : null}
-          <div className="msg-time">{threadTimeLabel}</div>
-        </div>
-        <div className="macts">
-          <button className="mact" type="button" onClick={() => onCopy(display.text)}>
-            📋 Copy
-          </button>
-          <button className="mact" type="button" onClick={() => onEdit(display.text)}>
-            ✏ Edit
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "agentMessage") {
-    const text = typeof textVisible === "number" ? item.text.slice(0, textVisible) : item.text;
-    const streaming = typeof textVisible === "number" && textVisible < item.text.length;
-
-    return (
-      <div className="msg" onContextMenu={(event) => onContext(event, item)}>
-        <div className="mh">
-          <div className="mav a">⬡</div>
-          <span className="mn">Codex</span>
-          <span className="mt">{turnStatus === "inProgress" ? "live" : turnStatus}</span>
-        </div>
-        <div className="mb">
-          {text ? <MessageTextFlow text={text} /> : null}
-          {streaming ? <div className="live-cursor" /> : null}
-        </div>
-        <div className="macts">
-          <button className="mact" type="button" onClick={() => onFork()}>
-            ⑂ /fork
-          </button>
-          <button className="mact" type="button" onClick={() => onPlan()}>
-            📋 /plan
-          </button>
-          <button className="mact" type="button" onClick={() => onCopy(item.text)}>
-            📋
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "reasoning") {
-    return null;
-  }
-
-  if (item.type === "plan") {
-    return (
-      <div className="compact-bar">
-        <span className="compact-ico">📋</span>
-        <span>{item.text}</span>
-      </div>
-    );
-  }
-
-  if (item.type === "commandExecution") {
-    const output =
-      typeof outputVisible === "number" && item.aggregatedOutput
-        ? item.aggregatedOutput.slice(0, outputVisible)
-        : item.aggregatedOutput ?? "";
-    const badge = commandStatusTone(item);
-
-    return (
-      <div className="cmd-inline">
-        <button className={clsx("cmd-inline-row", badge, commandExpanded && "open")} type="button" onClick={() => setCommandExpanded((current) => !current)}>
-          <span className={clsx("cmd-inline-chevron", commandExpanded && "open")}>▶</span>
-          <code className="cmd-inline-label">{item.command || "(command)"}</code>
-          <span className="cmd-inline-status">{commandStatusLabel(item)}</span>
-        </button>
-        {commandExpanded ? (
-          <div className="cmd-inline-output">
-            <div className="cmd-inline-meta">{item.cwd} · {item.processId ?? "pty"}</div>
-            <pre>{output || "(no output)"}</pre>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (item.type === "fileChange") {
-    return <DiffCard item={item} onReview={onReview} />;
-  }
-
-  if (item.type === "mcpToolCall") {
-    const body = item.result ? JSON.stringify(item.result.structuredContent ?? item.result.content ?? {}, null, 2) : item.error?.message ?? "No output";
-    return (
-      <div className={clsx("tool", item.error ? "err" : "ok")}>
-        <div className="tool-h">
-          {item.error ? "✗" : "✓"} MCP · {item.server}/{item.tool}
-          <span className="tbadge">{item.status}</span>
-        </div>
-        <div className="tool-b">
-          <pre className="tool-pre">{body}</pre>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "dynamicToolCall") {
-    return (
-      <div className={clsx("tool", item.success ? "ok" : "run")}>
-        <div className="tool-h">
-          {item.success ? "✓" : "↻"} Tool · {item.tool}
-          <span className="tbadge">{item.status}</span>
-        </div>
-        <div className="tool-b">
-          {item.contentItems?.map((entry, index) => (
-            <div key={`${item.id}-${index}`}>{JSON.stringify(entry)}</div>
-          )) ?? "No tool payload."}
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "collabAgentToolCall") {
-    return (
-      <div className="agc">
-        <div className="agh">
-          <div className="agdot" />
-          <span className="agn">⑂ {item.tool}</span>
-          <span className="ags">{item.status}</span>
-        </div>
-        <div className="agt">{item.prompt ?? "Subagent activity"}</div>
-        <div className="agprog">
-          <div className="agbar" style={{ width: item.status === "completed" ? "100%" : "58%" }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "webSearch") {
-    return (
-      <div className="tool ok">
-        <div className="tool-h">
-          ✓ Web search
-          <span className="tbadge">search</span>
-        </div>
-        <div className="tool-b">{item.query}</div>
-      </div>
-    );
-  }
-
-  if (item.type === "imageView") {
-    return (
-      <div className="image-card">
-        <div className="tool-h">
-          🖼 Image
-          <span className="tbadge">view</span>
-        </div>
-        <div className="tool-b">{item.path}</div>
-      </div>
-    );
-  }
-
-  if (item.type === "imageGeneration") {
-    return (
-      <div className="tool ok">
-        <div className="tool-h">
-          ✓ Image generation
-          <span className="tbadge">{item.status}</span>
-        </div>
-        <div className="tool-b">
-          <div>{item.revisedPrompt}</div>
-          <div>{item.result}</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "enteredReviewMode" || item.type === "exitedReviewMode") {
-    return (
-      <div className="compact-bar">
-        <span className="compact-ico">{item.type === "enteredReviewMode" ? "🔍" : "✓"}</span>
-        <span>{item.review}</span>
-      </div>
-    );
-  }
-
-  if (item.type === "contextCompaction") {
-    return (
-      <div className="compact-bar">
-        <span className="compact-ico">🗜</span>
-        <span>Conversation compacted to free context tokens.</span>
-      </div>
-    );
-  }
-
-  return null;
-});
-
-function DiffCard({
-  item,
-  onReview,
-}: {
-  item: Extract<ThreadItem, { type: "fileChange" }>;
-  onReview: (diffId?: string) => void;
-}) {
-  const liveLabel =
-    item.status === "inProgress"
-      ? "editing"
-      : item.status === "completed"
-        ? "applied"
-        : item.status === "failed"
-          ? "failed"
-          : item.status;
-  const changes =
-    item.changes.length > 0
-      ? item.changes
-      : [
-          {
-            path: "Editing files",
-            kind: { type: "update", move_path: null } as const,
-            diff: "",
-          },
-        ];
-
-  return (
-    <>
-      {changes.map((change, index) => (
-        <div className={clsx("dw", item.status === "inProgress" && "live")} key={`${item.id}-${change.path}-${index}`}>
-          <div className="dh">
-            📄 {change.path}
-            <div className="diff-head-actions">
-              <button className="diff-review" type="button" onClick={() => onReview(diffEntryId(item.id, index, change.path))}>
-                Review diff
-              </button>
-              <span className="dstats">
-                {change.kind.type === "add" ? <span className="diff-new">new</span> : null}
-                {change.kind.type === "update" ? <span className="diff-mod">mod</span> : null}
-                {change.kind.type === "delete" ? <span className="diff-del">del</span> : null}
-                <span className={clsx("diff-status", item.status === "inProgress" && "live", item.status === "failed" && "err")}>{liveLabel}</span>
-              </span>
-            </div>
-          </div>
-          {change.diff ? (
-            change.diff.split("\n").map((line, lineIndex) => (
-              <div
-                className={clsx(
-                  "dl",
-                  line.startsWith("+") && "add",
-                  line.startsWith("-") && "rem",
-                  !line.startsWith("+") && !line.startsWith("-") && "ctx",
-                )}
-                key={`${change.path}-${lineIndex}`}
-              >
-                {line}
-              </div>
-            ))
-          ) : (
-            <div className="dl ctx">Waiting for diff…</div>
-          )}
-        </div>
-      ))}
-    </>
-  );
-}
-
-function DiffPatchViewer({ entry }: { entry: DiffReviewEntry }) {
-  const rows = buildDiffReviewLines(entry.diff);
-
-  if (rows.length === 0) {
-    return <div className="diff-patch-empty">Waiting for diff…</div>;
-  }
-
-  return (
-    <div className="diff-patch-viewer">
-      {rows.map((row) => (
-        <div className={clsx("diff-patch-row", row.kind)} key={row.id}>
-          <span className="diff-patch-num">{row.oldLine ?? ""}</span>
-          <span className="diff-patch-num">{row.newLine ?? ""}</span>
-          <pre className="diff-patch-text">{row.text || " "}</pre>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FileEditorPreview({ preview }: { preview: FilePreviewState }) {
-  const lines = preview.loading || preview.error ? [] : preview.content.split("\n");
-  const browseHref = toBrowseUrl(preview.path);
-
-  return (
-    <div className="file-editor">
-      <div className="file-editor-head">
-        <div className="file-editor-copy">
-          <div className="file-editor-title">{preview.name}</div>
-          <div className="file-editor-path">{preview.path}</div>
-        </div>
-        <div className="file-editor-actions">
-          {browseHref !== "#" ? (
-            <a className="file-editor-link" href={browseHref} rel="noreferrer noopener" target="_blank">
-              Open raw
-            </a>
-          ) : null}
-        </div>
-      </div>
-      <div className="file-editor-body">
-        {preview.loading ? <div className="file-editor-empty">Opening file…</div> : null}
-        {!preview.loading && preview.error ? <div className="file-editor-empty">{preview.error}</div> : null}
-        {!preview.loading && !preview.error ? (
-          <div className="file-editor-code" role="presentation">
-            {lines.map((line, index) => (
-              <div className="file-editor-line" key={`${preview.path}:${index}`}>
-                <span className="file-editor-gutter">{index + 1}</span>
-                <code className="file-editor-text">{line || " "}</code>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ConfigPanel({
-  snapshot,
-  activeThreadLabel,
-  actions,
-  pushToast,
-  selectModel,
-}: {
-  snapshot: DashboardData;
-  activeThreadLabel: string;
-  actions: WorkspaceActions;
-  pushToast: (message: string, tone: ToastTone) => void;
-  selectModel: (modelId: string) => Promise<void>;
-}) {
-  return (
-    <div className="config-stack">
-      <div className="sg">
-        <div className="sg-t">Model</div>
-        <div className="sr">
-          <span className="sl">model</span>
-          <select className="ssel" value={snapshot.settings.model} onChange={(event) => void selectModel(event.target.value)}>
-            {snapshot.models.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.displayName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="sr">
-          <span className="sl">reasoning_effort</span>
-          <select
-            className="ssel"
-            value={snapshot.settings.reasoningEffort}
-            onChange={(event) => void actions.updateSettings({ reasoningEffort: event.target.value as SettingsState["reasoningEffort"] })}
-          >
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="xhigh">xhigh</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="sg">
-        <div className="sg-t">Approval &amp; Sandbox</div>
-        <div className="sr">
-          <span className="sl">approval_policy</span>
-          <select
-            className="ssel"
-            value={approvalModeFromSettings(snapshot.settings)}
-            onChange={(event) => void actions.updateSettings(settingsPatchFromApprovalMode(event.target.value as UiApprovalMode))}
-          >
-            <option value="auto">auto</option>
-            <option value="ro">read-only</option>
-            <option value="fa">full-access</option>
-          </select>
-        </div>
-        <div className="sr">
-          <span className="sl">sandbox</span>
-          <select
-            className="ssel"
-            value={snapshot.settings.sandboxMode}
-            onChange={(event) => void actions.updateSettings({ sandboxMode: event.target.value as SettingsState["sandboxMode"] })}
-          >
-            <option value="workspace-write">workspace-write</option>
-            <option value="read-only">read-only</option>
-            <option value="danger-full-access">danger-full-access</option>
-          </select>
-        </div>
-        <div className="sr">
-          <span className="sl">web_search</span>
-          <div className={clsx("tog", snapshot.settings.webSearch && "on")} onClick={() => void actions.updateSettings({ webSearch: !snapshot.settings.webSearch })} role="button" tabIndex={0} onKeyDown={() => undefined} />
-        </div>
-      </div>
-
-      <div className="sg">
-        <div className="sg-t">Skills</div>
-        {snapshot.installedSkills.map((skill) => (
-          <div className="sr" key={skill.id}>
-            <span className="sl">{skill.name}</span>
-            <div className={clsx("tog", skill.enabled && "on")} onClick={() => void actions.toggleInstalledSkill(skill.id)} role="button" tabIndex={0} onKeyDown={() => undefined} />
-          </div>
-        ))}
-        {snapshot.remoteSkills.length > 0 ? (
-          <div className="remote-skill-list">
-            {snapshot.remoteSkills.map((skill) => (
-              <button
-                className="remote-skill-card"
-                key={skill.id}
-                type="button"
-                onClick={() => {
-                  void actions.installSkill(skill.id);
-                  pushToast(`Installing ${skill.name}`, "ok");
-                }}
-              >
-                <strong>{skill.name}</strong>
-                <span>{skill.description}</span>
-                <small>{skill.downloads} downloads</small>
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="sg">
-        <div className="sg-t">MCP</div>
-        {snapshot.mcpServers.map((server) => (
-          <div className="mcp-card" key={server.name}>
-            <div className="mcp-head">
-              <strong>{server.name}</strong>
-              <span>{server.authStatus}</span>
-            </div>
-            <div className="mcp-tools">{Object.keys(server.tools).slice(0, 4).join(" · ")}</div>
-            <button className="mini-action" type="button" onClick={() => void actions.toggleMcpAuth(server.name)}>
-              {server.authStatus === "notLoggedIn" ? "Connect" : "Refresh"}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <div className="sg">
-        <div className="sg-t">
-          Feature Flags{" "}
-          <button className="feature-refresh" type="button" onClick={() => pushToast("codex features list", "ok")}>
-            ⟳
-          </button>
-        </div>
-        {snapshot.featureFlags.map((flag) => (
-          <div className="sr" key={flag.name}>
-            <span className="sl">
-              {flag.name} <small>({flag.stage})</small>
-            </span>
-            <div className={clsx("tog", flag.enabled && "on")} onClick={() => void actions.toggleFeatureFlag(flag.name)} role="button" tabIndex={0} onKeyDown={() => undefined} />
-          </div>
-        ))}
-      </div>
-
-      <div className="config-preview">
-        <div className="config-title">~/.codex/config.toml</div>
-        <div># Codex CLI Web UI config</div>
-        <div>model = "{snapshot.settings.model}"</div>
-        <div>approval_policy = "{snapshot.settings.approvalPolicy}"</div>
-        <div>model_reasoning_effort = "{snapshot.settings.reasoningEffort}"</div>
-        <div>web_search = "{snapshot.settings.webSearch ? "live" : "disabled"}"</div>
-        <br />
-        <div>[features]</div>
-        {snapshot.featureFlags.slice(0, 4).map((flag) => (
-          <div key={flag.name}>
-            {flag.name} = {flag.enabled ? "true" : "false"}
-          </div>
-        ))}
-        <br />
-        <div># active thread</div>
-        <div>thread = "{activeThreadLabel}"</div>
-      </div>
-    </div>
   );
 }

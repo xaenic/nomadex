@@ -291,30 +291,34 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     return null;
   }
 
+  const reversedItems = [...turn.items].reverse();
+  const runningCommand = reversedItems.find(
+    (item): item is Extract<ThreadItem, { type: "commandExecution" }> =>
+      item.type === "commandExecution" && item.status === "inProgress",
+  );
+  const agentMessage = reversedItems.find(
+    (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
+      item.type === "agentMessage",
+  );
+  const reasoning = reversedItems.find(
+    (item): item is Extract<ThreadItem, { type: "reasoning" }> =>
+      item.type === "reasoning",
+  );
+
   let activityLabel = "Thinking";
   const activityDetails: string[] = [];
-  let reasoningText = "";
+  const reasoningText = reasoning
+    ? [...reasoning.summary, ...reasoning.content].filter(Boolean).join("\n\n").trim()
+    : "";
   let errorText = "";
 
-  for (const item of [...turn.items].reverse()) {
-    if (item.type === "commandExecution" && item.status === "inProgress") {
-      activityLabel = "Running command";
-      if (item.command.trim()) {
-        activityDetails.push(item.command.trim());
-      }
-      break;
+  if (runningCommand) {
+    activityLabel = "Running command";
+    if (runningCommand.command.trim()) {
+      activityDetails.push(runningCommand.command.trim());
     }
-
-    if (item.type === "agentMessage") {
-      activityLabel = "Writing response";
-      break;
-    }
-
-    if (item.type === "reasoning") {
-      activityLabel = "Thinking";
-      reasoningText = [...item.summary, ...item.content].filter(Boolean).join("\n\n").trim();
-      break;
-    }
+  } else if (agentMessage) {
+    activityLabel = "Writing response";
   }
 
   if (turn.error && typeof turn.error === "object" && "message" in turn.error) {

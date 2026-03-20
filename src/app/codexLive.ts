@@ -9,11 +9,13 @@ import type {
   ExperimentalFeature,
   ExperimentalFeatureListResponse,
   FileChangeRequestApprovalParams,
+  FileUpdateChange,
   FsReadDirectoryEntry,
   FsReadDirectoryResponse,
   FsReadFileResponse,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
+  LoginAccountResponse,
   ListMcpServerStatusResponse,
   ModelListResponse,
   RateLimitSnapshot,
@@ -22,7 +24,6 @@ import type {
   SkillMetadata,
   SkillsListResponse,
   SkillsRemoteReadResponse,
-  FileUpdateChange,
   Thread,
   ThreadItem,
   ThreadReadResponse,
@@ -55,7 +56,7 @@ import {
 type EventListener = (snapshot: DashboardData) => void;
 
 type PendingRequest = {
-  resolve: (value: any) => void;
+  resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 };
 
@@ -129,7 +130,7 @@ const toSettingsState = (config: Config, fallback: SettingsState): SettingsState
     reasoningEffort: config.model_reasoning_effort ?? fallback.reasoningEffort,
     approvalPolicy: mapApprovalPolicy(config.approval_policy, fallback.approvalPolicy),
     sandboxMode: config.sandbox_mode ?? fallback.sandboxMode,
-    collaborationMode: fallback.collaborationMode,
+    collaborationMode: "default",
     personality: mapPersonality(config.personality, fallback.personality),
     webSearch: config.web_search ? config.web_search !== "disabled" : fallback.webSearch,
     analytics,
@@ -156,6 +157,67 @@ const formatCredits = (rateLimits: RateLimitSnapshot | null, fallback: string) =
   return "No credits";
 };
 
+const labelRateLimitWindow = (windowDurationMins: number | null, index: number) => {
+  if (windowDurationMins === 300) {
+    return "5-hour";
+  }
+
+  if (windowDurationMins === 60 * 24 * 7) {
+    return "Weekly";
+  }
+
+  if (windowDurationMins && windowDurationMins % (60 * 24) === 0) {
+    const days = windowDurationMins / (60 * 24);
+    return `${days}-day`;
+  }
+
+  if (windowDurationMins && windowDurationMins % 60 === 0) {
+    const hours = windowDurationMins / 60;
+    return `${hours}-hour`;
+  }
+
+  if (windowDurationMins) {
+    return `${windowDurationMins}-minute`;
+  }
+
+  return index === 0 ? "Primary" : "Secondary";
+};
+
+const toUsageWindows = (
+  rateLimits: RateLimitSnapshot | null,
+  fallback: DashboardData["account"]["usageWindows"],
+) => {
+  if (!rateLimits) {
+    return fallback;
+  }
+
+  const windows = [rateLimits.primary, rateLimits.secondary]
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .map((entry, index) => ({
+      id: `${rateLimits.limitId ?? "codex"}-${entry.windowDurationMins ?? index}-${index}`,
+      label: labelRateLimitWindow(entry.windowDurationMins, index),
+      usedPercent: Number(entry.usedPercent ?? 0),
+      windowDurationMins: entry.windowDurationMins ?? null,
+      resetsAt: entry.resetsAt ?? null,
+    }))
+    .sort((left, right) => (left.windowDurationMins ?? Number.MAX_SAFE_INTEGER) - (right.windowDurationMins ?? Number.MAX_SAFE_INTEGER));
+
+  return windows.length > 0 ? windows : fallback;
+};
+
+const applyRateLimitSnapshot = (
+  account: DashboardData["account"],
+  rateLimits: RateLimitSnapshot | null,
+): DashboardData["account"] => {
+  return {
+    ...account,
+    rateUsed: Number(rateLimits?.primary?.usedPercent ?? account.rateUsed),
+    rateLimit: 100,
+    credits: formatCredits(rateLimits, account.credits),
+    usageWindows: toUsageWindows(rateLimits, account.usageWindows),
+  };
+};
+
 const toAccountState = (
   account: GetAccountResponse | null,
   rateLimits: GetAccountRateLimitsResponse | null,
@@ -172,15 +234,26 @@ const toAccountState = (
       ? `ChatGPT ${capitalize(accountRecord.planType)}`
       : accountRecord?.type === "apiKey"
         ? "API key"
-        : fallback.planType;
+        : fallback.loginInProgress
+          ? fallback.planType
+          : "Signed out";
+
+  const workspaceLabel = accountRecord
+    ? workspace
+    : fallback.loginInProgress
+      ? fallback.workspace
+      : "No active account";
 
   return {
+    ...applyRateLimitSnapshot(fallback, snapshot),
     planType,
-    workspace,
-    authMode: accountRecord?.type ?? fallback.authMode,
-    rateUsed: snapshot?.primary?.usedPercent ?? fallback.rateUsed,
-    rateLimit: 100,
-    credits: formatCredits(snapshot, fallback.credits),
+    workspace: workspaceLabel,
+    authMode: accountRecord?.type ?? (fallback.loginInProgress ? fallback.authMode : "signedOut"),
+    loggedIn: Boolean(accountRecord),
+    requiresOpenaiAuth: account?.requiresOpenaiAuth ?? fallback.requiresOpenaiAuth,
+    loginInProgress: !accountRecord && fallback.loginInProgress,
+    pendingLoginId: !accountRecord ? fallback.pendingLoginId : null,
+    loginError: accountRecord ? null : fallback.loginError,
   };
 };
 
@@ -301,7 +374,7 @@ const parseReviewFindings = (thread: Thread) => {
       }
 
       for (const line of item.text.split("\n")) {
-        const match = line.match(/^\s*(?:\d+[\.\)]\s*)?(high|medium|low)\s*[:\-]\s*(.+)$/i);
+        const match = line.match(/^\s*(?:\d+[.)]\s*)?(high|medium|low)\s*[:-]\s*(.+)$/i);
         if (!match) {
           continue;
         }
@@ -583,20 +656,14 @@ const toTurnInputs = (text: string, mentions: Array<MentionAttachment>, skills: 
   return inputs;
 };
 
-const settingsToCollaborationMode = (settings: SettingsState): CollaborationMode | null => {
-  if (settings.collaborationMode === "default") {
-    return null;
-  }
-
-  return {
-    mode: settings.collaborationMode,
-    settings: {
-      model: settings.model,
-      reasoning_effort: settings.reasoningEffort,
-      developer_instructions: null,
-    },
-  };
-};
+const settingsToCollaborationMode = (settings: SettingsState): CollaborationMode => ({
+  mode: settings.collaborationMode,
+  settings: {
+    model: settings.model,
+    reasoning_effort: settings.reasoningEffort,
+    developer_instructions: null,
+  },
+});
 
 const toRuntimeStatus = (mode: DashboardData["transport"]["mode"], status: DashboardData["transport"]["status"], error: string | null) => ({
   mode,
@@ -784,6 +851,52 @@ const mergeIncomingTurn = (incoming: Turn, existing?: Turn): Turn => ({
   items: incoming.items.length > 0 ? incoming.items : existing?.items ?? [],
 });
 
+const mergeIncomingItem = (incoming: ThreadItem, existing?: ThreadItem): ThreadItem => {
+  if (!existing || existing.type !== incoming.type) {
+    return incoming;
+  }
+
+  if (incoming.type === "agentMessage") {
+    const current = existing as Extract<ThreadItem, { type: "agentMessage" }>;
+
+    return {
+      ...current,
+      ...incoming,
+      text: incoming.text.length >= current.text.length ? incoming.text : current.text,
+      phase: incoming.phase ?? current.phase,
+    };
+  }
+
+  if (incoming.type === "commandExecution") {
+    const current = existing as Extract<ThreadItem, { type: "commandExecution" }>;
+    const incomingOutput = incoming.aggregatedOutput ?? "";
+    const existingOutput = current.aggregatedOutput ?? "";
+
+    return {
+      ...current,
+      ...incoming,
+      aggregatedOutput:
+        incomingOutput.length >= existingOutput.length ? incoming.aggregatedOutput : current.aggregatedOutput,
+      command: incoming.command || current.command,
+      cwd: incoming.cwd || current.cwd,
+      processId: incoming.processId ?? current.processId,
+    };
+  }
+
+  if (incoming.type === "reasoning") {
+    const current = existing as Extract<ThreadItem, { type: "reasoning" }>;
+
+    return {
+      ...current,
+      ...incoming,
+      summary: incoming.summary.length >= current.summary.length ? incoming.summary : current.summary,
+      content: incoming.content.length >= current.content.length ? incoming.content : current.content,
+    };
+  }
+
+  return incoming;
+};
+
 export class CodexLiveRuntime {
   private snapshot: DashboardData;
   private listeners = new Set<EventListener>();
@@ -794,6 +907,9 @@ export class CodexLiveRuntime {
   private loadingThreads = new Set<string>();
   private resumedThreads = new Set<string>();
   private approvalMap = new Map<string, { requestId: string; method: string; params: Record<string, unknown> }>();
+  private emitQueued = false;
+  private emitFrame: number | null = null;
+  private emitTimer: number | null = null;
 
   constructor(initialData = createFallbackDashboardData()) {
     this.snapshot = {
@@ -811,6 +927,7 @@ export class CodexLiveRuntime {
   }
 
   disconnect() {
+    this.clearScheduledEmit();
     this.socket?.close();
     this.socket = null;
     this.failPending(new Error("Codex app-server connection closed."));
@@ -826,15 +943,51 @@ export class CodexLiveRuntime {
     this.pending.clear();
   }
 
-  private emit() {
+  private clearScheduledEmit() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (this.emitFrame !== null) {
+      window.cancelAnimationFrame(this.emitFrame);
+      this.emitFrame = null;
+    }
+
+    if (this.emitTimer !== null) {
+      window.clearTimeout(this.emitTimer);
+      this.emitTimer = null;
+    }
+  }
+
+  private flushEmit = () => {
+    this.clearScheduledEmit();
+    this.emitQueued = false;
     const next = structuredClone(this.snapshot);
     this.listeners.forEach((listener) => listener(next));
+  };
+
+  private emit() {
+    if (this.emitQueued) {
+      return;
+    }
+
+    this.emitQueued = true;
+
+    if (typeof window === "undefined") {
+      queueMicrotask(this.flushEmit);
+      return;
+    }
+
+    if (typeof document !== "undefined" && document.visibilityState === "visible") {
+      this.emitFrame = window.requestAnimationFrame(this.flushEmit);
+      return;
+    }
+
+    this.emitTimer = window.setTimeout(this.flushEmit, 32);
   }
 
   private mutate(mutator: (snapshot: DashboardData) => void) {
-    const draft = structuredClone(this.snapshot);
-    mutator(draft);
-    this.snapshot = draft;
+    mutator(this.snapshot);
     this.emit();
   }
 
@@ -877,7 +1030,10 @@ export class CodexLiveRuntime {
     const payload = { id, method, params };
 
     return await new Promise<TResult>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
       this.socket?.send(JSON.stringify(payload));
     });
   }
@@ -1526,6 +1682,62 @@ export class CodexLiveRuntime {
     });
   }
 
+  async startChatGptLogin() {
+    const response = await this.request<LoginAccountResponse>("account/login/start", {
+      type: "chatgpt",
+    });
+
+    if (response.type === "chatgpt") {
+      this.mutate((snapshot) => {
+        snapshot.account.loginInProgress = true;
+        snapshot.account.pendingLoginId = response.loginId;
+        snapshot.account.loginError = null;
+      });
+      return response.authUrl;
+    }
+
+    await this.refreshAccount();
+    return null;
+  }
+
+  async loginWithApiKey(apiKey: string) {
+    await this.request<LoginAccountResponse>("account/login/start", {
+      type: "apiKey",
+      apiKey,
+    });
+
+    this.mutate((snapshot) => {
+      snapshot.account.loginInProgress = false;
+      snapshot.account.pendingLoginId = null;
+      snapshot.account.loginError = null;
+    });
+
+    await this.refreshAccount();
+  }
+
+  async logoutAccount() {
+    await this.request("account/logout", undefined);
+
+    this.mutate((snapshot) => {
+      snapshot.account = {
+        ...snapshot.account,
+        planType: "Signed out",
+        workspace: "No active account",
+        authMode: "signedOut",
+        loggedIn: false,
+        loginInProgress: false,
+        pendingLoginId: null,
+        loginError: null,
+        usageWindows: [],
+        rateUsed: 0,
+        rateLimit: 100,
+        credits: "Sign in to view rate limits",
+      };
+    });
+
+    await this.refreshAccount();
+  }
+
   async cleanTerminals(threadId: string) {
     await this.request("thread/backgroundTerminals/clean", { threadId });
 
@@ -1990,6 +2202,7 @@ export class CodexLiveRuntime {
               if (itemIndex === -1) {
                 items.push(nextItem);
               } else {
+                nextItem = mergeIncomingItem(nextItem, items[itemIndex]);
                 items[itemIndex] = nextItem;
               }
 
@@ -2103,32 +2316,58 @@ export class CodexLiveRuntime {
       }
 
       case "item/commandExecution/outputDelta": {
+        const threadId = safeString(params.threadId);
+        const turnId = safeString(params.turnId);
+        const itemId = safeString(params.itemId);
+        const processId = typeof params.processId === "string" ? params.processId : null;
+        const delta = safeString(params.delta);
+
         this.mutate((snapshot) => {
-          updateThreadRecord(snapshot, safeString(params.threadId), (record) => {
-            const turns = record.thread.turns.map((turn) => {
-              if (turn.id !== safeString(params.turnId)) {
+          updateThreadRecord(snapshot, threadId, (record) => {
+            const turns = ensureTurnExists(record.thread.turns, turnId).map((turn) => {
+              if (turn.id !== turnId) {
                 return turn;
               }
 
-              const items = turn.items.map((item) =>
-                item.id === safeString(params.itemId) && item.type === "commandExecution"
+              const hasItem = turn.items.some((item) => item.id === itemId && item.type === "commandExecution");
+              const baseItems = hasItem
+                ? turn.items
+                : [
+                    ...turn.items,
+                    {
+                      type: "commandExecution",
+                      id: itemId,
+                      command: safeString(params.command),
+                      cwd: safeString(params.cwd, record.thread.cwd),
+                      processId,
+                      status: "inProgress",
+                      commandActions: [],
+                      aggregatedOutput: "",
+                      exitCode: null,
+                      durationMs: null,
+                    } satisfies Extract<ThreadItem, { type: "commandExecution" }>,
+                  ];
+
+              const items = baseItems.map((item) =>
+                item.id === itemId && item.type === "commandExecution"
                   ? {
                       ...item,
-                      aggregatedOutput: `${item.aggregatedOutput ?? ""}${safeString(params.delta)}`,
+                      processId: item.processId ?? processId,
+                      aggregatedOutput: `${item.aggregatedOutput ?? ""}${delta}`,
                     }
                   : item,
               );
 
               const commandItem = items.find(
                 (item): item is Extract<ThreadItem, { type: "commandExecution" }> =>
-                  item.id === safeString(params.itemId) && item.type === "commandExecution",
+                  item.id === itemId && item.type === "commandExecution",
               );
 
               if (commandItem) {
                 ensureStream(
                   snapshot,
-                  safeString(params.threadId),
-                  safeString(params.turnId),
+                  threadId,
+                  turnId,
                   commandItem.id,
                   "aggregatedOutput",
                   commandItem.aggregatedOutput ?? "",
@@ -2145,6 +2384,7 @@ export class CodexLiveRuntime {
             const nextThread = {
               ...record.thread,
               turns,
+              updatedAt: Math.floor(Date.now() / 1000),
             };
 
             return {
@@ -2356,10 +2596,28 @@ export class CodexLiveRuntime {
         return;
       }
 
+      case "account/login/completed": {
+        const success = Boolean(params.success);
+        const loginId = typeof params.loginId === "string" ? params.loginId : null;
+        const error = typeof params.error === "string" ? params.error : null;
+
+        this.mutate((snapshot) => {
+          if (!snapshot.account.pendingLoginId || !loginId || snapshot.account.pendingLoginId === loginId) {
+            snapshot.account.loginInProgress = false;
+            snapshot.account.pendingLoginId = null;
+            snapshot.account.loginError = success ? null : error;
+          }
+        });
+
+        if (success) {
+          void this.refreshAccount();
+        }
+        return;
+      }
+
       case "account/rateLimits/updated": {
         this.mutate((snapshot) => {
-          snapshot.account.rateUsed = Number((params.rateLimits as RateLimitSnapshot).primary?.usedPercent ?? snapshot.account.rateUsed);
-          snapshot.account.credits = formatCredits(params.rateLimits as RateLimitSnapshot, snapshot.account.credits);
+          snapshot.account = applyRateLimitSnapshot(snapshot.account, params.rateLimits as RateLimitSnapshot);
         });
         return;
       }
@@ -2401,7 +2659,7 @@ export class CodexLiveRuntime {
     });
   }
 
-  private async refreshAccount() {
+  async refreshAccount() {
     const [account, rates] = await Promise.all([
       this.request<GetAccountResponse>("account/read", {}),
       this.request<GetAccountRateLimitsResponse>("account/rateLimits/read", {}),
