@@ -18,7 +18,7 @@ import {
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import clsx from "clsx";
 
-import type { Thread, ThreadItem, Turn } from "../protocol/v2";
+import type { Thread, ThreadItem, Turn, TurnError } from "../protocol/v2";
 import { CodexLiveRuntime } from "./codexLive";
 import {
   deriveLiveOverlay,
@@ -535,6 +535,27 @@ const isExistingThreadHistoryPending = (record: ThreadRecord | null, turns: Arra
   }
 
   return Boolean(record.thread.preview?.trim());
+};
+
+const turnErrorText = (turn: Turn) => {
+  if (!turn.error?.message) {
+    return "";
+  }
+
+  const details = turn.error.additionalDetails?.trim();
+  return details ? `${turn.error.message}\n\n${details}` : turn.error.message;
+};
+
+const formatTurnErrorCode = (code: TurnError["codexErrorInfo"] | null) => {
+  if (!code) {
+    return null;
+  }
+
+  if (typeof code === "string") {
+    return code;
+  }
+
+  return Object.keys(code)[0] ?? null;
 };
 
 const diffEntryId = (itemId: string, changeIndex: number, path: string) => `${itemId}:${changeIndex}:${path}`;
@@ -3993,26 +4014,31 @@ const ChatTranscript = memo(function ChatTranscript({
 
   return (
     <>
-      {activeTurns.map((turn) => (
-        <div className="turn-block" key={turn.id}>
-          {turn.items.map((item) => (
-            <ThreadItemView
-              item={item}
-              key={item.id}
-              turnStatus={turn.status}
-              threadTimeLabel={activeThreadTimeLabel}
-              textVisible={item.type === "agentMessage" ? streamVisible[`${item.id}:text`] : undefined}
-              outputVisible={item.type === "commandExecution" ? streamVisible[`${item.id}:aggregatedOutput`] : undefined}
-              onCopy={onCopy}
-              onFork={onFork}
-              onPlan={onPlan}
-              onReview={onReview}
-              onEdit={onEdit}
-              onContext={onContext}
-            />
-          ))}
-        </div>
-      ))}
+      {activeTurns.map((turn) => {
+        const errorText = turnErrorText(turn);
+
+        return (
+          <div className="turn-block" key={turn.id}>
+            {turn.items.map((item) => (
+              <ThreadItemView
+                item={item}
+                key={item.id}
+                turnStatus={turn.status}
+                threadTimeLabel={activeThreadTimeLabel}
+                textVisible={item.type === "agentMessage" ? streamVisible[`${item.id}:text`] : undefined}
+                outputVisible={item.type === "commandExecution" ? streamVisible[`${item.id}:aggregatedOutput`] : undefined}
+                onCopy={onCopy}
+                onFork={onFork}
+                onPlan={onPlan}
+                onReview={onReview}
+                onEdit={onEdit}
+                onContext={onContext}
+              />
+            ))}
+            {errorText ? <TurnErrorCard status={turn.status} text={errorText} code={formatTurnErrorCode(turn.error?.codexErrorInfo ?? null)} /> : null}
+          </div>
+        );
+      })}
       {shouldShowLiveOverlay ? <LiveOverlayCard overlay={liveOverlay!} /> : null}
     </>
   );
@@ -4072,6 +4098,32 @@ const LiveOverlayCard = memo(function LiveOverlayCard({ overlay }: { overlay: Ui
         </p>
       ) : null}
       {overlay.errorText ? <p className="live-overlay-error">{overlay.errorText}</p> : null}
+    </div>
+  );
+});
+
+const TurnErrorCard = memo(function TurnErrorCard({
+  status,
+  text,
+  code,
+}: {
+  status: Turn["status"];
+  text: string;
+  code: string | null;
+}) {
+  return (
+    <div className="msg">
+      <div className="mh">
+        <div className="mav a">⬡</div>
+        <span className="mn">Codex</span>
+        <span className="mt">{status}</span>
+      </div>
+      <div className="mb">
+        <div className="turn-error-card">
+          <MessageTextFlow text={text} />
+          {code ? <div className="turn-error-code">{code}</div> : null}
+        </div>
+      </div>
     </div>
   );
 });

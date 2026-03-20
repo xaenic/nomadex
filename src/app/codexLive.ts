@@ -29,6 +29,7 @@ import type {
   ThreadResumeResponse,
   ThreadStartResponse,
   Turn,
+  TurnError,
   TurnInterruptResponse,
   TurnStartResponse,
   UserInput,
@@ -1836,6 +1837,50 @@ export class CodexLiveRuntime {
                 updatedAt: Math.floor(Date.now() / 1000),
               },
               review: parseReviewFindings({ ...record.thread, turns: sortTurnsById(turns) }),
+            };
+          });
+        });
+        return;
+      }
+
+      case "error": {
+        const threadId = safeString(params.threadId);
+        const turnId = safeString(params.turnId);
+        const willRetry = Boolean(params.willRetry);
+        const errorRecord = params.error as Record<string, unknown> | null | undefined;
+        const error: TurnError | null =
+          errorRecord && typeof errorRecord === "object"
+            ? {
+                message: safeString(errorRecord.message),
+                codexErrorInfo: (errorRecord.codexErrorInfo ?? null) as TurnError["codexErrorInfo"],
+                additionalDetails:
+                  typeof errorRecord.additionalDetails === "string" ? safeString(errorRecord.additionalDetails) : null,
+              }
+            : null;
+
+        if (!threadId || !turnId || !error?.message) {
+          return;
+        }
+
+        this.mutate((snapshot) => {
+          updateThreadRecord(snapshot, threadId, (record) => {
+            const turns = ensureTurnExists(record.thread.turns, turnId).map((turn) =>
+              turn.id === turnId
+                ? {
+                    ...turn,
+                    status: willRetry ? turn.status : "failed",
+                    error,
+                  }
+                : turn,
+            );
+
+            return {
+              ...record,
+              thread: {
+                ...record.thread,
+                turns,
+                updatedAt: Math.floor(Date.now() / 1000),
+              },
             };
           });
         });

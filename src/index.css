@@ -914,6 +914,26 @@ code {
   white-space: pre-wrap;
 }
 
+.turn-error-card {
+  border: 1px solid rgb(255 111 111 / 24%);
+  background: linear-gradient(180deg, rgb(44 20 24 / 92%), rgb(31 15 18 / 96%));
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.turn-error-code {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(255 111 111 / 18%);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  color: #ffb0b0;
+  background: rgb(255 111 111 / 8%);
+}
+
 .td {
   width: 5px;
   height: 5px;
