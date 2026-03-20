@@ -23,6 +23,8 @@ export type UserMessageDisplay = {
 export type UiLiveOverlay = {
   activityLabel: string;
   activityDetails: string[];
+  activityTone: "thinking" | "writing" | "command" | "editing" | "error";
+  statusText: string;
   reasoningText: string;
   errorText: string;
 };
@@ -300,6 +302,10 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
       item.type === "agentMessage",
   );
+  const editingFiles = reversedItems.find(
+    (item): item is Extract<ThreadItem, { type: "fileChange" }> =>
+      item.type === "fileChange" && item.status === "inProgress",
+  );
   const reasoning = reversedItems.find(
     (item): item is Extract<ThreadItem, { type: "reasoning" }> =>
       item.type === "reasoning",
@@ -307,6 +313,8 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
 
   let activityLabel = "Thinking";
   const activityDetails: string[] = [];
+  let activityTone: UiLiveOverlay["activityTone"] = "thinking";
+  let statusText = "Codex is thinking through the next step";
   const reasoningText = reasoning
     ? [...reasoning.summary, ...reasoning.content].filter(Boolean).join("\n\n").trim()
     : "";
@@ -314,20 +322,38 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
 
   if (runningCommand) {
     activityLabel = "Running command";
+    activityTone = "command";
+    statusText = "Codex is running a command";
     if (runningCommand.command.trim()) {
       activityDetails.push(runningCommand.command.trim());
     }
+  } else if (editingFiles) {
+    activityLabel = "Editing files";
+    activityTone = "editing";
+    statusText = "Codex is editing files";
+    activityDetails.push(
+      ...editingFiles.changes
+        .map((change) => change.path)
+        .filter((path) => Boolean(path) && path !== "Editing files")
+        .slice(0, 2),
+    );
   } else if (agentMessage) {
     activityLabel = "Writing response";
+    activityTone = "writing";
+    statusText = "Codex is writing the response";
   }
 
   if (turn.error && typeof turn.error === "object" && "message" in turn.error) {
     errorText = typeof (turn.error as { message?: unknown }).message === "string" ? (turn.error as { message: string }).message : "";
+    activityTone = "error";
+    statusText = "Codex hit an error";
   }
 
   return {
     activityLabel,
     activityDetails,
+    activityTone,
+    statusText,
     reasoningText,
     errorText,
   };

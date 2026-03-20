@@ -90,6 +90,7 @@ import {
   ConfigPanel,
   DiffPatchViewer,
   FileEditorPreview,
+  LiveStatusDock,
   QueuedMessagesStrip,
 } from "./WorkspaceView";
 
@@ -1050,6 +1051,10 @@ export function CodexWorkspacePage() {
   const activeTurn = [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ?? null;
   const activeQueuedMessages = activeThreadId ? queuedByThreadId[activeThreadId] ?? [] : [];
   const liveOverlay = useMemo(() => deriveLiveOverlay(activeTurn), [activeTurn]);
+  const pendingApprovalsCount = useMemo(
+    () => activeThread?.approvals.filter((approval) => approval.state === "pending").length ?? 0,
+    [activeThread?.approvals],
+  );
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
   const activeThreadTimeLabel = activeThread
     ? formatClock(activeThread.thread.updatedAt)
@@ -3014,6 +3019,12 @@ export function CodexWorkspacePage() {
                 />
               ) : null}
 
+              <LiveStatusDock
+                overlay={liveOverlay}
+                pendingApprovalsCount={pendingApprovalsCount}
+                queuedCount={activeQueuedMessages.length}
+              />
+
               <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
                 <div id="toolbar">
                 <button className={clsx("tbtn", toolbarAuto && "on")} type="button" onClick={() => setToolbarAuto((current) => !current)}>
@@ -3113,7 +3124,7 @@ export function CodexWorkspacePage() {
                   <option value="ro">read-only</option>
                   <option value="fa">full-access (--yolo)</option>
                 </select>
-                {activeTurn ? <span className="composer-live-note">Active turn running. Sending now queues a follow-up.</span> : null}
+                {activeTurn ? <span className="composer-live-note">{liveOverlay?.statusText ?? "Codex is working. Sending now queues a follow-up."}</span> : null}
                 <span>⏎ send · ⇧⏎ newline</span>
                 <span>/cmds · $skills · !shell</span>
                 <span id="tokcount">{currentTokenCount} / 200k ctx</span>

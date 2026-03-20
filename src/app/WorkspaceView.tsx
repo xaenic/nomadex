@@ -482,8 +482,14 @@ const LiveOverlayCard = memo(function LiveOverlayCard({
   }, [overlay.reasoningText]);
 
   return (
-    <div className="live-overlay-card">
-      <div className="live-overlay-label">{overlay.activityLabel}</div>
+    <div className={clsx("live-overlay-card", overlay.activityTone)}>
+      <div className="live-overlay-head">
+        <span className={clsx("live-overlay-dot", overlay.activityTone)} aria-hidden="true" />
+        <div className="live-overlay-head-copy">
+          <div className="live-overlay-label">{overlay.activityLabel}</div>
+          <div className="live-overlay-status">{overlay.statusText}</div>
+        </div>
+      </div>
       {overlay.activityDetails.length > 0 ? (
         <div className="live-overlay-details">
           {overlay.activityDetails.map((detail, index) => (
@@ -501,6 +507,52 @@ const LiveOverlayCard = memo(function LiveOverlayCard({
       {overlay.errorText ? (
         <p className="live-overlay-error">{overlay.errorText}</p>
       ) : null}
+    </div>
+  );
+});
+
+export const LiveStatusDock = memo(function LiveStatusDock({
+  overlay,
+  pendingApprovalsCount,
+  queuedCount,
+}: {
+  overlay: UiLiveOverlay | null;
+  pendingApprovalsCount: number;
+  queuedCount: number;
+}) {
+  if (!overlay && pendingApprovalsCount === 0) {
+    return null;
+  }
+
+  const tone = overlay?.errorText
+    ? "error"
+    : pendingApprovalsCount > 0
+      ? "approval"
+      : overlay?.activityTone ?? "thinking";
+  const title = pendingApprovalsCount > 0
+    ? "Waiting for approval"
+    : overlay?.statusText ?? "Codex is active";
+  const subtitle = overlay?.activityLabel ?? "Live turn";
+  const detail = overlay?.activityDetails[0] ?? null;
+
+  return (
+    <div className={clsx("live-status-dock", tone)}>
+      <div className="live-status-leading">
+        <span className={clsx("live-status-dot", tone)} aria-hidden="true" />
+        <div className="live-status-copy">
+          <div className="live-status-title">{title}</div>
+          <div className="live-status-subtitle">{subtitle}</div>
+        </div>
+      </div>
+      <div className="live-status-meta">
+        {detail ? <code className="live-status-pill">{detail}</code> : null}
+        {pendingApprovalsCount > 0 ? (
+          <span className="live-status-pill">{pendingApprovalsCount} approval{pendingApprovalsCount > 1 ? "s" : ""}</span>
+        ) : null}
+        {queuedCount > 0 ? (
+          <span className="live-status-pill">{queuedCount} queued</span>
+        ) : null}
+      </div>
     </div>
   );
 });
