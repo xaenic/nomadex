@@ -259,7 +259,7 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
       files: Array<ComposerFile>;
       settings: SettingsState;
     }) => {
-      const threadCwd = snapshotRef.current.threads.find((entry) => entry.thread.id === threadId)?.thread.cwd ?? "/home/allan/codex-cli-ui";
+      const threadCwd = snapshotRef.current.threads.find((entry) => entry.thread.id === threadId)?.thread.cwd ?? "/home/allan/codex-console";
       const result = createSimulatedTurn({
         threadId,
         prompt,
@@ -941,10 +941,14 @@ export function BlankWorkspacePage() {
 export function CodexWorkspacePage() {
   const { snapshot, actions } = useWorkspace();
   const navigate = useNavigate();
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
+  const location = useRouterState({
+    select: (state) => state.location,
   });
-  const route = parseRoute(pathname);
+  const route = parseRoute(location.pathname);
+  const routeSearch = useMemo(
+    () => new URLSearchParams(location.search),
+    [location.search],
+  );
   const uniqueThreads = useMemo(() => {
     const map = new Map<string, ThreadRecord>();
 
@@ -971,6 +975,31 @@ export function CodexWorkspacePage() {
     : null;
   const activeThreadLabel = activeThread ? threadLabelById[activeThread.thread.id] ?? threadLabel(activeThread.thread) : "New Session";
   const routePanel = sectionToPanel(route.section);
+  const editorPath = route.section === "editor" ? routeSearch.get("path") : null;
+  const editorLine = useMemo(() => {
+    const raw = route.section === "editor" ? routeSearch.get("line") : null;
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [route.section, routeSearch]);
+  const editorSource = useMemo<RouteSection>(() => {
+    const source = route.section === "editor" ? routeSearch.get("from") : null;
+    switch (source) {
+      case "ops":
+      case "review":
+      case "agents":
+      case "skills":
+      case "mcp":
+      case "settings":
+      case "chat":
+        return source;
+      default:
+        return "chat";
+    }
+  }, [route.section, routeSearch]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(isDesktopViewport());
@@ -1001,6 +1030,7 @@ export function CodexWorkspacePage() {
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [sessionClockSeed] = useState(() => Math.floor(Date.now() / 1000));
+  const [composerSyncKey, setComposerSyncKey] = useState(0);
 
   const chatRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -1013,7 +1043,6 @@ export function CodexWorkspacePage() {
   const toastTimersRef = useRef<Record<string, number>>({});
   const hydratedScrollKeyRef = useRef<string | null>(null);
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
-  const deferredComposer = useDeferredValue(composer);
   const deferredQuickQuery = useDeferredValue(quickQuery);
 
   const updateModelPickerPosition = useCallback(() => {
@@ -1384,6 +1413,16 @@ export function CodexWorkspacePage() {
   }, [actions, effectiveComposerSettings, queuedByThreadId, snapshot.threads]);
 
   useEffect(() => {
+    if (route.section === "editor") {
+      const frame = window.requestAnimationFrame(() => {
+        setPanelOpen(false);
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frame);
+      };
+    }
+
     const frame = window.requestAnimationFrame(() => {
       if (!routePanel) {
         if (!isDesktopViewport()) {
@@ -1399,7 +1438,7 @@ export function CodexWorkspacePage() {
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [routePanel]);
+  }, [route.section, routePanel]);
 
   useEffect(() => {
     if (!activeThread || quickMode !== "mention") {
@@ -1441,6 +1480,66 @@ export function CodexWorkspacePage() {
 
     void actions.loadDirectory(activeExplorerPath);
   }, [actions, activeExplorerPath]);
+
+  useEffect(() => {
+    if (route.section !== "editor" || !editorPath) {
+      return;
+    }
+
+    if (
+      filePreview?.path === editorPath &&
+      !filePreview.loading &&
+      filePreview.error === null
+    ) {
+      return;
+    }
+
+    const normalizedName =
+      editorPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ??
+      editorPath;
+
+    let cancelled = false;
+
+    void actions
+      .readFile(editorPath)
+      .then((content) => {
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setFilePreview({
+            path: editorPath,
+            name: normalizedName,
+            content,
+            loading: false,
+            error: null,
+            line: editorLine,
+          });
+        });
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setFilePreview({
+          path: editorPath,
+          name: normalizedName,
+          content: "",
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to open this file.",
+          line: editorLine,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actions, editorLine, editorPath, filePreview, route.section]);
 
   useEffect(() => {
     if (snapshot.transport.mode === "live") {
@@ -1591,6 +1690,7 @@ export function CodexWorkspacePage() {
       const currentValue = getComposerInputValue();
       const resolvedValue = typeof nextValue === "function" ? nextValue(currentValue) : nextValue;
       setComposer(resolvedValue);
+      setComposerSyncKey((current) => current + 1);
       return resolvedValue;
     },
     [getComposerInputValue],
@@ -1598,6 +1698,7 @@ export function CodexWorkspacePage() {
 
   const resetComposer = useCallback(() => {
     setComposer("");
+    setComposerSyncKey((current) => current + 1);
     setSelectedMentions([]);
     setSelectedSkills([]);
     setSelectedFiles([]);
@@ -1670,6 +1771,55 @@ export function CodexWorkspacePage() {
       });
     },
     [navigate],
+  );
+
+  const openThreadFile = useCallback(
+    (
+      path: string,
+      options?: {
+        line?: number | null;
+        source?: RouteSection;
+      },
+    ) => {
+      if (!activeThreadId) {
+        return;
+      }
+
+      const nextLine =
+        typeof options?.line === "number" && options.line > 0
+          ? options.line
+          : null;
+      const source = options?.source ?? "chat";
+      const normalizedName =
+        path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
+
+      setFilePreview((current) =>
+        current?.path === path && !current.loading
+          ? {
+              ...current,
+              line: nextLine,
+            }
+          : {
+              path,
+              name: normalizedName,
+              content: current?.path === path ? current.content : "",
+              loading: current?.path === path ? current.loading : true,
+              error: null,
+              line: nextLine,
+            },
+      );
+
+      void navigate({
+        to: "/threads/$threadId/$section",
+        params: { threadId: activeThreadId, section: "editor" } as never,
+        search: {
+          path,
+          line: nextLine ? String(nextLine) : undefined,
+          from: source,
+        } as never,
+      });
+    },
+    [activeThreadId, navigate],
   );
 
   const openPanel = useCallback(
@@ -1862,8 +2012,8 @@ export function CodexWorkspacePage() {
   );
 
   const activeComposerMentions = useMemo(
-    () => selectedMentions.filter((mention) => composerHasMentionToken(deferredComposer, mention)),
-    [deferredComposer, selectedMentions],
+    () => selectedMentions.filter((mention) => composerHasMentionToken(composer, mention)),
+    [composer, selectedMentions],
   );
 
   const runSlash = useCallback(
@@ -2399,7 +2549,7 @@ export function CodexWorkspacePage() {
     [activeThreadId, navigateToThread, pushToast, visibleTabIds],
   );
 
-  const currentTokenCount = Math.floor(deferredComposer.length / 3.5).toLocaleString();
+  const currentTokenCount = Math.floor(composer.length / 3.5).toLocaleString();
   const composerPlaceholder = quickMode
     ? QUICK_HINTS[quickMode]
     : activeTurn
@@ -2430,6 +2580,44 @@ export function CodexWorkspacePage() {
       item,
     });
   }, []);
+  const closeEditor = useCallback(() => {
+    if (!activeThreadId) {
+      return;
+    }
+
+    if (editorSource === "ops") {
+      setPanelTab("files");
+      setPanelOpen(true);
+      navigateToThread(activeThreadId, "ops");
+      return;
+    }
+
+    navigateToThread(activeThreadId, editorSource);
+  }, [activeThreadId, editorSource, navigateToThread]);
+  const editorPreviewState = useMemo<FilePreviewState | null>(() => {
+    if (route.section !== "editor" || !editorPath) {
+      return null;
+    }
+
+    if (filePreview?.path === editorPath) {
+      return {
+        ...filePreview,
+        line: editorLine,
+      };
+    }
+
+    return {
+      path: editorPath,
+      name:
+        editorPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ??
+        editorPath,
+      content: "",
+      loading: true,
+      error: null,
+      line: editorLine,
+    };
+  }, [editorLine, editorPath, filePreview, route.section]);
+  const editorBackLabel = editorSource === "ops" ? "Back to Files" : "Back to Chat";
   const openExplorerEntry = useCallback(
     async (entry: MentionAttachment) => {
       if (entry.kind === "directory") {
@@ -2439,36 +2627,11 @@ export function CodexWorkspacePage() {
       }
 
       attachMention(entry);
-      setFilePreview({
-        path: entry.path,
-        name: entry.name,
-        content: "",
-        loading: true,
-        error: null,
+      openThreadFile(entry.path, {
+        source: "ops",
       });
-
-      try {
-        const content = await actions.readFile(entry.path);
-        startTransition(() => {
-          setFilePreview({
-            path: entry.path,
-            name: entry.name,
-            content,
-            loading: false,
-            error: null,
-          });
-        });
-      } catch (error) {
-        setFilePreview({
-          path: entry.path,
-          name: entry.name,
-          content: "",
-          loading: false,
-          error: error instanceof Error ? error.message : "Unable to open this file.",
-        });
-      }
     },
-    [actions, attachMention],
+    [attachMention, openThreadFile],
   );
   const renderPanelBody = () => {
     if (!activeThread) {
@@ -2545,7 +2708,7 @@ export function CodexWorkspacePage() {
                   entry.kind === "directory" && "dir",
                   badge === "mod" && "active",
                   mentionedPaths.has(entry.path) && "mentioned",
-                  filePreview?.path === entry.path && "open",
+                  route.section === "editor" && editorPath === entry.path && "open",
                 )}
                 key={entry.id}
                 type="button"
@@ -2558,9 +2721,8 @@ export function CodexWorkspacePage() {
               </button>
             );
           })}
-          {filePreview ? <FileEditorPreview preview={filePreview} /> : null}
           <div className="panel-meta">
-            <div>Tap a file to mention it and open the editor. Tap folders to drill in.</div>
+            <div>Tap a file to mention it and open the full editor. Tap folders to drill in.</div>
             <div>Use <code>/mention filename</code> or type <code>@filename</code> in the composer.</div>
           </div>
         </div>
@@ -2819,7 +2981,7 @@ export function CodexWorkspacePage() {
         </button>
         <div className="logo">
           <div className="logo-ico">⬡</div>
-          <span>Codex CLI</span>
+          <span>Codex Console</span>
         </div>
         <div className="hsep" />
         <button
@@ -2957,76 +3119,96 @@ export function CodexWorkspacePage() {
             </button>
           </div>
 
-          <div id="chat" ref={chatRef}>
-            <ChatTranscript
-              activeThread={activeThread}
-              activeThreadLabel={activeThreadLabel}
-              activeTurns={activeTurns}
-              existingThreadHistoryPending={existingThreadHistoryPending}
-              activeThreadTimeLabel={activeThreadTimeLabel}
-              streamVisible={streamVisible}
-              liveOverlay={liveOverlay}
-              onReview={reviewDiff}
-              onFill={fillComposer}
-              onSlash={triggerSlash}
-              onCopy={handleCopy}
-              onFork={forkSession}
-              onPlan={triggerPlan}
-              onEdit={fillComposer}
-              onContext={openItemContextMenu}
-            />
-            <div aria-hidden="true" ref={chatEndRef} />
-          </div>
-
-          <div id="ia">
-            {selectedSkills.length > 0 || selectedFiles.length > 0 || selectedImages.length > 0 ? (
-              <div id="ctx-row">
-                {selectedSkills.map((skill) => (
-                  <div className="ctag" key={skill.id}>
-                    <span>📋</span>
-                    <span>${skill.name}</span>
-                    <button className="ctx-x" type="button" onClick={() => removeSkill(skill.id)}>
-                      ×
-                    </button>
-                  </div>
-                ))}
-                {selectedFiles.map((file) => (
-                  <div className="ctag" key={file.id}>
-                    <span>📄</span>
-                    <span>{file.name}</span>
-                    <button className="ctx-x" type="button" onClick={() => removeUploadedFile(file.id)}>
-                      ×
-                    </button>
-                  </div>
-                ))}
-                {selectedImages.map((image) => (
-                  <div className="ctag" key={image.id}>
-                    <span>🖼</span>
-                    <span>{image.name}</span>
-                    <button className="ctx-x" type="button" onClick={() => removeImage(image.id)}>
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-              {activeQueuedMessages.length > 0 ? (
-                <QueuedMessagesStrip
-                  messages={activeQueuedMessages}
-                  onDelete={(messageId) => activeThreadId && removeQueuedMessage(activeThreadId, messageId)}
-                  onSteer={steerQueuedMessage}
+          {route.section === "editor" ? (
+            <div id="editor-page">
+              {editorPreviewState ? (
+                <FileEditorPreview
+                  backLabel={editorBackLabel}
+                  onBack={closeEditor}
+                  preview={editorPreviewState}
+                  variant="page"
                 />
-              ) : null}
+              ) : (
+                <div className="empty-panel">No file selected.</div>
+              )}
+            </div>
+          ) : (
+            <>
+              <div id="chat" ref={chatRef}>
+                <ChatTranscript
+                  activeThread={activeThread}
+                  activeThreadLabel={activeThreadLabel}
+                  activeTurns={activeTurns}
+                  existingThreadHistoryPending={existingThreadHistoryPending}
+                  activeThreadTimeLabel={activeThreadTimeLabel}
+                  onContext={openItemContextMenu}
+                  onCopy={handleCopy}
+                  onEdit={fillComposer}
+                  onFill={fillComposer}
+                  onFork={forkSession}
+                  onOpenFile={(path, line) =>
+                    openThreadFile(path, {
+                      line,
+                      source: "chat",
+                    })
+                  }
+                  onPlan={triggerPlan}
+                  onReview={reviewDiff}
+                  onSlash={triggerSlash}
+                  streamVisible={streamVisible}
+                />
+                <div aria-hidden="true" ref={chatEndRef} />
+              </div>
 
-              <LiveStatusDock
-                overlay={liveOverlay}
-                pendingApprovalsCount={pendingApprovalsCount}
-                queuedCount={activeQueuedMessages.length}
-              />
+              <div id="ia">
+                {selectedSkills.length > 0 || selectedFiles.length > 0 || selectedImages.length > 0 ? (
+                  <div id="ctx-row">
+                    {selectedSkills.map((skill) => (
+                      <div className="ctag" key={skill.id}>
+                        <span>📋</span>
+                        <span>${skill.name}</span>
+                        <button className="ctx-x" type="button" onClick={() => removeSkill(skill.id)}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {selectedFiles.map((file) => (
+                      <div className="ctag" key={file.id}>
+                        <span>📄</span>
+                        <span>{file.name}</span>
+                        <button className="ctx-x" type="button" onClick={() => removeUploadedFile(file.id)}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {selectedImages.map((image) => (
+                      <div className="ctag" key={image.id}>
+                        <span>🖼</span>
+                        <span>{image.name}</span>
+                        <button className="ctx-x" type="button" onClick={() => removeImage(image.id)}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
 
-              <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
-                <div id="toolbar">
+                {activeQueuedMessages.length > 0 ? (
+                  <QueuedMessagesStrip
+                    messages={activeQueuedMessages}
+                    onDelete={(messageId) => activeThreadId && removeQueuedMessage(activeThreadId, messageId)}
+                    onSteer={steerQueuedMessage}
+                  />
+                ) : null}
+
+                <LiveStatusDock
+                  overlay={liveOverlay}
+                  pendingApprovalsCount={pendingApprovalsCount}
+                  queuedCount={activeQueuedMessages.length}
+                />
+
+                <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
+                  <div id="toolbar">
                 <button className={clsx("tbtn", toolbarAuto && "on")} type="button" onClick={() => setToolbarAuto((current) => !current)}>
                   ⚡ Auto
                 </button>
@@ -3086,6 +3268,7 @@ export function CodexWorkspacePage() {
 
                 <div id="irow">
                   <ComposerTextarea
+                    key={composerSyncKey}
                     composerMirrorRef={composerMirrorRef}
                     mentions={selectedMentions}
                     onKeyDown={onComposerKeyDown}
@@ -3124,16 +3307,17 @@ export function CodexWorkspacePage() {
                   <option value="ro">read-only</option>
                   <option value="fa">full-access (--yolo)</option>
                 </select>
-                {activeTurn ? <span className="composer-live-note">{liveOverlay?.statusText ?? "Codex is working. Sending now queues a follow-up."}</span> : null}
                 <span>⏎ send · ⇧⏎ newline</span>
                 <span>/cmds · $skills · !shell</span>
                 <span id="tokcount">{currentTokenCount} / 200k ctx</span>
               </div>
             </div>
-          </div>
+              </div>
+            </>
+          )}
         </section>
 
-        <aside id="rp" className={clsx(panelOpen && "open")}>
+        <aside id="rp" className={clsx(panelOpen && route.section !== "editor" && "open")}>
           <div className="rph">
             <span className="rpt" id="rp-title">
               {PANEL_TITLE[panelTab]}

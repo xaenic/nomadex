@@ -14,6 +14,7 @@ export type PanelTab = "files" | "diff" | "terminal" | "agents" | "config";
 export type QuickMode = "slash" | "mention" | "skill";
 export type RouteSection =
   | "chat"
+  | "editor"
   | "ops"
   | "agents"
   | "review"
@@ -102,6 +103,7 @@ export type FilePreviewState = {
   content: string;
   loading: boolean;
   error: string | null;
+  line: number | null;
 };
 
 export type FileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;

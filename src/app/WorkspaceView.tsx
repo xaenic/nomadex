@@ -56,7 +56,7 @@ export function WelcomeState({
   return (
     <div className="ww">
       <div className="wico">⬡</div>
-      <h1>Codex CLI</h1>
+      <h1>Codex Console</h1>
       <p>
         Agentic coding assistant — reads repos, patches files, runs sandboxed
         commands, streams live turns, and tracks operational state inline.
@@ -218,20 +218,6 @@ export const ComposerTextarea = memo(function ComposerTextarea({
   ) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState(value);
-  const pendingDraftRef = useRef(value);
-
-  useEffect(() => {
-    if (value === pendingDraftRef.current) {
-      return;
-    }
-
-    pendingDraftRef.current = value;
-    const frame = window.requestAnimationFrame(() => {
-      setDraft(value);
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [value]);
 
   const activeMentions = useMemo(
     () => mentions.filter((mention) => composerHasMentionToken(draft, mention)),
@@ -279,10 +265,9 @@ export const ComposerTextarea = memo(function ComposerTextarea({
 
   const handleChange = useCallback(
     (event: ReactChangeEvent<HTMLTextAreaElement>) => {
-      const next = event.target.value;
-      pendingDraftRef.current = next;
-      setDraft(next);
-      onValueChange(next);
+      const nextValue = event.target.value;
+      setDraft(nextValue);
+      onValueChange(nextValue);
     },
     [onValueChange],
   );
@@ -332,7 +317,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending,
   activeThreadTimeLabel,
   streamVisible,
-  liveOverlay,
   onReview,
   onFill,
   onSlash,
@@ -341,6 +325,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onPlan,
   onEdit,
   onContext,
+  onOpenFile,
 }: {
   activeThread: ThreadRecord | null;
   activeThreadLabel: string;
@@ -348,7 +333,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending: boolean;
   activeThreadTimeLabel: string;
   streamVisible: Record<string, number>;
-  liveOverlay: UiLiveOverlay | null;
   onReview: (diffId?: string) => void;
   onFill: (value: string) => void;
   onSlash: (value: string) => void;
@@ -357,6 +341,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onPlan: () => void;
   onEdit: (value: string) => void;
   onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
+  onOpenFile: (path: string, line?: number | null) => void;
 }) {
   if (!activeThread) {
     return <WelcomeState onFill={onFill} onSlash={onSlash} />;
@@ -369,27 +354,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   if (activeTurns.length === 0) {
     return <WelcomeState onFill={onFill} onSlash={onSlash} />;
   }
-
-  const liveTurn =
-    [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ??
-    null;
-  const hasRenderableLiveItems =
-    liveTurn?.items.some((item) => {
-      if (item.type === "agentMessage") {
-        return item.text.trim().length > 0;
-      }
-
-      return item.type === "commandExecution" || item.type === "fileChange";
-    }) ?? false;
-
-  const shouldShowLiveOverlay = Boolean(
-    liveOverlay &&
-      (liveOverlay.errorText ||
-        (!hasRenderableLiveItems &&
-          (liveOverlay.reasoningText ||
-            liveOverlay.activityLabel ||
-            liveOverlay.activityDetails.length > 0))),
-  );
 
   return (
     <>
@@ -420,6 +384,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                 onReview={onReview}
                 onEdit={onEdit}
                 onContext={onContext}
+                onOpenFile={onOpenFile}
               />
             ))}
             {errorText ? (
@@ -427,12 +392,12 @@ export const ChatTranscript = memo(function ChatTranscript({
                 status={turn.status}
                 text={errorText}
                 code={formatTurnErrorCode(turn.error?.codexErrorInfo ?? null)}
+                onOpenFile={onOpenFile}
               />
             ) : null}
           </div>
         );
       })}
-      {shouldShowLiveOverlay ? <LiveOverlayCard overlay={liveOverlay!} /> : null}
     </>
   );
 });
@@ -468,49 +433,6 @@ const commandStatusTone = (
   return "err";
 };
 
-const LiveOverlayCard = memo(function LiveOverlayCard({
-  overlay,
-}: {
-  overlay: UiLiveOverlay;
-}) {
-  const reasoningRef = useRef<HTMLParagraphElement | null>(null);
-
-  useEffect(() => {
-    if (reasoningRef.current) {
-      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
-    }
-  }, [overlay.reasoningText]);
-
-  return (
-    <div className={clsx("live-overlay-card", overlay.activityTone)}>
-      <div className="live-overlay-head">
-        <span className={clsx("live-overlay-dot", overlay.activityTone)} aria-hidden="true" />
-        <div className="live-overlay-head-copy">
-          <div className="live-overlay-label">{overlay.activityLabel}</div>
-          <div className="live-overlay-status">{overlay.statusText}</div>
-        </div>
-      </div>
-      {overlay.activityDetails.length > 0 ? (
-        <div className="live-overlay-details">
-          {overlay.activityDetails.map((detail, index) => (
-            <code className="live-overlay-detail" key={`${detail}-${index}`}>
-              {detail}
-            </code>
-          ))}
-        </div>
-      ) : null}
-      {overlay.reasoningText ? (
-        <p className="live-overlay-reasoning" ref={reasoningRef}>
-          {overlay.reasoningText}
-        </p>
-      ) : null}
-      {overlay.errorText ? (
-        <p className="live-overlay-error">{overlay.errorText}</p>
-      ) : null}
-    </div>
-  );
-});
-
 export const LiveStatusDock = memo(function LiveStatusDock({
   overlay,
   pendingApprovalsCount,
@@ -532,7 +454,6 @@ export const LiveStatusDock = memo(function LiveStatusDock({
   const title = pendingApprovalsCount > 0
     ? "Waiting for approval"
     : overlay?.statusText ?? "Codex is active";
-  const subtitle = overlay?.activityLabel ?? "Live turn";
   const detail = overlay?.activityDetails[0] ?? null;
 
   return (
@@ -541,7 +462,6 @@ export const LiveStatusDock = memo(function LiveStatusDock({
         <span className={clsx("live-status-dot", tone)} aria-hidden="true" />
         <div className="live-status-copy">
           <div className="live-status-title">{title}</div>
-          <div className="live-status-subtitle">{subtitle}</div>
         </div>
       </div>
       <div className="live-status-meta">
@@ -561,10 +481,12 @@ const TurnErrorCard = memo(function TurnErrorCard({
   status,
   text,
   code,
+  onOpenFile,
 }: {
   status: Turn["status"];
   text: string;
   code: string | null;
+  onOpenFile: (path: string, line?: number | null) => void;
 }) {
   return (
     <div className="msg">
@@ -575,7 +497,7 @@ const TurnErrorCard = memo(function TurnErrorCard({
       </div>
       <div className="mb">
         <div className="turn-error-card">
-          <MessageTextFlow text={text} />
+          <MessageTextFlow onOpenFile={onOpenFile} text={text} />
           {code ? <div className="turn-error-code">{code}</div> : null}
         </div>
       </div>
@@ -585,8 +507,10 @@ const TurnErrorCard = memo(function TurnErrorCard({
 
 const MessageInlineFlow = memo(function MessageInlineFlow({
   text,
+  onOpenFile,
 }: {
   text: string;
+  onOpenFile: (path: string, line?: number | null) => void;
 }) {
   const segments = useMemo(() => parseInlineSegments(text), [text]);
 
@@ -607,7 +531,17 @@ const MessageInlineFlow = memo(function MessageInlineFlow({
 
         const href = toBrowseUrl(segment.path);
         if (href === "#") {
-          return (
+          return onOpenFile ? (
+            <button
+              className="message-file-link file-link-button"
+              key={`file-${index}`}
+              onClick={() => onOpenFile(segment.path, segment.line)}
+              title={segment.path}
+              type="button"
+            >
+              {segment.displayPath}
+            </button>
+          ) : (
             <code className="message-inline-code" key={`file-${index}`}>
               {segment.displayPath}
             </code>
@@ -615,16 +549,15 @@ const MessageInlineFlow = memo(function MessageInlineFlow({
         }
 
         return (
-          <a
-            className="message-file-link"
-            href={href}
+          <button
+            className="message-file-link file-link-button"
             key={`file-${index}`}
-            rel="noreferrer noopener"
-            target="_blank"
+            onClick={() => onOpenFile(segment.path, segment.line)}
             title={segment.path}
+            type="button"
           >
             {segment.displayPath}
-          </a>
+          </button>
         );
       })}
     </>
@@ -661,7 +594,13 @@ function MessageImagePreview({
   );
 }
 
-const MessageTextFlow = memo(function MessageTextFlow({ text }: { text: string }) {
+const MessageTextFlow = memo(function MessageTextFlow({
+  text,
+  onOpenFile,
+}: {
+  text: string;
+  onOpenFile: (path: string, line?: number | null) => void;
+}) {
   const blocks = useMemo(() => parseMessageBlocks(text), [text]);
 
   return (
@@ -685,7 +624,7 @@ const MessageTextFlow = memo(function MessageTextFlow({ text }: { text: string }
 
         return (
           <p className="message-text" key={`text-${index}`}>
-            <MessageInlineFlow text={block.value} />
+            <MessageInlineFlow onOpenFile={onOpenFile} text={block.value} />
           </p>
         );
       })}
@@ -705,6 +644,7 @@ const ThreadItemView = memo(function ThreadItemView({
   onReview,
   onEdit,
   onContext,
+  onOpenFile,
 }: {
   item: ThreadItem;
   turnStatus: Turn["status"];
@@ -717,6 +657,7 @@ const ThreadItemView = memo(function ThreadItemView({
   onReview: (diffId?: string) => void;
   onEdit: (value: string) => void;
   onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
+  onOpenFile: (path: string, line?: number | null) => void;
 }) {
   const [commandExpanded, setCommandExpanded] = useState(
     item.type === "commandExecution" ? item.status === "inProgress" : false,
@@ -801,17 +742,23 @@ const ThreadItemView = memo(function ThreadItemView({
                   <span className="attachment-chip" key={`${item.id}-file-${attachment.path}`}>
                     <span>📄</span>
                     {href === "#" ? (
-                      <span>{attachmentLabel}</span>
-                    ) : (
-                      <a
-                        className="message-file-link attachment-chip-link"
-                        href={href}
-                        rel="noreferrer noopener"
-                        target="_blank"
+                      <button
+                        className="message-file-link attachment-chip-link file-link-button"
+                        onClick={() => onOpenFile(attachment.path)}
                         title={attachment.path}
+                        type="button"
                       >
                         {attachmentLabel}
-                      </a>
+                      </button>
+                    ) : (
+                      <button
+                        className="message-file-link attachment-chip-link file-link-button"
+                        onClick={() => onOpenFile(attachment.path)}
+                        title={attachment.path}
+                        type="button"
+                      >
+                        {attachmentLabel}
+                      </button>
                     )}
                   </span>
                 );
@@ -827,7 +774,7 @@ const ThreadItemView = memo(function ThreadItemView({
               ))}
             </div>
           ) : null}
-          {display.text ? <MessageTextFlow text={display.text} /> : null}
+          {display.text ? <MessageTextFlow onOpenFile={onOpenFile} text={display.text} /> : null}
           <div className="msg-time">{threadTimeLabel}</div>
         </div>
         <div className="macts">
@@ -858,7 +805,7 @@ const ThreadItemView = memo(function ThreadItemView({
           <span className="mt">{turnStatus === "inProgress" ? "live" : turnStatus}</span>
         </div>
         <div className="mb">
-          {text ? <MessageTextFlow text={text} /> : null}
+          {text ? <MessageTextFlow onOpenFile={onOpenFile} text={text} /> : null}
           {streaming ? <div className="live-cursor" /> : null}
         </div>
         <div className="macts">
@@ -1150,15 +1097,38 @@ export function DiffPatchViewer({ entry }: { entry: DiffReviewEntry }) {
 
 export function FileEditorPreview({
   preview,
+  variant = "panel",
+  onBack,
+  backLabel = "Back",
 }: {
   preview: FilePreviewState;
+  variant?: "panel" | "page";
+  onBack?: () => void;
+  backLabel?: string;
 }) {
+  const highlightedLine = preview.line;
   const lines = preview.loading || preview.error ? [] : preview.content.split("\n");
   const browseHref = toBrowseUrl(preview.path);
+  const activeLineRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeLineRef.current || preview.loading) {
+      return;
+    }
+
+    activeLineRef.current.scrollIntoView({
+      block: "center",
+    });
+  }, [highlightedLine, preview.loading, preview.path]);
 
   return (
-    <div className="file-editor">
+    <div className={clsx("file-editor", variant === "page" && "page")}>
       <div className="file-editor-head">
+        {variant === "page" ? (
+          <button className="file-editor-back" onClick={onBack} type="button">
+            ← {backLabel}
+          </button>
+        ) : null}
         <div className="file-editor-copy">
           <div className="file-editor-title">{preview.name}</div>
           <div className="file-editor-path">{preview.path}</div>
@@ -1179,7 +1149,18 @@ export function FileEditorPreview({
         {!preview.loading && !preview.error ? (
           <div className="file-editor-code" role="presentation">
             {lines.map((line, index) => (
-              <div className="file-editor-line" key={`${preview.path}:${index}`}>
+              <div
+                className={clsx(
+                  "file-editor-line",
+                  highlightedLine === index + 1 && "active",
+                )}
+                key={`${preview.path}:${index}`}
+                ref={
+                  highlightedLine === index + 1
+                    ? activeLineRef
+                    : undefined
+                }
+              >
                 <span className="file-editor-gutter">{index + 1}</span>
                 <code className="file-editor-text">{line || " "}</code>
               </div>
@@ -1547,7 +1528,7 @@ export function ConfigPanel({
 
       <div className="config-preview">
         <div className="config-title">~/.codex/config.toml</div>
-        <div># Codex CLI Web UI config</div>
+        <div># Codex Console config</div>
         <div>model = "{snapshot.settings.model}"</div>
         <div>approval_policy = "{snapshot.settings.approvalPolicy}"</div>
         <div>model_reasoning_effort = "{snapshot.settings.reasoningEffort}"</div>

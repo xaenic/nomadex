@@ -1074,7 +1074,7 @@ export class CodexLiveRuntime {
       try {
         await this.request("initialize", {
           clientInfo: {
-            name: "codex-cli-ui",
+            name: "codex-console",
             version: "0.0.0",
           },
           capabilities: {

@@ -227,7 +227,7 @@ export type CreateTurnResult = {
   review: ReviewFinding[];
 };
 
-const WORKSPACE_CWD = "/home/allan/codex-cli-ui";
+const WORKSPACE_CWD = "/home/allan/codex-console";
 const now = Math.floor(Date.now() / 1000);
 
 const reasoningOption = (effort: ReasoningEffort, description: string) => ({
@@ -612,7 +612,7 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
     id: "item-user-1",
     content: [
       textInput(
-        "Build a VS Code-style web UI for Codex CLI with streaming messages, plans, subagents, skills, MCP, settings, and background terminals.",
+        "Build a VS Code-style web UI for Codex Console with streaming messages, plans, subagents, skills, MCP, settings, and background terminals.",
       ),
       mentionInput(mentionCatalog[1]),
       skillInput(installedSkills[0]),
@@ -808,7 +808,7 @@ const threadUiShellTurnTwoItems: Array<ThreadItem> = [
     status: "inProgress",
     commandActions: [{ type: "unknown", command: "npm run build" }],
     aggregatedOutput: [
-      "> codex-cli-ui@0.0.0 build",
+      "> codex-console@0.0.0 build",
       "> tsc -b && vite build",
       "",
       "vite v8.0.1 building for production...",
@@ -960,7 +960,7 @@ const threads: Array<ThreadRecord> = [
   {
     thread: {
       id: "thread-ui-shell",
-      preview: "Build a full Codex CLI web shell in React + TanStack.",
+      preview: "Build a full Codex Console workspace in React + TanStack.",
       ephemeral: false,
       modelProvider: "openai",
       createdAt: now - 3600,
@@ -975,9 +975,9 @@ const threads: Array<ThreadRecord> = [
       gitInfo: {
         sha: "cc92fe7",
         branch: "feature/codex-web-shell",
-        originUrl: "git@github.com:allan/codex-cli-ui.git",
+        originUrl: "git@github.com:xaenic/codex-console.git",
       },
-      name: "Codex CLI web shell",
+      name: "Codex Console workspace",
       turns: uiShellTurns,
     },
     plan: {
@@ -1048,7 +1048,7 @@ const threads: Array<ThreadRecord> = [
         log: [
           "$ codex app-server --listen ws://127.0.0.1:3900",
           "Listening on ws://127.0.0.1:3900",
-          "Client connected: codex-cli-ui-web",
+          "Client connected: codex-console-web",
         ],
       },
       {
@@ -1125,7 +1125,7 @@ const threads: Array<ThreadRecord> = [
       gitInfo: {
         sha: "5ffb882",
         branch: "review/ui-shell",
-        originUrl: "git@github.com:allan/codex-cli-ui.git",
+        originUrl: "git@github.com:xaenic/codex-console.git",
       },
       name: "Review workspace shell",
       turns: reviewTurns,

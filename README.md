@@ -1,6 +1,6 @@
-# ⚡ Codex CLI Web UI
+# ⚡ Codex Console
 
-A standalone **React + TanStack** web interface for **Codex CLI**, built for desktop and mobile use with a live local Codex app-server bridge.
+A standalone **React + TanStack** workspace for **Codex CLI**, built for desktop and mobile use with a live local Codex app-server bridge.
 
 ## 🖼️ Sample UI
 

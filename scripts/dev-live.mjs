@@ -56,11 +56,11 @@ process.on("SIGTERM", () => {
 
 const ensureAppServer = async () => {
   if (await isPortOpen(host, port)) {
-    console.log(`[codex-cli-ui] Reusing Codex app-server at ${wsUrl}`);
+    console.log(`[codex-console] Reusing Codex app-server at ${wsUrl}`);
     return;
   }
 
-  console.log(`[codex-cli-ui] Starting Codex app-server at ${wsUrl}`);
+  console.log(`[codex-console] Starting Codex app-server at ${wsUrl}`);
   const appServer = spawn("codex", ["app-server", "--listen", wsUrl], {
     cwd: projectRoot,
     stdio: "inherit",
@@ -85,7 +85,7 @@ const ensureAppServer = async () => {
 };
 
 const startVite = () => {
-  console.log(`[codex-cli-ui] Starting Vite dev server on http://127.0.0.1:${uiPort}`);
+  console.log(`[codex-console] Starting Vite dev server on http://127.0.0.1:${uiPort}`);
 
   const viteEnv = {
     ...process.env,
@@ -113,6 +113,6 @@ try {
   startVite();
 } catch (error) {
   stopChildren();
-  console.error(`[codex-cli-ui] ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`[codex-console] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }

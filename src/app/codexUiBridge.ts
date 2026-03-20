@@ -8,7 +8,7 @@ export type UiFileAttachment = {
 export type InlineSegment =
   | { kind: "text"; value: string }
   | { kind: "code"; value: string }
-  | { kind: "file"; value: string; path: string; displayPath: string; downloadName: string };
+  | { kind: "file"; value: string; path: string; line: number | null; displayPath: string; downloadName: string };
 
 export type MessageBlock =
   | { kind: "text"; value: string }
@@ -70,6 +70,71 @@ function parseFileReference(value: string): { path: string; line: number | null 
 
   if (!isFilePath(pathValue)) return null;
   return { path: pathValue, line };
+}
+
+function formatFileReferenceLabel(pathValue: string, line: number | null): string {
+  const base = getBasename(pathValue);
+  if (line === null) {
+    return base;
+  }
+
+  return `${base}:${String(line)}`;
+}
+
+function parseMarkdownFileLinkSegments(value: string): InlineSegment[] {
+  if (!value.includes("[") || !value.includes("](")) {
+    return [{ kind: "text", value }];
+  }
+
+  const segments: InlineSegment[] = [];
+  const markdownLinkRegex = /\[([^\]\n]+)\]\(([^)\n]+)\)/gu;
+  let cursor = 0;
+
+  for (const match of value.matchAll(markdownLinkRegex)) {
+    const fullMatch = match[0];
+    const label = match[1]?.trim() ?? "";
+    const hrefRaw = match[2]?.trim() ?? "";
+    const start = match.index ?? -1;
+    if (start < 0) {
+      continue;
+    }
+
+    if (start > cursor) {
+      segments.push({ kind: "text", value: value.slice(cursor, start) });
+    }
+
+    const fileReference = parseFileReference(hrefRaw);
+    if (fileReference) {
+      segments.push({
+        kind: "file",
+        value: label || hrefRaw,
+        path: fileReference.path,
+        line: fileReference.line,
+        displayPath: formatFileReferenceLabel(fileReference.path, fileReference.line),
+        downloadName: getBasename(fileReference.path),
+      });
+    } else {
+      segments.push({ kind: "text", value: fullMatch });
+    }
+
+    cursor = start + fullMatch.length;
+  }
+
+  if (cursor < value.length) {
+    segments.push({ kind: "text", value: value.slice(cursor) });
+  }
+
+  return segments.length > 0 ? segments : [{ kind: "text", value }];
+}
+
+function pushTextSegments(segments: InlineSegment[], value: string) {
+  parseMarkdownFileLinkSegments(value).forEach((segment) => {
+    if (segment.kind === "text" && segment.value.length === 0) {
+      return;
+    }
+
+    segments.push(segment);
+  });
 }
 
 function extractFileAttachments(value: string): UiFileAttachment[] {
@@ -136,7 +201,9 @@ export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMes
 }
 
 export function parseInlineSegments(text: string): InlineSegment[] {
-  if (!text.includes("`")) return [{ kind: "text", value: text }];
+  if (!text.includes("`")) {
+    return parseMarkdownFileLinkSegments(text);
+  }
 
   const segments: InlineSegment[] = [];
   let cursor = 0;
@@ -177,18 +244,22 @@ export function parseInlineSegments(text: string): InlineSegment[] {
     }
 
     if (cursor > textStart) {
-      segments.push({ kind: "text", value: text.slice(textStart, cursor) });
+      pushTextSegments(segments, text.slice(textStart, cursor));
     }
 
     const token = text.slice(cursor + openLength, closingStart);
     if (token.length > 0) {
       const fileReference = parseFileReference(token);
       if (fileReference) {
-        const displayPath = fileReference.line ? `${fileReference.path}:${String(fileReference.line)}` : fileReference.path;
+        const displayPath = formatFileReferenceLabel(
+          fileReference.path,
+          fileReference.line,
+        );
         segments.push({
           kind: "file",
           value: token,
           path: fileReference.path,
+          line: fileReference.line,
           displayPath,
           downloadName: getBasename(fileReference.path),
         });
@@ -204,7 +275,7 @@ export function parseInlineSegments(text: string): InlineSegment[] {
   }
 
   if (textStart < text.length) {
-    segments.push({ kind: "text", value: text.slice(textStart) });
+    pushTextSegments(segments, text.slice(textStart));
   }
 
   return segments;

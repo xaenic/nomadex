@@ -796,6 +796,15 @@ code {
   text-underline-offset: 2px;
 }
 
+.file-link-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .message-file-link:hover,
 .message-file-link:focus-visible {
   color: #bad3ff;
@@ -853,141 +862,6 @@ code {
 .typing-copy {
   margin-left: 5px;
   font-size: 11px;
-}
-
-.live-overlay-card {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin-left: 26px;
-  margin-top: 4px;
-  padding: 12px 12px 10px;
-  border: 1px solid rgb(140 183 255 / 12%);
-  border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgb(99 102 241 / 9%), rgb(99 102 241 / 3%)),
-    rgb(255 255 255 / 1.5%);
-  box-shadow: 0 14px 34px rgb(0 0 0 / 16%);
-}
-
-.live-overlay-card.command {
-  border-color: rgb(16 185 129 / 14%);
-  background:
-    linear-gradient(180deg, rgb(16 185 129 / 11%), rgb(16 185 129 / 3%)),
-    rgb(255 255 255 / 1.5%);
-}
-
-.live-overlay-card.editing {
-  border-color: rgb(245 158 11 / 14%);
-  background:
-    linear-gradient(180deg, rgb(245 158 11 / 11%), rgb(245 158 11 / 3%)),
-    rgb(255 255 255 / 1.5%);
-}
-
-.live-overlay-card.error {
-  border-color: rgb(239 68 68 / 18%);
-  background:
-    linear-gradient(180deg, rgb(239 68 68 / 14%), rgb(239 68 68 / 4%)),
-    rgb(255 255 255 / 1.5%);
-}
-
-.live-overlay-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.live-overlay-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--ac2);
-  color: rgb(140 183 255 / 42%);
-  box-shadow: 0 0 0 0 rgb(140 183 255 / 44%);
-  animation: live-pulse 1.3s ease-out infinite;
-  flex-shrink: 0;
-  margin-top: 4px;
-}
-
-.live-overlay-dot.command {
-  background: var(--gn);
-  color: rgb(16 185 129 / 34%);
-  box-shadow: 0 0 0 0 rgb(16 185 129 / 34%);
-}
-
-.live-overlay-dot.editing {
-  background: var(--yw);
-  color: rgb(245 158 11 / 34%);
-  box-shadow: 0 0 0 0 rgb(245 158 11 / 34%);
-}
-
-.live-overlay-dot.error {
-  background: var(--rd);
-  color: rgb(239 68 68 / 34%);
-  box-shadow: 0 0 0 0 rgb(239 68 68 / 34%);
-}
-
-.live-overlay-head-copy {
-  min-width: 0;
-}
-
-.live-overlay-status {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--tx3);
-  line-height: 1.55;
-}
-
-.live-overlay-label {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--tx2);
-}
-
-.live-overlay-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.live-overlay-detail {
-  width: fit-content;
-  max-width: 100%;
-  background: var(--bg3);
-  border: 1px solid var(--bdr);
-  border-radius: 12px;
-  padding: 8px 11px;
-  font-size: 11px;
-  color: var(--tx2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.live-overlay-reasoning {
-  margin: 0;
-  max-height: calc(1.75em * 5);
-  overflow: auto;
-  color: var(--tx3);
-  font-size: 11.5px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  scrollbar-width: none;
-  mask-image: linear-gradient(to top, black 76%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to top, black 76%, transparent 100%);
-}
-
-.live-overlay-reasoning::-webkit-scrollbar {
-  display: none;
-}
-
-.live-overlay-error {
-  margin: 0;
-  color: var(--rd);
-  font-size: 11.5px;
-  line-height: 1.6;
-  white-space: pre-wrap;
 }
 
 .live-status-dock {
@@ -1072,13 +946,6 @@ code {
   font-weight: 700;
   color: var(--tx);
   line-height: 1.3;
-}
-
-.live-status-subtitle {
-  margin-top: 2px;
-  font-size: 10.5px;
-  color: var(--tx3);
-  line-height: 1.45;
 }
 
 .live-status-meta {
@@ -2062,12 +1929,6 @@ pre::-webkit-scrollbar-thumb {
   color: var(--tx3);
 }
 
-.composer-live-note {
-  color: var(--ac2);
-  white-space: nowrap;
-  max-width: 100%;
-}
-
 #msel {
   background: var(--bg4);
   border: 1px solid var(--bdr);
@@ -2436,6 +2297,25 @@ pre::-webkit-scrollbar-thumb {
   background: rgb(10 11 23 / 92%);
 }
 
+#editor-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 12px 14px 14px;
+}
+
+.file-editor.page {
+  margin-top: 0;
+  height: 100%;
+  border-radius: 18px;
+  border-color: rgb(140 183 255 / 14%);
+  background:
+    radial-gradient(circle at top left, rgb(140 183 255 / 8%), transparent 34%),
+    rgb(10 11 23 / 96%);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 26%);
+}
+
 .file-editor-head {
   display: flex;
   align-items: center;
@@ -2443,6 +2323,34 @@ pre::-webkit-scrollbar-thumb {
   padding: 8px 10px;
   border-bottom: 1px solid var(--bdr);
   background: rgb(255 255 255 / 3%);
+}
+
+.file-editor.page .file-editor-head {
+  padding: 12px 14px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  backdrop-filter: blur(18px);
+  background: rgb(15 18 31 / 92%);
+}
+
+.file-editor-back {
+  flex-shrink: 0;
+  border: 1px solid rgb(140 183 255 / 22%);
+  border-radius: 999px;
+  background: rgb(140 183 255 / 10%);
+  color: #cfe1ff;
+  font-size: 11px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.file-editor-back:hover,
+.file-editor-back:focus-visible {
+  border-color: rgb(140 183 255 / 38%);
+  background: rgb(140 183 255 / 16%);
+  color: #edf4ff;
+  outline: none;
 }
 
 .file-editor-copy {
@@ -2488,6 +2396,11 @@ pre::-webkit-scrollbar-thumb {
   max-height: min(42vh, 520px);
 }
 
+.file-editor.page .file-editor-body {
+  flex: 1;
+  max-height: none;
+}
+
 .file-editor-empty {
   padding: 20px 14px;
   color: var(--tx3);
@@ -2511,6 +2424,11 @@ pre::-webkit-scrollbar-thumb {
   background: rgb(255 255 255 / 2.5%);
 }
 
+.file-editor-line.active {
+  background:
+    linear-gradient(90deg, rgb(140 183 255 / 16%), rgb(140 183 255 / 5%));
+}
+
 .file-editor-gutter {
   padding: 0 10px 0 0;
   text-align: right;
@@ -2519,12 +2437,21 @@ pre::-webkit-scrollbar-thumb {
   border-right: 1px solid rgb(255 255 255 / 4%);
 }
 
+.file-editor-line.active .file-editor-gutter {
+  color: #dbe8ff;
+  border-right-color: rgb(140 183 255 / 22%);
+}
+
 .file-editor-text {
   display: block;
   padding: 0 0 0 12px;
   color: var(--tx);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.file-editor-line.active .file-editor-text {
+  color: #f3f7ff;
 }
 
 .review-list {
