@@ -1162,7 +1162,11 @@ export function CodexWorkspacePage() {
   const queueProcessingRef = useRef<Record<string, boolean>>({});
   const toastTimersRef = useRef<Record<string, number>>({});
   const hydratedScrollKeyRef = useRef<string | null>(null);
+  const streamVisibleRef = useRef<Record<string, number>>({});
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
+  const [streamTextFx, setStreamTextFx] = useState<
+    Record<string, { from: number; to: number }>
+  >({});
   const deferredQuickQuery = useDeferredValue(quickQuery);
 
   const updateModelPickerPosition = useCallback(() => {
@@ -1735,10 +1739,31 @@ export function CodexWorkspacePage() {
   }, [actions, editorLine, editorPath, filePreview, route.section]);
 
   useEffect(() => {
-    if (snapshot.transport.mode === "live") {
-      const nextVisible = Object.fromEntries(snapshot.streams.map((entry) => [entry.key, entry.visible]));
+    const liveMode = snapshot.transport.mode === "live";
+    const streamEntries = snapshot.streams;
+
+    if (liveMode) {
       const frame = window.requestAnimationFrame(() => {
+        const previousVisible = streamVisibleRef.current;
+        const nextVisible: Record<string, number> = {};
+        const nextTextFx: Record<string, { from: number; to: number }> = {};
+
+        for (const entry of streamEntries) {
+          const target = getStreamTarget(entry);
+          const previous = previousVisible[entry.key] ?? 0;
+
+          nextVisible[entry.key] = target;
+          if (entry.field === "text" && target > previous) {
+            nextTextFx[entry.key] = {
+              from: previous,
+              to: target,
+            };
+          }
+        }
+
+        streamVisibleRef.current = nextVisible;
         setStreamVisible(nextVisible);
+        setStreamTextFx(nextTextFx);
       });
 
       return () => {
@@ -1746,42 +1771,62 @@ export function CodexWorkspacePage() {
       };
     }
 
-    const nextTargets = Object.fromEntries(snapshot.streams.map((entry) => [entry.key, getStreamTarget(entry)]));
+    const syncVisible = () => {
+      const currentVisible = streamVisibleRef.current;
+      let changed = Object.keys(currentVisible).length !== streamEntries.length;
+      const nextVisible: Record<string, number> = {};
 
-    const frame = window.requestAnimationFrame(() => {
-      setStreamVisible((current) => {
-        const next = { ...current };
-        for (const [key, value] of Object.entries(nextTargets)) {
-          if (!(key in next)) {
-            next[key] = 0;
-          } else if (next[key] > value) {
-            next[key] = value;
-          }
+      for (const entry of streamEntries) {
+        const target = getStreamTarget(entry);
+        const nextValue = Math.min(currentVisible[entry.key] ?? 0, target);
+        nextVisible[entry.key] = nextValue;
+        if ((currentVisible[entry.key] ?? undefined) !== nextValue) {
+          changed = true;
         }
-        return next;
-      });
-    });
+      }
+
+      if (changed) {
+        streamVisibleRef.current = nextVisible;
+        setStreamVisible(nextVisible);
+      }
+      setStreamTextFx({});
+    };
+
+    const frame = window.requestAnimationFrame(syncVisible);
 
     const timer = window.setInterval(() => {
-      setStreamVisible((current) => {
-        let changed = false;
-        const next = { ...current };
+      const currentVisible = streamVisibleRef.current;
+      const nextVisible: Record<string, number> = {};
+      const nextTextFx: Record<string, { from: number; to: number }> = {};
+      let changed = Object.keys(currentVisible).length !== streamEntries.length;
 
-        snapshot.streams.forEach((entry) => {
-          const key = entry.key;
-          const target = getStreamTarget(entry);
-          const value = next[key] ?? 0;
-          const backlog = target - value;
-          const speed = Math.max(1, entry.speed, Math.ceil(backlog / 5));
+      for (const entry of streamEntries) {
+        const target = getStreamTarget(entry);
+        const value = Math.min(currentVisible[entry.key] ?? 0, target);
+        const backlog = target - value;
+        const speed = Math.max(1, entry.speed, Math.ceil(backlog / 5));
+        const nextValue =
+          value < target ? Math.min(target, value + speed) : value;
 
-          if (value < target) {
-            next[key] = Math.min(target, value + speed);
-            changed = true;
+        nextVisible[entry.key] = nextValue;
+        if (nextValue !== value) {
+          changed = true;
+          if (entry.field === "text") {
+            nextTextFx[entry.key] = {
+              from: value,
+              to: nextValue,
+            };
           }
-        });
+        }
+      }
 
-        return changed ? next : current;
-      });
+      if (!changed) {
+        return;
+      }
+
+      streamVisibleRef.current = nextVisible;
+      setStreamVisible(nextVisible);
+      setStreamTextFx(nextTextFx);
     }, 24);
 
     return () => {
@@ -3463,6 +3508,7 @@ export function CodexWorkspacePage() {
                   activeTurns={activeTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
                   activeThreadTimeLabel={activeThreadTimeLabel}
+                  streamTextFx={streamTextFx}
                   onContext={openItemContextMenu}
                   onCopy={handleCopy}
                   onEdit={fillComposer}

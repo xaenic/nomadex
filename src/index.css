@@ -803,6 +803,10 @@ code {
   word-break: break-word;
 }
 
+.message-text-tail {
+  animation: messageTextTail 0.16s ease-out both;
+}
+
 .message-inline-code {
   background: var(--bg4);
   border: 1px solid var(--bdr);
@@ -1169,6 +1173,31 @@ code {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes liveCursorPulse {
+  0%,
+  100% {
+    opacity: 0.34;
+    transform: scaleY(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleY(1.04);
+  }
+}
+
+@keyframes messageTextTail {
+  from {
+    opacity: 0.22;
+    filter: blur(1.8px);
+  }
+
+  to {
+    opacity: 1;
+    filter: blur(0);
   }
 }
 
@@ -4161,7 +4190,9 @@ pre::-webkit-scrollbar-thumb {
   margin-left: 3px;
   background: var(--tx2);
   vertical-align: middle;
-  animation: blink 1s infinite;
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgb(140 183 255 / 28%);
+  animation: liveCursorPulse 0.95s ease-in-out infinite;
 }
 
 .hidden-input {
@@ -4215,7 +4246,9 @@ pre::-webkit-scrollbar-thumb {
   .agc,
   .compact-bar,
   .image-card,
+  .message-text-tail,
   .live-status-inline,
+  .live-cursor,
   .live-status-icon-frame,
   .live-status-icon-mark,
   .live-status-icon-line,

@@ -46,6 +46,11 @@ import type {
   WorkspaceActions,
 } from "./workspaceTypes";
 
+type TextStreamFx = {
+  from: number;
+  to: number;
+};
+
 export function WelcomeState({
   onFill,
   onSlash,
@@ -448,6 +453,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending,
   activeThreadTimeLabel,
   streamVisible,
+  streamTextFx,
   onReview,
   onFill,
   onSlash,
@@ -464,6 +470,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending: boolean;
   activeThreadTimeLabel: string;
   streamVisible: Record<string, number>;
+  streamTextFx: Record<string, TextStreamFx>;
   onReview: (diffId?: string) => void;
   onFill: (value: string) => void;
   onSlash: (value: string) => void;
@@ -502,6 +509,11 @@ export const ChatTranscript = memo(function ChatTranscript({
                 textVisible={
                   item.type === "agentMessage"
                     ? streamVisible[`${item.id}:text`]
+                    : undefined
+                }
+                textFx={
+                  item.type === "agentMessage"
+                    ? streamTextFx[`${item.id}:text`]
                     : undefined
                 }
                 outputVisible={
@@ -684,15 +696,23 @@ function MessageImagePreview({
 const MessageTextFlow = memo(function MessageTextFlow({
   text,
   onOpenFile,
+  textFx,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
+  textFx?: TextStreamFx;
 }) {
   const blocks = useMemo(() => parseMessageBlocks(text), [text]);
+  let blockCursor = 0;
 
   return (
     <div className="message-text-flow">
       {blocks.map((block, index) => {
+        const blockStart = blockCursor;
+        const blockLength =
+          block.kind === "image" ? block.markdown.length : block.value.length;
+        blockCursor += blockLength;
+
         if (block.kind === "image") {
           return (
             <MessageImagePreview
@@ -709,9 +729,58 @@ const MessageTextFlow = memo(function MessageTextFlow({
           return null;
         }
 
+        const blockEnd = blockStart + block.value.length;
+        const activeFx = textFx ?? null;
+        const fadeFrom = activeFx ? Math.max(0, activeFx.from - blockStart) : 0;
+        const fadeTo = activeFx
+          ? Math.max(0, Math.min(block.value.length, activeFx.to - blockStart))
+          : 0;
+        let hasFade = false;
+        if (activeFx) {
+          hasFade =
+            activeFx.to > activeFx.from &&
+            fadeTo > fadeFrom &&
+            blockEnd > activeFx.from &&
+            blockStart < activeFx.to;
+        }
+
+        if (!hasFade) {
+          return (
+            <p className="message-text" key={`text-${index}`}>
+              <MessageInlineFlow onOpenFile={onOpenFile} text={block.value} />
+            </p>
+          );
+        }
+
+        const stablePrefix = block.value.slice(0, fadeFrom);
+        const freshText = block.value.slice(fadeFrom, fadeTo);
+        const trailingSuffix = block.value.slice(fadeTo);
+
         return (
-          <p className="message-text" key={`text-${index}`}>
-            <MessageInlineFlow onOpenFile={onOpenFile} text={block.value} />
+          <p
+            className="message-text"
+            key={`text-${index}`}
+          >
+            {stablePrefix ? (
+              <MessageInlineFlow
+                onOpenFile={onOpenFile}
+                text={stablePrefix}
+              />
+            ) : null}
+            {freshText ? (
+              <span
+                className="message-text-tail"
+                key={`tail-${index}-${activeFx?.to ?? block.value.length}`}
+              >
+                <MessageInlineFlow onOpenFile={onOpenFile} text={freshText} />
+              </span>
+            ) : null}
+            {trailingSuffix ? (
+              <MessageInlineFlow
+                onOpenFile={onOpenFile}
+                text={trailingSuffix}
+              />
+            ) : null}
           </p>
         );
       })}
@@ -724,6 +793,7 @@ const ThreadItemView = memo(function ThreadItemView({
   turnStatus,
   threadTimeLabel,
   textVisible,
+  textFx,
   outputVisible,
   onCopy,
   onFork,
@@ -737,6 +807,7 @@ const ThreadItemView = memo(function ThreadItemView({
   turnStatus: Turn["status"];
   threadTimeLabel: string;
   textVisible?: number;
+  textFx?: TextStreamFx;
   outputVisible?: number;
   onCopy: (value: string) => void;
   onFork: () => void;
@@ -898,7 +969,13 @@ const ThreadItemView = memo(function ThreadItemView({
           <span className="mt">{turnStatus === "inProgress" ? "live" : turnStatus}</span>
         </div>
         <div className="mb">
-          {text ? <MessageTextFlow onOpenFile={onOpenFile} text={text} /> : null}
+          {text ? (
+            <MessageTextFlow
+              onOpenFile={onOpenFile}
+              text={text}
+              textFx={textFx}
+            />
+          ) : null}
           {streaming ? <div className="live-cursor" /> : null}
         </div>
         <div className="macts">
