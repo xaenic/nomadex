@@ -23,7 +23,16 @@ export type UserMessageDisplay = {
 export type UiLiveOverlay = {
   activityLabel: string;
   activityDetails: string[];
-  activityTone: "thinking" | "writing" | "command" | "editing" | "error";
+  activityTone:
+    | "thinking"
+    | "writing"
+    | "command"
+    | "editing"
+    | "tool"
+    | "agent"
+    | "search"
+    | "image"
+    | "error";
   statusText: string;
   reasoningText: string;
   errorText: string;
@@ -365,21 +374,12 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
   }
 
   const reversedItems = [...turn.items].reverse();
-  const runningCommand = reversedItems.find(
-    (item): item is Extract<ThreadItem, { type: "commandExecution" }> =>
-      item.type === "commandExecution" && item.status === "inProgress",
-  );
-  const agentMessage = reversedItems.find(
-    (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
-      item.type === "agentMessage",
-  );
-  const editingFiles = reversedItems.find(
-    (item): item is Extract<ThreadItem, { type: "fileChange" }> =>
-      item.type === "fileChange" && item.status === "inProgress",
-  );
   const reasoning = reversedItems.find(
     (item): item is Extract<ThreadItem, { type: "reasoning" }> =>
       item.type === "reasoning",
+  );
+  const plan = reversedItems.find(
+    (item): item is Extract<ThreadItem, { type: "plan" }> => item.type === "plan",
   );
 
   let activityLabel = "Thinking";
@@ -391,27 +391,112 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     : "";
   let errorText = "";
 
-  if (runningCommand) {
-    activityLabel = "Running command";
-    activityTone = "command";
-    statusText = "Codex is running a command";
-    if (runningCommand.command.trim()) {
-      activityDetails.push(runningCommand.command.trim());
+  for (const item of reversedItems) {
+    if (item.type === "commandExecution" && item.status === "inProgress") {
+      activityLabel = "Running command";
+      activityTone = "command";
+      statusText = "Codex is running a command";
+      if (item.command.trim()) {
+        activityDetails.push(item.command.trim());
+      }
+      break;
     }
-  } else if (editingFiles) {
-    activityLabel = "Editing files";
-    activityTone = "editing";
-    statusText = "Codex is editing files";
-    activityDetails.push(
-      ...editingFiles.changes
-        .map((change) => change.path)
-        .filter((path) => Boolean(path) && path !== "Editing files")
-        .slice(0, 2),
-    );
-  } else if (agentMessage) {
-    activityLabel = "Writing response";
-    activityTone = "writing";
-    statusText = "Codex is writing the response";
+
+    if (item.type === "fileChange" && item.status === "inProgress") {
+      activityLabel = "Editing files";
+      activityTone = "editing";
+      statusText = "Codex is editing files";
+      activityDetails.push(
+        ...item.changes
+          .map((change) => change.path)
+          .filter((path) => Boolean(path) && path !== "Editing files")
+          .slice(0, 2),
+      );
+      break;
+    }
+
+    if (item.type === "mcpToolCall" && item.status === "inProgress") {
+      activityLabel = "Using MCP tool";
+      activityTone = "tool";
+      statusText = "Codex is using an MCP tool";
+      activityDetails.push([item.server, item.tool].filter(Boolean).join(" · "));
+      break;
+    }
+
+    if (item.type === "dynamicToolCall" && item.status === "inProgress") {
+      activityLabel = "Using tool";
+      activityTone = "tool";
+      statusText = "Codex is using a tool";
+      if (item.tool.trim()) {
+        activityDetails.push(item.tool.trim());
+      }
+      break;
+    }
+
+    if (item.type === "collabAgentToolCall" && item.status === "inProgress") {
+      activityLabel = "Calling subagent";
+      activityTone = "agent";
+      statusText = "Codex is working with a subagent";
+      if (item.tool.trim()) {
+        activityDetails.push(item.tool.trim());
+      }
+      break;
+    }
+
+    if (item.type === "webSearch" && item.query.trim()) {
+      activityLabel = "Searching web";
+      activityTone = "search";
+      statusText = "Codex is searching the web";
+      activityDetails.push(item.query.trim());
+      break;
+    }
+
+    if (item.type === "imageGeneration" && item.status !== "completed") {
+      activityLabel = "Generating image";
+      activityTone = "image";
+      statusText = "Codex is generating an image";
+      if (item.revisedPrompt?.trim()) {
+        activityDetails.push(item.revisedPrompt.trim());
+      }
+      break;
+    }
+
+    if (item.type === "agentMessage") {
+      activityLabel = "Writing response";
+      activityTone = "writing";
+      statusText = "Codex is writing the response";
+      break;
+    }
+
+    if (item.type === "plan") {
+      activityLabel = "Planning";
+      activityTone = "thinking";
+      statusText = "Codex is planning the next steps";
+      if (item.text.trim()) {
+        activityDetails.push(item.text.trim().split("\n")[0]);
+      }
+      break;
+    }
+
+    if (item.type === "reasoning") {
+      activityLabel = "Reasoning";
+      activityTone = "thinking";
+      statusText = "Codex is reasoning about the next step";
+      if (item.summary[0]?.trim()) {
+        activityDetails.push(item.summary[0].trim());
+      }
+      break;
+    }
+  }
+
+  if (
+    activityTone === "thinking" &&
+    activityLabel === "Thinking" &&
+    plan?.text.trim()
+  ) {
+    activityLabel = "Planning";
+    statusText = "Codex is planning the next steps";
+    activityDetails.push(plan.text.trim().split("\n")[0]);
   }
 
   if (turn.error && typeof turn.error === "object" && "message" in turn.error) {
@@ -422,7 +507,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
 
   return {
     activityLabel,
-    activityDetails,
+    activityDetails: activityDetails.filter(Boolean),
     activityTone,
     statusText,
     reasoningText,

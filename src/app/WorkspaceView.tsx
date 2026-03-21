@@ -18,7 +18,6 @@ import {
   parseMessageBlocks,
   toBrowseUrl,
   toRenderableImageUrl,
-  type UiLiveOverlay,
 } from "./codexUiBridge";
 import type {
   DashboardData,
@@ -565,50 +564,6 @@ const commandStatusTone = (
   return "err";
 };
 
-export const LiveStatusDock = memo(function LiveStatusDock({
-  overlay,
-  pendingApprovalsCount,
-  queuedCount,
-}: {
-  overlay: UiLiveOverlay | null;
-  pendingApprovalsCount: number;
-  queuedCount: number;
-}) {
-  if (!overlay && pendingApprovalsCount === 0) {
-    return null;
-  }
-
-  const tone = overlay?.errorText
-    ? "error"
-    : pendingApprovalsCount > 0
-      ? "approval"
-      : overlay?.activityTone ?? "thinking";
-  const title = pendingApprovalsCount > 0
-    ? "Waiting for approval"
-    : overlay?.statusText ?? "Codex is active";
-  const detail = overlay?.activityDetails[0] ?? null;
-
-  return (
-    <div className={clsx("live-status-dock", tone)}>
-      <div className="live-status-leading">
-        <span className={clsx("live-status-dot", tone)} aria-hidden="true" />
-        <div className="live-status-copy">
-          <div className="live-status-title">{title}</div>
-        </div>
-      </div>
-      <div className="live-status-meta">
-        {detail ? <code className="live-status-pill">{detail}</code> : null}
-        {pendingApprovalsCount > 0 ? (
-          <span className="live-status-pill">{pendingApprovalsCount} approval{pendingApprovalsCount > 1 ? "s" : ""}</span>
-        ) : null}
-        {queuedCount > 0 ? (
-          <span className="live-status-pill">{queuedCount} queued</span>
-        ) : null}
-      </div>
-    </div>
-  );
-});
-
 const TurnErrorCard = memo(function TurnErrorCard({
   status,
   text,
@@ -841,7 +796,10 @@ const ThreadItemView = memo(function ThreadItemView({
     );
 
     return (
-      <div className="msg user" onContextMenu={(event) => onContext(event, item)}>
+      <div
+        className="msg user"
+        onContextMenu={(event) => onContext(event, item)}
+      >
         <div className="mb">
           {display.images.length > 0 ? (
             <div className="message-image-list">
@@ -930,7 +888,10 @@ const ThreadItemView = memo(function ThreadItemView({
       typeof textVisible === "number" && textVisible < item.text.length;
 
     return (
-      <div className="msg" onContextMenu={(event) => onContext(event, item)}>
+      <div
+        className="msg assistant"
+        onContextMenu={(event) => onContext(event, item)}
+      >
         <div className="mh">
           <div className="mav a">⬡</div>
           <span className="mn">Codex</span>

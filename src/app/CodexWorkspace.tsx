@@ -19,6 +19,7 @@ import clsx from "clsx";
 import type { ThreadItem, Turn } from "../protocol/v2";
 import { CodexLiveRuntime } from "./codexLive";
 import { deriveLiveOverlay, toBrowseUrl } from "./codexUiBridge";
+import { LiveStatusInline } from "./LiveStatusInline";
 import {
   createBlankThreadRecord,
   createFallbackDashboardData,
@@ -91,7 +92,6 @@ import {
   DiffReviewPage,
   DiffPatchViewer,
   FileEditorPreview,
-  LiveStatusDock,
   ProjectFolderPickerModal,
   QueuedMessagesStrip,
 } from "./WorkspaceView";
@@ -3479,6 +3479,11 @@ export function CodexWorkspacePage() {
                   onSlash={triggerSlash}
                   streamVisible={streamVisible}
                 />
+                <LiveStatusInline
+                  overlay={liveOverlay}
+                  pendingApprovalsCount={pendingApprovalsCount}
+                  queuedCount={activeQueuedMessages.length}
+                />
                 <div aria-hidden="true" ref={chatEndRef} />
               </div>
 
@@ -3522,12 +3527,6 @@ export function CodexWorkspacePage() {
                     onSteer={steerQueuedMessage}
                   />
                 ) : null}
-
-                <LiveStatusDock
-                  overlay={liveOverlay}
-                  pendingApprovalsCount={pendingApprovalsCount}
-                  queuedCount={activeQueuedMessages.length}
-                />
 
                 <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
                   <div id="toolbar">
