@@ -45,7 +45,6 @@ import {
   deriveLocalDirectoryCatalog,
   diffEntryId,
   diffKindLabel,
-  formatClock,
   formatUploadSize,
   getStreamTarget,
   getUserText,
@@ -144,6 +143,13 @@ const waitFor = (ms: number) =>
     window.setTimeout(resolve, ms);
   });
 
+const waitForNextPaint = () =>
+  new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+
 const errorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -198,7 +204,9 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
     runtimeRef.current = runtime;
 
     const unsubscribe = runtime.subscribe((next) => {
-      setSnapshot(next);
+      startTransition(() => {
+        setSnapshot(next);
+      });
     });
 
     const reconnect = () => {
@@ -1149,7 +1157,6 @@ export function CodexWorkspacePage() {
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
-  const [sessionClockSeed] = useState(() => Math.floor(Date.now() / 1000));
   const [composerSyncKey, setComposerSyncKey] = useState(0);
 
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -1209,9 +1216,6 @@ export function CodexWorkspacePage() {
     [activeThread?.approvals],
   );
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
-  const activeThreadTimeLabel = activeThread
-    ? formatClock(activeThread.thread.updatedAt)
-    : formatClock(sessionClockSeed);
   const activeExplorerPath = useMemo(() => {
     const cwd = activeThread?.thread.cwd ?? null;
     if (!cwd) {
@@ -1762,8 +1766,10 @@ export function CodexWorkspacePage() {
         }
 
         streamVisibleRef.current = nextVisible;
-        setStreamVisible(nextVisible);
-        setStreamTextFx(nextTextFx);
+        startTransition(() => {
+          setStreamVisible(nextVisible);
+          setStreamTextFx(nextTextFx);
+        });
       });
 
       return () => {
@@ -1787,9 +1793,13 @@ export function CodexWorkspacePage() {
 
       if (changed) {
         streamVisibleRef.current = nextVisible;
-        setStreamVisible(nextVisible);
+        startTransition(() => {
+          setStreamVisible(nextVisible);
+        });
       }
-      setStreamTextFx({});
+      startTransition(() => {
+        setStreamTextFx({});
+      });
     };
 
     const frame = window.requestAnimationFrame(syncVisible);
@@ -1825,8 +1835,10 @@ export function CodexWorkspacePage() {
       }
 
       streamVisibleRef.current = nextVisible;
-      setStreamVisible(nextVisible);
-      setStreamTextFx(nextTextFx);
+      startTransition(() => {
+        setStreamVisible(nextVisible);
+        setStreamTextFx(nextTextFx);
+      });
     }, 24);
 
     return () => {
@@ -1844,22 +1856,18 @@ export function CodexWorkspacePage() {
       }
     };
 
-    const frameA = window.requestAnimationFrame(run);
-    const frameB = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(run);
-    });
-    const timeoutA = window.setTimeout(run, extraDelay ? 90 : 40);
-    const timeoutB = window.setTimeout(run, extraDelay ? 220 : 120);
+    const frame = window.requestAnimationFrame(run);
+    const timeout = extraDelay ? window.setTimeout(run, 90) : null;
 
     return () => {
-      window.cancelAnimationFrame(frameA);
-      window.cancelAnimationFrame(frameB);
-      window.clearTimeout(timeoutA);
-      window.clearTimeout(timeoutB);
+      window.cancelAnimationFrame(frame);
+      if (timeout !== null) {
+        window.clearTimeout(timeout);
+      }
     };
   }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!chatRef.current) {
       return;
     }
@@ -1867,7 +1875,7 @@ export function CodexWorkspacePage() {
     return scrollChatToBottom();
   }, [activeTurns, scrollChatToBottom, streamVisible]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!activeThreadId) {
       hydratedScrollKeyRef.current = null;
       return;
@@ -2632,6 +2640,13 @@ export function CodexWorkspacePage() {
     const composerValue = rawValue ?? textareaRef.current?.value ?? composer;
     const prompt = composerValue.trim();
     const promptMentions = selectedMentions.filter((mention) => composerHasMentionToken(composerValue, mention));
+    const composerDraft = {
+      composerValue,
+      mentions: [...selectedMentions],
+      skills: [...selectedSkills],
+      files: [...selectedFiles],
+      images: [...selectedImages],
+    };
     if (
       !prompt &&
       promptMentions.length === 0 &&
@@ -2671,6 +2686,7 @@ export function CodexWorkspacePage() {
           ? "review"
           : "chat";
       const nextPrompt = toolbarShell && prompt ? `! ${prompt}` : prompt;
+      const canClearImmediately = selectedImages.length === 0;
 
       if (activeTurn) {
         enqueueMessage(threadId, {
@@ -2686,6 +2702,11 @@ export function CodexWorkspacePage() {
         return;
       }
 
+      if (canClearImmediately) {
+        resetComposer();
+        await waitForNextPaint();
+      }
+
       await actions.sendComposer({
         threadId,
         mode,
@@ -2697,8 +2718,21 @@ export function CodexWorkspacePage() {
         settings: effectiveComposerSettings,
       });
 
-      resetComposer();
+      if (!canClearImmediately) {
+        resetComposer();
+      }
     } catch (error) {
+      if (composerDraft.images.length === 0 && !getComposerInputValue().trim()) {
+        setComposer(composerDraft.composerValue);
+        setComposerSyncKey((current) => current + 1);
+        setSelectedMentions(composerDraft.mentions);
+        setSelectedSkills(composerDraft.skills);
+        setSelectedFiles(composerDraft.files);
+        setQuickMode(null);
+        setQuickQuery("");
+        setQuickIndex(0);
+      }
+
       const message = errorMessage(
         error,
         snapshot.transport.error ?? "Failed to send message",
@@ -3507,7 +3541,6 @@ export function CodexWorkspacePage() {
                   activeThreadLabel={activeThreadLabel}
                   activeTurns={activeTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
-                  activeThreadTimeLabel={activeThreadTimeLabel}
                   streamTextFx={streamTextFx}
                   onContext={openItemContextMenu}
                   onCopy={handleCopy}

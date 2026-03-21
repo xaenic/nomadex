@@ -451,7 +451,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeThreadLabel,
   activeTurns,
   existingThreadHistoryPending,
-  activeThreadTimeLabel,
   streamVisible,
   streamTextFx,
   onReview,
@@ -468,7 +467,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeThreadLabel: string;
   activeTurns: Array<Turn>;
   existingThreadHistoryPending: boolean;
-  activeThreadTimeLabel: string;
   streamVisible: Record<string, number>;
   streamTextFx: Record<string, TextStreamFx>;
   onReview: (diffId?: string) => void;
@@ -505,7 +503,6 @@ export const ChatTranscript = memo(function ChatTranscript({
                 item={item}
                 key={item.id}
                 turnStatus={turn.status}
-                threadTimeLabel={activeThreadTimeLabel}
                 textVisible={
                   item.type === "agentMessage"
                     ? streamVisible[`${item.id}:text`]
@@ -791,7 +788,6 @@ const MessageTextFlow = memo(function MessageTextFlow({
 const ThreadItemView = memo(function ThreadItemView({
   item,
   turnStatus,
-  threadTimeLabel,
   textVisible,
   textFx,
   outputVisible,
@@ -805,7 +801,6 @@ const ThreadItemView = memo(function ThreadItemView({
 }: {
   item: ThreadItem;
   turnStatus: Turn["status"];
-  threadTimeLabel: string;
   textVisible?: number;
   textFx?: TextStreamFx;
   outputVisible?: number;
@@ -819,6 +814,14 @@ const ThreadItemView = memo(function ThreadItemView({
 }) {
   const [commandExpanded, setCommandExpanded] = useState(
     item.type === "commandExecution" ? item.status === "inProgress" : false,
+  );
+  const [userMessageTimeLabel] = useState(() =>
+    item.type === "userMessage"
+      ? new Intl.DateTimeFormat([], {
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date())
+      : "",
   );
   const previousCommandStatusRef = useRef<string | null>(
     item.type === "commandExecution" ? item.status : null,
@@ -936,7 +939,7 @@ const ThreadItemView = memo(function ThreadItemView({
             </div>
           ) : null}
           {display.text ? <MessageTextFlow onOpenFile={onOpenFile} text={display.text} /> : null}
-          <div className="msg-time">{threadTimeLabel}</div>
+          <div className="msg-time">{userMessageTimeLabel}</div>
         </div>
         <div className="macts">
           <button className="mact" type="button" onClick={() => onCopy(display.text)}>

@@ -88,8 +88,18 @@ export const isDesktopViewport = () =>
 export const sortThreads = (threads: Array<ThreadRecord>) =>
   [...threads].sort((left, right) => right.thread.updatedAt - left.thread.updatedAt);
 
+const turnSortWeight = (id: string) =>
+  id.startsWith("optimistic-turn:") ? 1 : 0;
+
 export const sortTurnsById = (turns: Array<Turn>) =>
-  [...turns].sort((left, right) => left.id.localeCompare(right.id));
+  [...turns].sort((left, right) => {
+    const weightDiff = turnSortWeight(left.id) - turnSortWeight(right.id);
+    if (weightDiff !== 0) {
+      return weightDiff;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
 
 export const approvalModeFromSettings = (
   settings: SettingsState,

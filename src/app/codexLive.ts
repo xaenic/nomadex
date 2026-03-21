@@ -477,7 +477,18 @@ const stopStreamsForItem = (snapshot: DashboardData, itemId: string) => {
   );
 };
 
-const sortTurnsById = (turns: Array<Turn>) => [...turns].sort((left, right) => left.id.localeCompare(right.id));
+const turnSortWeight = (id: string) =>
+  id.startsWith(OPTIMISTIC_TURN_PREFIX) ? 1 : 0;
+
+const sortTurnsById = (turns: Array<Turn>) =>
+  [...turns].sort((left, right) => {
+    const weightDiff = turnSortWeight(left.id) - turnSortWeight(right.id);
+    if (weightDiff !== 0) {
+      return weightDiff;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
 
 const ensureTurnExists = (turns: Array<Turn>, turnId: string, status: Turn["status"] = "inProgress") => {
   if (turns.some((turn) => turn.id === turnId)) {
@@ -683,6 +694,37 @@ const toTurnInputs = (text: string, mentions: Array<MentionAttachment>, skills: 
 
   return inputs;
 };
+
+const toOptimisticFileMentions = (
+  cwd: string,
+  files: Array<ComposerFile>,
+): Array<MentionAttachment> =>
+  files.map((file) => ({
+    id: `optimistic-file:${file.id}`,
+    name: file.name,
+    path: `${cwd}/.codex-web/uploads/files/${file.name}`,
+    kind: "file",
+  }));
+
+const cloneDashboardSnapshot = (snapshot: DashboardData): DashboardData => ({
+  ...snapshot,
+  threads: [...snapshot.threads],
+  models: [...snapshot.models],
+  collaborationModes: [...snapshot.collaborationModes],
+  settings: { ...snapshot.settings },
+  installedSkills: [...snapshot.installedSkills],
+  remoteSkills: [...snapshot.remoteSkills],
+  mcpServers: [...snapshot.mcpServers],
+  featureFlags: [...snapshot.featureFlags],
+  account: {
+    ...snapshot.account,
+    usageWindows: [...snapshot.account.usageWindows],
+  },
+  mentionCatalog: [...snapshot.mentionCatalog],
+  directoryCatalog: [...snapshot.directoryCatalog],
+  streams: [...snapshot.streams],
+  transport: { ...snapshot.transport },
+});
 
 const settingsToCollaborationMode = (settings: SettingsState): CollaborationMode => ({
   mode: settings.collaborationMode,
@@ -952,7 +994,7 @@ export class CodexLiveRuntime {
 
   subscribe(listener: EventListener) {
     this.listeners.add(listener);
-    listener(structuredClone(this.snapshot));
+    listener(cloneDashboardSnapshot(this.snapshot));
     return () => {
       this.listeners.delete(listener);
     };
@@ -994,7 +1036,7 @@ export class CodexLiveRuntime {
   private flushEmit = () => {
     this.clearScheduledEmit();
     this.emitQueued = false;
-    const next = structuredClone(this.snapshot);
+    const next = cloneDashboardSnapshot(this.snapshot);
     this.listeners.forEach((listener) => listener(next));
   };
 
@@ -1402,9 +1444,6 @@ export class CodexLiveRuntime {
       return;
     }
 
-    const uploadedFileMentions = await this.uploadFiles(thread.cwd, args.files);
-    const uploadedImages = await this.uploadImages(thread.cwd, args.images);
-
     if (args.mode === "review") {
       const response = await this.request<ReviewStartResponse>("review/start", {
         threadId: args.threadId,
@@ -1434,12 +1473,16 @@ export class CodexLiveRuntime {
       return;
     }
 
-    const combinedMentions = [...args.mentions, ...uploadedFileMentions];
-    const inputs = toTurnInputs(args.prompt, combinedMentions, args.skills, uploadedImages);
+    const optimisticInputs = toTurnInputs(
+      args.prompt,
+      [...args.mentions, ...toOptimisticFileMentions(thread.cwd, args.files)],
+      args.skills,
+      args.images.map((image) => image.url),
+    );
     const optimisticUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
       type: "userMessage",
       id: `${OPTIMISTIC_USER_MESSAGE_PREFIX}${args.threadId}:${Date.now().toString(36)}`,
-      content: inputs,
+      content: optimisticInputs,
     };
     const optimisticTurnId = `${OPTIMISTIC_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
 
@@ -1465,6 +1508,15 @@ export class CodexLiveRuntime {
     });
 
     try {
+      const uploadedFileMentions = await this.uploadFiles(thread.cwd, args.files);
+      const uploadedImages = await this.uploadImages(thread.cwd, args.images);
+      const combinedMentions = [...args.mentions, ...uploadedFileMentions];
+      const inputs = toTurnInputs(
+        args.prompt,
+        combinedMentions,
+        args.skills,
+        uploadedImages,
+      );
       const response = await this.request<TurnStartResponse>("turn/start", {
         threadId: args.threadId,
         input: inputs,
