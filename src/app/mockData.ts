@@ -1328,7 +1328,12 @@ export const createMockDemoDashboardData = () =>
     },
   });
 
-export const createBlankThreadRecord = (threadId: string, title: string, currentSettings: SettingsState): ThreadRecord => ({
+export const createBlankThreadRecord = (
+  threadId: string,
+  title: string,
+  currentSettings: SettingsState,
+  cwd = WORKSPACE_CWD,
+): ThreadRecord => ({
   thread: {
     id: threadId,
     preview: title,
@@ -1338,7 +1343,7 @@ export const createBlankThreadRecord = (threadId: string, title: string, current
     updatedAt: Math.floor(Date.now() / 1000),
     status: { type: "idle" },
     path: null,
-    cwd: WORKSPACE_CWD,
+    cwd,
     cliVersion: "0.115.0",
     source: "appServer",
     agentNickname: null,

@@ -88,9 +88,11 @@ import {
   ChatTranscript,
   ComposerTextarea,
   ConfigPanel,
+  DiffReviewPage,
   DiffPatchViewer,
   FileEditorPreview,
   LiveStatusDock,
+  ProjectFolderPickerModal,
   QueuedMessagesStrip,
 } from "./WorkspaceView";
 
@@ -119,6 +121,7 @@ type CommandPaletteGroup = {
 
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
+const SESSION_PROJECT_ROOT = "/home/allan";
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -134,6 +137,33 @@ const copyText = async (value: string) => {
   textarea.select();
   document.execCommand("copy");
   textarea.remove();
+};
+
+const waitFor = (ms: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+const errorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.trim()
+  ) {
+    return error.message;
+  }
+
+  return fallback;
 };
 
 const useWorkspace = () => {
@@ -207,17 +237,58 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
   }, []);
 
   const withLiveFallback = useCallback(
-    async <T,>(live: () => Promise<T>, fallback: () => Promise<T> | T) => {
+    async <T,>(
+      live: () => Promise<T>,
+      fallback: () => Promise<T> | T,
+      options?: {
+        preferLive?: boolean;
+        fallbackOnLiveError?: boolean;
+      },
+    ) => {
       const current = snapshotRef.current;
       const runtime = runtimeRef.current;
-      const liveReady = runtime && current.transport.mode === "live" && current.transport.status === "connected";
+      const shouldAttemptLive =
+        Boolean(runtime) &&
+        (options?.preferLive ||
+          (current.transport.mode === "live" &&
+            current.transport.status === "connected"));
 
-      if (liveReady) {
-        try {
-          return await live();
-        } catch {
-          return await fallback();
+      if (!runtime && options?.preferLive) {
+        throw new Error("Codex runtime is still starting. Try again.");
+      }
+
+      if (runtime && shouldAttemptLive) {
+        const attempts = options?.preferLive ? 3 : 1;
+        let lastError: unknown = null;
+
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          try {
+            const next = snapshotRef.current;
+            if (
+              next.transport.mode !== "live" ||
+              next.transport.status !== "connected"
+            ) {
+              await runtime.connect();
+            }
+
+            return await live();
+          } catch (error) {
+            lastError = error;
+
+            if (attempt < attempts - 1) {
+              await waitFor(320 * (attempt + 1));
+              continue;
+            }
+
+            if (options?.fallbackOnLiveError ?? true) {
+              return await fallback();
+            }
+
+            throw error;
+          }
         }
+
+        throw lastError;
       }
 
       return await fallback();
@@ -226,9 +297,20 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
   );
 
   const createThreadLocal = useCallback(
-    async (settings: SettingsState, title?: string) => {
+    async (
+      settings: SettingsState,
+      options?: {
+        title?: string;
+        cwd?: string;
+      },
+    ) => {
       const threadId = nextId("thread");
-      const record = createBlankThreadRecord(threadId, title ?? "New Session", settings);
+      const record = createBlankThreadRecord(
+        threadId,
+        options?.title ?? "New Session",
+        settings,
+        options?.cwd,
+      );
 
       mutateLocal((draft) => {
         draft.threads = sortThreads([record, ...draft.threads.filter((entry) => entry.thread.id !== threadId)]);
@@ -398,13 +480,19 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
 
   const actions = useMemo<WorkspaceActions>(
     () => ({
-      createThread: async (settings, title) =>
+      createThread: async (settings, options) =>
         await withLiveFallback(
           async () => {
             const runtime = runtimeRef.current!;
-            return await runtime.createThread(settings);
+            return await runtime.createThread(settings, {
+              cwd: options?.cwd,
+            });
           },
-          async () => await createThreadLocal(settings, title),
+          async () => await createThreadLocal(settings, options),
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
         ),
       resumeThread: async (threadId) =>
         await withLiveFallback(
@@ -414,6 +502,10 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
             await runtime.ensureThreadLoaded(threadId).catch(() => undefined);
           },
           async () => undefined,
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
         ),
       interruptTurn: async (threadId) =>
         await withLiveFallback(
@@ -469,6 +561,10 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
           },
           async () => {
             await sendComposerLocal(args);
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       applySteer: async (args) =>
@@ -529,6 +625,10 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
             });
 
             return applied;
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       searchMentions: async (cwd, query) =>
@@ -1000,12 +1100,32 @@ export function CodexWorkspacePage() {
         return "chat";
     }
   }, [route.section, routeSearch]);
+  const reviewDiffId =
+    route.section === "review" ? routeSearch.get("diff") : null;
+  const reviewSource = useMemo<RouteSection>(() => {
+    const source = route.section === "review" ? routeSearch.get("from") : null;
+    switch (source) {
+      case "ops":
+      case "agents":
+      case "skills":
+      case "mcp":
+      case "settings":
+      case "chat":
+        return source;
+      default:
+        return "chat";
+    }
+  }, [route.section, routeSearch]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(isDesktopViewport());
   const [panelTab, setPanelTab] = useState<PanelTab>(routePanel ?? "files");
   const [commandOpen, setCommandOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectPickerStarting, setProjectPickerStarting] = useState(false);
+  const [projectPickerPath, setProjectPickerPath] =
+    useState(SESSION_PROJECT_ROOT);
   const [composer, setComposer] = useState("");
   const [composerMode, setComposerMode] = useState<WorkspaceMode>("chat");
   const [toolbarAuto, setToolbarAuto] = useState(false);
@@ -1192,6 +1312,56 @@ export function CodexWorkspacePage() {
       return findingPath === targetPath || findingPath.endsWith(`/${targetPath}`);
     });
   }, [activeThread, selectedDiffEntry]);
+  const projectPickerEntries = useMemo(
+    () =>
+      snapshot.directoryCatalogRoot === projectPickerPath
+        ? snapshot.directoryCatalog.filter(
+            (entry) => entry.kind === "directory",
+          )
+        : [],
+    [projectPickerPath, snapshot.directoryCatalog, snapshot.directoryCatalogRoot],
+  );
+  const projectPickerParentPath = useMemo(() => {
+    if (projectPickerPath === SESSION_PROJECT_ROOT) {
+      return null;
+    }
+
+    const lastSlashIndex = projectPickerPath.lastIndexOf("/");
+    if (lastSlashIndex <= 0) {
+      return SESSION_PROJECT_ROOT;
+    }
+
+    return projectPickerPath.slice(0, lastSlashIndex) || SESSION_PROJECT_ROOT;
+  }, [projectPickerPath]);
+  const projectPickerBreadcrumbs = useMemo(() => {
+    const normalizedRoot = SESSION_PROJECT_ROOT.replace(/\/+$/u, "");
+    const normalizedPath = projectPickerPath.replace(/\/+$/u, "");
+    const relative =
+      normalizedPath === normalizedRoot
+        ? ""
+        : normalizedPath.slice(normalizedRoot.length).replace(/^\/+/u, "");
+
+    return [
+      {
+        label:
+          normalizedRoot.split("/").filter(Boolean).pop() ?? normalizedRoot,
+        path: normalizedRoot,
+      },
+      ...relative.split("/").filter(Boolean).reduce<
+        Array<{
+          label: string;
+          path: string;
+        }>
+      >((parts, segment) => {
+        const previous = parts.at(-1)?.path ?? normalizedRoot;
+        parts.push({
+          label: segment,
+          path: `${previous.replace(/\/+$/u, "")}/${segment}`,
+        });
+        return parts;
+      }, []),
+    ];
+  }, [projectPickerPath]);
 
   const agentCalls = useMemo(
     () =>
@@ -1340,6 +1510,21 @@ export function CodexWorkspacePage() {
   ]);
 
   useEffect(() => {
+    if (route.section !== "review") {
+      return;
+    }
+
+    const targetDiffId =
+      reviewDiffId && diffEntries.some((entry) => entry.id === reviewDiffId)
+        ? reviewDiffId
+        : diffEntries[0]?.id ?? null;
+
+    setSelectedDiffEntryId((current) =>
+      current === targetDiffId ? current : targetDiffId,
+    );
+  }, [diffEntries, reviewDiffId, route.section]);
+
+  useEffect(() => {
     if (!selectedDiffEntryId || !diffEntries.some((entry) => entry.id === selectedDiffEntryId)) {
       const frame = window.requestAnimationFrame(() => {
         setSelectedDiffEntryId(diffEntries[0]?.id ?? null);
@@ -1413,7 +1598,7 @@ export function CodexWorkspacePage() {
   }, [actions, effectiveComposerSettings, queuedByThreadId, snapshot.threads]);
 
   useEffect(() => {
-    if (route.section === "editor") {
+    if (route.section === "editor" || route.section === "review") {
       const frame = window.requestAnimationFrame(() => {
         setPanelOpen(false);
       });
@@ -1480,6 +1665,14 @@ export function CodexWorkspacePage() {
 
     void actions.loadDirectory(activeExplorerPath);
   }, [actions, activeExplorerPath]);
+
+  useEffect(() => {
+    if (!projectPickerOpen) {
+      return;
+    }
+
+    void actions.loadDirectory(projectPickerPath);
+  }, [actions, projectPickerOpen, projectPickerPath]);
 
   useEffect(() => {
     if (route.section !== "editor" || !editorPath) {
@@ -1835,12 +2028,30 @@ export function CodexWorkspacePage() {
     [activeThreadId, navigateToThread],
   );
 
-  const reviewDiff = useCallback((diffId?: string) => {
-    if (diffId) {
-      setSelectedDiffEntryId(diffId);
-    }
-    openPanel("diff");
-  }, [openPanel]);
+  const reviewDiff = useCallback(
+    (diffId?: string, source: RouteSection = "chat") => {
+      if (!activeThreadId) {
+        return;
+      }
+
+      const nextDiffId =
+        diffId ?? selectedDiffEntry?.id ?? diffEntries[0]?.id ?? null;
+
+      if (nextDiffId) {
+        setSelectedDiffEntryId(nextDiffId);
+      }
+
+      void navigate({
+        to: "/threads/$threadId/$section",
+        params: { threadId: activeThreadId, section: "review" } as never,
+        search: {
+          diff: nextDiffId ?? undefined,
+          from: source,
+        } as never,
+      });
+    },
+    [activeThreadId, diffEntries, navigate, selectedDiffEntry],
+  );
 
   const closePanel = useCallback(() => {
     setPanelOpen(false);
@@ -1849,15 +2060,78 @@ export function CodexWorkspacePage() {
     }
   }, [activeThreadId, navigateToThread]);
 
-  const createSession = useCallback(async () => {
-    const threadId = await actions.createThread(effectiveComposerSettings, "New Session");
-    setTabIds((current) => [threadId, ...current.filter((entry) => entry !== threadId)].slice(0, 6));
-    navigateToThread(threadId, "chat");
+  const createSessionInCwd = useCallback(
+    async (cwd: string) => {
+      if (projectPickerStarting) {
+        return null;
+      }
+
+      setProjectPickerStarting(true);
+
+      try {
+        const threadId = await actions.createThread(effectiveComposerSettings, {
+          title: "New Session",
+          cwd,
+        });
+
+        setProjectPickerPath(cwd);
+        setTabIds((current) =>
+          [threadId, ...current.filter((entry) => entry !== threadId)].slice(
+            0,
+            6,
+          ),
+        );
+        navigateToThread(threadId, "chat");
+        setSidebarOpen(false);
+        setPanelOpen(isDesktopViewport());
+        resetComposer();
+        pushToast(`New session — ${cwd}`, "ok");
+        return threadId;
+      } catch (error) {
+        const message = errorMessage(
+          error,
+          snapshot.transport.error ?? "Failed to start session",
+        );
+        pushToast(message, "err");
+        return null;
+      } finally {
+        setProjectPickerStarting(false);
+      }
+    },
+    [
+      actions,
+      effectiveComposerSettings,
+      navigateToThread,
+      projectPickerStarting,
+      pushToast,
+      resetComposer,
+      snapshot.transport.error,
+    ],
+  );
+
+  const openProjectPicker = useCallback(() => {
+    setProjectPickerPath((current) => {
+      if (current && current.trim().length > 0) {
+        return current;
+      }
+
+      return activeThread?.thread.cwd ?? SESSION_PROJECT_ROOT;
+    });
+    setProjectPickerOpen(true);
     setSidebarOpen(false);
-    setPanelOpen(isDesktopViewport());
-    resetComposer();
-    pushToast("New session — /new", "ok");
-  }, [actions, effectiveComposerSettings, navigateToThread, pushToast, resetComposer]);
+    setCommandOpen(false);
+  }, [activeThread]);
+
+  const confirmProjectPicker = useCallback(async (cwd?: string) => {
+    const threadId = await createSessionInCwd(cwd ?? projectPickerPath);
+    if (threadId) {
+      setProjectPickerOpen(false);
+    }
+  }, [createSessionInCwd, projectPickerPath]);
+
+  const createSession = useCallback(async () => {
+    openProjectPicker();
+  }, [openProjectPicker]);
 
   const forkSession = useCallback(async () => {
     if (!activeThreadId) {
@@ -1926,6 +2200,7 @@ export function CodexWorkspacePage() {
       if (event.key === "Escape") {
         setCommandOpen(false);
         setModelPickerOpen(false);
+        setProjectPickerOpen(false);
         setContextMenu(null);
         closeQuickPicker();
       }
@@ -2322,47 +2597,69 @@ export function CodexWorkspacePage() {
       return;
     }
 
-    let threadId = activeThreadId;
-    if (!threadId) {
-      threadId = await actions.createThread(effectiveComposerSettings, "New Session");
-      setTabIds((current) => [threadId!, ...current.filter((entry) => entry !== threadId)].slice(0, 6));
-      navigateToThread(threadId, "chat");
-    }
+    try {
+      let threadId = activeThreadId;
+      const threadExists = threadId
+        ? snapshot.threads.some((entry) => entry.thread.id === threadId)
+        : false;
+      if (!threadId || !threadExists) {
+        threadId = await actions.createThread(effectiveComposerSettings, {
+          title: "New Session",
+          cwd: projectPickerPath,
+        });
+        setTabIds((current) =>
+          [threadId!, ...current.filter((entry) => entry !== threadId)].slice(
+            0,
+            6,
+          ),
+        );
+        navigateToThread(threadId, "chat");
+      }
 
-    if (prompt.startsWith("/")) {
-      await runSlash(prompt, true);
-      return;
-    }
+      if (prompt.startsWith("/")) {
+        await runSlash(prompt, true);
+        return;
+      }
 
-    const mode = composerMode === "review" || route.section === "review" ? "review" : "chat";
-    const nextPrompt = toolbarShell && prompt ? `! ${prompt}` : prompt;
+      const mode =
+        composerMode === "review" || route.section === "review"
+          ? "review"
+          : "chat";
+      const nextPrompt = toolbarShell && prompt ? `! ${prompt}` : prompt;
 
-    if (activeTurn) {
-      enqueueMessage(threadId, {
+      if (activeTurn) {
+        enqueueMessage(threadId, {
+          mode,
+          prompt: nextPrompt,
+          mentions: promptMentions,
+          skills: selectedSkills,
+          files: selectedFiles,
+          images: selectedImages,
+        });
+        resetComposer();
+        pushToast("Message queued", "ok");
+        return;
+      }
+
+      await actions.sendComposer({
+        threadId,
         mode,
         prompt: nextPrompt,
         mentions: promptMentions,
         skills: selectedSkills,
         files: selectedFiles,
         images: selectedImages,
+        settings: effectiveComposerSettings,
       });
+
       resetComposer();
-      pushToast("Message queued", "ok");
-      return;
+    } catch (error) {
+      const message = errorMessage(
+        error,
+        snapshot.transport.error ?? "Failed to send message",
+      );
+      pushToast(message, "err");
     }
-
-    await actions.sendComposer({
-      threadId,
-      mode,
-      prompt: nextPrompt,
-      mentions: promptMentions,
-      skills: selectedSkills,
-      files: selectedFiles,
-      images: selectedImages,
-      settings: effectiveComposerSettings,
-    });
-
-    resetComposer();
   }, [
     actions,
     activeThreadId,
@@ -2375,11 +2672,14 @@ export function CodexWorkspacePage() {
     resetComposer,
     route.section,
     runSlash,
+    snapshot.transport.error,
+    snapshot.threads,
     selectedMentions,
     selectedImages,
     selectedFiles,
     selectedSkills,
     effectiveComposerSettings,
+    projectPickerPath,
     toolbarShell,
   ]);
 
@@ -2594,6 +2894,20 @@ export function CodexWorkspacePage() {
 
     navigateToThread(activeThreadId, editorSource);
   }, [activeThreadId, editorSource, navigateToThread]);
+  const closeReview = useCallback(() => {
+    if (!activeThreadId) {
+      return;
+    }
+
+    if (reviewSource === "ops") {
+      setPanelTab("files");
+      setPanelOpen(true);
+      navigateToThread(activeThreadId, "ops");
+      return;
+    }
+
+    navigateToThread(activeThreadId, reviewSource);
+  }, [activeThreadId, navigateToThread, reviewSource]);
   const editorPreviewState = useMemo<FilePreviewState | null>(() => {
     if (route.section !== "editor" || !editorPath) {
       return null;
@@ -2626,12 +2940,11 @@ export function CodexWorkspacePage() {
         return;
       }
 
-      attachMention(entry);
       openThreadFile(entry.path, {
         source: "ops",
       });
     },
-    [attachMention, openThreadFile],
+    [openThreadFile],
   );
   const renderPanelBody = () => {
     if (!activeThread) {
@@ -2722,7 +3035,7 @@ export function CodexWorkspacePage() {
             );
           })}
           <div className="panel-meta">
-            <div>Tap a file to mention it and open the full editor. Tap folders to drill in.</div>
+            <div>Tap a file to open the full editor. Tap folders to drill in.</div>
             <div>Use <code>/mention filename</code> or type <code>@filename</code> in the composer.</div>
           </div>
         </div>
@@ -3132,6 +3445,15 @@ export function CodexWorkspacePage() {
                 <div className="empty-panel">No file selected.</div>
               )}
             </div>
+          ) : route.section === "review" ? (
+            <DiffReviewPage
+              backLabel={reviewSource === "ops" ? "Back to Files" : "Back to Chat"}
+              diffEntries={diffEntries}
+              findings={selectedDiffFindings}
+              onBack={closeReview}
+              onSelectEntry={(entryId) => reviewDiff(entryId, reviewSource)}
+              selectedEntryId={selectedDiffEntryId}
+            />
           ) : (
             <>
               <div id="chat" ref={chatRef}>
@@ -3153,7 +3475,7 @@ export function CodexWorkspacePage() {
                     })
                   }
                   onPlan={triggerPlan}
-                  onReview={reviewDiff}
+                  onReview={(diffId) => reviewDiff(diffId)}
                   onSlash={triggerSlash}
                   streamVisible={streamVisible}
                 />
@@ -3317,7 +3639,7 @@ export function CodexWorkspacePage() {
           )}
         </section>
 
-        <aside id="rp" className={clsx(panelOpen && route.section !== "editor" && "open")}>
+        <aside id="rp" className={clsx(panelOpen && route.section !== "editor" && route.section !== "review" && "open")}>
           <div className="rph">
             <span className="rpt" id="rp-title">
               {PANEL_TITLE[panelTab]}
@@ -3332,7 +3654,17 @@ export function CodexWorkspacePage() {
                 className={clsx("rptab", panelTab === tab && "active")}
                 key={tab}
                 type="button"
-                onClick={() => setPanelTab(tab)}
+                onClick={() => {
+                  if (tab === "diff") {
+                    reviewDiff(
+                      selectedDiffEntry?.id ?? diffEntries[0]?.id,
+                      route.section === "ops" ? "ops" : "chat",
+                    );
+                    return;
+                  }
+
+                  setPanelTab(tab);
+                }}
               >
                 {PANEL_TITLE[tab]}
               </button>
@@ -3386,6 +3718,23 @@ export function CodexWorkspacePage() {
             </div>
           ))}
         </div>
+      ) : null}
+
+      {projectPickerOpen ? (
+        <ProjectFolderPickerModal
+          activePath={projectPickerPath}
+          breadcrumbs={projectPickerBreadcrumbs}
+          busy={projectPickerStarting}
+          entries={projectPickerEntries}
+          loading={snapshot.directoryCatalogRoot !== projectPickerPath}
+          onClose={() => setProjectPickerOpen(false)}
+          onNavigate={setProjectPickerPath}
+          onPick={(path) => {
+            setProjectPickerPath(path);
+            void confirmProjectPicker(path);
+          }}
+          parentPath={projectPickerParentPath}
+        />
       ) : null}
 
       {commandOpen ? (

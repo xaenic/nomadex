@@ -96,6 +96,34 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 
 const safeString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "data" in error &&
+    error.data &&
+    typeof error.data === "object" &&
+    "message" in error.data &&
+    typeof error.data.message === "string"
+  ) {
+    return error.data.message;
+  }
+
+  return "";
+};
+
+const isFreshThreadUnavailableError = (error: unknown) => {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("no rollout found for thread id") ||
+    message.includes("not materialized yet")
+  );
+};
+
 const mapFeatureFlag = (feature: ExperimentalFeature): UiFeatureFlag => ({
   name: feature.name,
   stage: feature.stage,
@@ -673,11 +701,15 @@ const toRuntimeStatus = (mode: DashboardData["transport"]["mode"], status: Dashb
 });
 
 const OPTIMISTIC_USER_MESSAGE_PREFIX = "optimistic-user:";
+const OPTIMISTIC_TURN_PREFIX = "optimistic-turn:";
 const LIVE_FILE_CHANGE_PREVIEW_PREFIX = "live-filechange-preview:";
 
 const isOptimisticUserMessage = (item: ThreadItem) => item.type === "userMessage" && item.id.startsWith(OPTIMISTIC_USER_MESSAGE_PREFIX);
+const isOptimisticTurn = (turn: Turn) => turn.id.startsWith(OPTIMISTIC_TURN_PREFIX);
 const isLiveFileChangePreview = (item: ThreadItem) => item.type === "fileChange" && item.id.startsWith(LIVE_FILE_CHANGE_PREVIEW_PREFIX);
 type FileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;
+
+const stripOptimisticTurns = (turns: Array<Turn>) => turns.filter((turn) => !isOptimisticTurn(turn));
 
 const normalizeDiffPath = (value: string) => value.replace(/^[ab]\//, "");
 const createEditingDiffChange = (diff: string): FileUpdateChange => ({
@@ -1200,6 +1232,10 @@ export class CodexLiveRuntime {
         const current = snapshot.threads.find((entry) => entry.thread.id === response.thread.id);
         upsertThreadRecord(snapshot, mergeThread(response.thread, current));
       });
+    } catch (error) {
+      if (!isFreshThreadUnavailableError(error)) {
+        throw error;
+      }
     } finally {
       this.loadingThreads.delete(threadId);
     }
@@ -1229,16 +1265,26 @@ export class CodexLiveRuntime {
 
       this.resumedThreads.add(threadId);
     } catch (error) {
-      if (!force) {
-        const response = await this.request<ThreadReadResponse>("thread/read", {
-          threadId,
-          includeTurns: true,
-        });
+      if (isFreshThreadUnavailableError(error)) {
+        return;
+      }
 
-        this.mutate((snapshot) => {
-          const current = snapshot.threads.find((entry) => entry.thread.id === response.thread.id);
-          upsertThreadRecord(snapshot, mergeThread(response.thread, current));
-        });
+      if (!force) {
+        try {
+          const response = await this.request<ThreadReadResponse>("thread/read", {
+            threadId,
+            includeTurns: true,
+          });
+
+          this.mutate((snapshot) => {
+            const current = snapshot.threads.find((entry) => entry.thread.id === response.thread.id);
+            upsertThreadRecord(snapshot, mergeThread(response.thread, current));
+          });
+        } catch (readError) {
+          if (!isFreshThreadUnavailableError(readError)) {
+            throw readError;
+          }
+        }
       } else {
         throw error;
       }
@@ -1247,9 +1293,14 @@ export class CodexLiveRuntime {
     }
   }
 
-  async createThread(settings: SettingsState) {
+  async createThread(
+    settings: SettingsState,
+    options?: {
+      cwd?: string;
+    },
+  ) {
     const response = await this.request<ThreadStartResponse>("thread/start", {
-      cwd: this.snapshot.threads[0]?.thread.cwd ?? "/home/allan",
+      cwd: options?.cwd ?? this.snapshot.threads[0]?.thread.cwd ?? "/home/allan",
       model: settings.model,
       approvalPolicy: settings.approvalPolicy,
       sandbox: settings.sandboxMode,
@@ -1263,7 +1314,7 @@ export class CodexLiveRuntime {
       upsertThreadRecord(snapshot, mergeThread(response.thread, snapshot.threads.find((entry) => entry.thread.id === response.thread.id)));
     });
 
-    await this.resumeThread(response.thread.id, true);
+    await this.loadDirectory(response.thread.cwd).catch(() => undefined);
     return response.thread.id;
   }
 
@@ -1390,65 +1441,107 @@ export class CodexLiveRuntime {
       id: `${OPTIMISTIC_USER_MESSAGE_PREFIX}${args.threadId}:${Date.now().toString(36)}`,
       content: inputs,
     };
-
-    const response = await this.request<TurnStartResponse>("turn/start", {
-      threadId: args.threadId,
-      input: inputs,
-      model: args.settings.model,
-      approvalPolicy: args.settings.approvalPolicy,
-      effort: args.settings.reasoningEffort,
-      sandboxPolicy:
-        args.settings.sandboxMode === "danger-full-access"
-          ? { type: "dangerFullAccess" }
-          : args.settings.sandboxMode === "read-only"
-            ? {
-                type: "readOnly",
-                access: {
-                  type: "restricted",
-                  includePlatformDefaults: true,
-                  readableRoots: [thread.cwd],
-                },
-                networkAccess: false,
-              }
-            : {
-                type: "workspaceWrite",
-                writableRoots: [thread.cwd],
-                readOnlyAccess: {
-                  type: "restricted",
-                  includePlatformDefaults: true,
-                  readableRoots: [thread.cwd],
-                },
-                networkAccess: false,
-                excludeTmpdirEnvVar: false,
-                excludeSlashTmp: false,
-              },
-      personality: args.settings.personality === "none" ? null : args.settings.personality,
-      collaborationMode: settingsToCollaborationMode(args.settings),
-    });
+    const optimisticTurnId = `${OPTIMISTIC_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
 
     this.mutate((snapshot) => {
-      updateThreadRecord(snapshot, args.threadId, (record) => {
-        const existingTurn = record.thread.turns.find((turn) => turn.id === response.turn.id);
-        const mergedTurn = mergeIncomingTurn(response.turn, existingTurn);
-        const nextTurnItems = mergedTurn.items.some((item) => item.type === "userMessage")
-          ? mergedTurn.items
-          : [optimisticUserMessage, ...mergedTurn.items];
-        const nextTurn = {
-          ...mergedTurn,
-          items: nextTurnItems,
-        };
+      updateThreadRecord(snapshot, args.threadId, (record) => ({
+        ...record,
+        thread: {
+          ...record.thread,
+          preview: args.prompt.trim() || record.thread.preview,
+          status: { type: "active", activeFlags: [] },
+          turns: sortTurnsById([
+            ...stripOptimisticTurns(record.thread.turns),
+            {
+              id: optimisticTurnId,
+              items: [optimisticUserMessage],
+              status: "inProgress",
+              error: null,
+            },
+          ]),
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
+      }));
+    });
 
-        return {
+    try {
+      const response = await this.request<TurnStartResponse>("turn/start", {
+        threadId: args.threadId,
+        input: inputs,
+        model: args.settings.model,
+        approvalPolicy: args.settings.approvalPolicy,
+        effort: args.settings.reasoningEffort,
+        sandboxPolicy:
+          args.settings.sandboxMode === "danger-full-access"
+            ? { type: "dangerFullAccess" }
+            : args.settings.sandboxMode === "read-only"
+              ? {
+                  type: "readOnly",
+                  access: {
+                    type: "restricted",
+                    includePlatformDefaults: true,
+                    readableRoots: [thread.cwd],
+                  },
+                  networkAccess: false,
+                }
+              : {
+                  type: "workspaceWrite",
+                  writableRoots: [thread.cwd],
+                  readOnlyAccess: {
+                    type: "restricted",
+                    includePlatformDefaults: true,
+                    readableRoots: [thread.cwd],
+                  },
+                  networkAccess: false,
+                  excludeTmpdirEnvVar: false,
+                  excludeSlashTmp: false,
+                },
+        personality: args.settings.personality === "none" ? null : args.settings.personality,
+        collaborationMode: settingsToCollaborationMode(args.settings),
+      });
+
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, args.threadId, (record) => {
+          const baseTurns = stripOptimisticTurns(record.thread.turns);
+          const existingTurn = baseTurns.find((turn) => turn.id === response.turn.id);
+          const mergedTurn = mergeIncomingTurn(response.turn, existingTurn);
+          const nextTurnItems = mergedTurn.items.some((item) => item.type === "userMessage")
+            ? mergedTurn.items
+            : [optimisticUserMessage, ...mergedTurn.items];
+          const nextTurn = {
+            ...mergedTurn,
+            items: nextTurnItems,
+          };
+
+          return {
+            ...record,
+            thread: {
+              ...record.thread,
+              preview: args.prompt.trim() || record.thread.preview,
+              status: { type: "active", activeFlags: [] },
+              turns: sortTurnsById([
+                ...baseTurns.filter((turn) => turn.id !== response.turn.id),
+                nextTurn,
+              ]),
+              updatedAt: Math.floor(Date.now() / 1000),
+            },
+          };
+        });
+      });
+    } catch (error) {
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, args.threadId, (record) => ({
           ...record,
           thread: {
             ...record.thread,
-            status: { type: "active", activeFlags: [] },
-            turns: sortTurnsById([...record.thread.turns.filter((turn) => turn.id !== response.turn.id), nextTurn]),
+            status: { type: "idle" },
+            turns: record.thread.turns.filter((turn) => turn.id !== optimisticTurnId),
             updatedAt: Math.floor(Date.now() / 1000),
           },
-        };
+        }));
       });
-    });
+      throw error;
+    }
   }
 
   async interruptTurn(threadId: string) {
@@ -2020,14 +2113,15 @@ export class CodexLiveRuntime {
         const turn = params.turn as Turn;
         this.mutate((snapshot) => {
           updateThreadRecord(snapshot, safeString(params.threadId), (record) => {
-            const existingTurn = record.thread.turns.find((entry) => entry.id === turn.id);
+            const baseTurns = stripOptimisticTurns(record.thread.turns);
+            const existingTurn = baseTurns.find((entry) => entry.id === turn.id);
             const nextTurn = mergeIncomingTurn(turn, existingTurn);
 
             return {
               ...record,
               thread: {
                 ...record.thread,
-                turns: sortTurnsById([...record.thread.turns.filter((entry) => entry.id !== turn.id), nextTurn]),
+                turns: sortTurnsById([...baseTurns.filter((entry) => entry.id !== turn.id), nextTurn]),
                 updatedAt: Math.floor(Date.now() / 1000),
               },
             };
@@ -2040,7 +2134,9 @@ export class CodexLiveRuntime {
         const turn = params.turn as Turn;
         this.mutate((snapshot) => {
           updateThreadRecord(snapshot, safeString(params.threadId), (record) => {
-            const turns = record.thread.turns.map((entry) => (entry.id === turn.id ? mergeIncomingTurn(turn, entry) : entry));
+            const turns = stripOptimisticTurns(record.thread.turns).map((entry) =>
+              entry.id === turn.id ? mergeIncomingTurn(turn, entry) : entry,
+            );
             return {
               ...record,
               thread: {
@@ -2170,7 +2266,11 @@ export class CodexLiveRuntime {
 
         this.mutate((snapshot) => {
           updateThreadRecord(snapshot, threadId, (record) => {
-            const turns = ensureTurnExists(record.thread.turns, turnId, live ? "inProgress" : "completed").map((turn) => {
+            const turns = ensureTurnExists(
+              stripOptimisticTurns(record.thread.turns),
+              turnId,
+              live ? "inProgress" : "completed",
+            ).map((turn) => {
               if (turn.id !== turnId) {
                 return turn;
               }
@@ -2260,7 +2360,7 @@ export class CodexLiveRuntime {
 
         this.mutate((snapshot) => {
           updateThreadRecord(snapshot, threadId, (record) => {
-            const turns = ensureTurnExists(record.thread.turns, turnId).map((turn) => {
+            const turns = ensureTurnExists(stripOptimisticTurns(record.thread.turns), turnId).map((turn) => {
               if (turn.id !== turnId) {
                 return turn;
               }

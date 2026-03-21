@@ -33,6 +33,7 @@ import {
   buildDiffReviewLines,
   composerHasMentionToken,
   diffEntryId,
+  diffKindLabel,
   formatTurnErrorCode,
   settingsPatchFromApprovalMode,
   shorten,
@@ -135,6 +136,137 @@ export function LoadingConversationState({
       <p className="welcome-foot">
         The starter cards are hidden until the saved turns are loaded.
       </p>
+    </div>
+  );
+}
+
+export function ProjectFolderPickerModal({
+  activePath,
+  breadcrumbs,
+  busy,
+  entries,
+  loading,
+  onClose,
+  onNavigate,
+  onPick,
+  parentPath,
+}: {
+  activePath: string;
+  breadcrumbs: Array<{
+    label: string;
+    path: string;
+  }>;
+  busy: boolean;
+  entries: Array<MentionAttachment>;
+  loading: boolean;
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+  onPick: (path: string) => void;
+  parentPath: string | null;
+}) {
+  return (
+    <div
+      className="project-picker-overlay"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="project-picker-modal">
+        <div className="project-picker-head">
+          <div className="project-picker-copy">
+            <div className="project-picker-title">Start New Session</div>
+            <div className="project-picker-subtitle">
+              Pick the project folder to use as this session&apos;s working
+              directory.
+            </div>
+          </div>
+          <button
+            aria-label="Close project picker"
+            className="project-picker-close"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="project-picker-breadcrumbs">
+          {breadcrumbs.map((crumb) => (
+            <button
+              className={clsx(
+                "project-picker-crumb",
+                crumb.path === activePath && "active",
+              )}
+              disabled={busy}
+              key={crumb.path}
+              onClick={() => onNavigate(crumb.path)}
+              type="button"
+            >
+              {crumb.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="project-picker-toolbar">
+          {parentPath ? (
+            <button
+              className="project-picker-action"
+              disabled={busy}
+              onClick={() => onNavigate(parentPath)}
+              type="button"
+            >
+              ← Up
+            </button>
+          ) : (
+            <span className="project-picker-root">Root</span>
+          )}
+
+          <button
+            className="project-picker-start"
+            disabled={busy || loading}
+            onClick={() => onPick(activePath)}
+            type="button"
+          >
+            {busy ? "Starting…" : "Use This Folder"}
+          </button>
+        </div>
+
+        <div className="project-picker-current">{activePath}</div>
+
+        <div className="project-picker-list">
+          {loading ? (
+            <div className="project-picker-empty">Loading folders…</div>
+          ) : entries.length === 0 ? (
+            <div className="project-picker-empty">
+              No folders found here.
+            </div>
+          ) : (
+            entries.map((entry) => (
+              <button
+                className="project-picker-entry"
+                disabled={busy}
+                key={entry.id}
+                onClick={() => onNavigate(entry.path)}
+                type="button"
+              >
+                <span className="project-picker-entry-icon">📁</span>
+                <span className="project-picker-entry-copy">
+                  <span className="project-picker-entry-name">
+                    {entry.name}
+                  </span>
+                  <span className="project-picker-entry-path">
+                    {entry.path}
+                  </span>
+                </span>
+                <span className="project-picker-entry-arrow">→</span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1091,6 +1223,163 @@ export function DiffPatchViewer({ entry }: { entry: DiffReviewEntry }) {
           <pre className="diff-patch-text">{row.text || " "}</pre>
         </div>
       ))}
+    </div>
+  );
+}
+
+export function DiffReviewPage({
+  backLabel = "Back to Chat",
+  diffEntries,
+  findings,
+  onBack,
+  onSelectEntry,
+  selectedEntryId,
+}: {
+  backLabel?: string;
+  diffEntries: Array<DiffReviewEntry>;
+  findings: ThreadRecord["review"];
+  onBack: () => void;
+  onSelectEntry: (entryId: string) => void;
+  selectedEntryId: string | null;
+}) {
+  const selectedEntry = useMemo(
+    () =>
+      diffEntries.find((entry) => entry.id === selectedEntryId) ??
+      diffEntries[0] ??
+      null,
+    [diffEntries, selectedEntryId],
+  );
+  const totalAdditions = useMemo(
+    () => diffEntries.reduce((sum, entry) => sum + entry.additions, 0),
+    [diffEntries],
+  );
+  const totalRemovals = useMemo(
+    () => diffEntries.reduce((sum, entry) => sum + entry.removals, 0),
+    [diffEntries],
+  );
+
+  return (
+    <div id="review-page">
+      <div className="diff-review-shell page">
+        <div className="diff-review-page-head">
+          <button className="file-editor-back" onClick={onBack} type="button">
+            ← {backLabel}
+          </button>
+          <div className="diff-review-page-copy">
+            <div className="diff-review-page-title">Patch review</div>
+            <div className="diff-review-page-subtitle">
+              {diffEntries.length} changed file
+              {diffEntries.length === 1 ? "" : "s"} · +{totalAdditions} / -
+              {totalRemovals}
+            </div>
+          </div>
+        </div>
+
+        {diffEntries.length === 0 ? (
+          <div className="empty-panel">No diff items in this thread yet.</div>
+        ) : (
+          <div className="diff-review-layout page">
+            <div className="diff-review-sidebar">
+              {diffEntries.map((entry) => (
+                <button
+                  className={clsx(
+                    "diff-review-entry",
+                    selectedEntry?.id === entry.id && "active",
+                  )}
+                  key={entry.id}
+                  type="button"
+                  onClick={() => onSelectEntry(entry.id)}
+                >
+                  <div className="diff-review-entry-top">
+                    <span
+                      className={clsx(
+                        "diff-kind-pill",
+                        entry.kind.type === "add" && "new",
+                        entry.kind.type === "delete" && "del",
+                      )}
+                    >
+                      {diffKindLabel(entry.kind)}
+                    </span>
+                    <span
+                      className={clsx(
+                        "diff-status",
+                        entry.status === "inProgress" && "live",
+                        entry.status === "failed" && "err",
+                      )}
+                    >
+                      {entry.status === "inProgress" ? "editing" : entry.status}
+                    </span>
+                  </div>
+                  <div className="diff-review-entry-path">{entry.path}</div>
+                  <div className="diff-review-entry-meta">
+                    <span>+{entry.additions}</span>
+                    <span>-{entry.removals}</span>
+                    <span>
+                      {entry.hunks} hunk{entry.hunks === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {selectedEntry ? (
+              <div className="diff-review-main">
+                <div className="diff-focus-head">
+                  <div className="diff-focus-title">{selectedEntry.path}</div>
+                  <div className="diff-focus-meta">
+                    <span
+                      className={clsx(
+                        "diff-kind-pill",
+                        selectedEntry.kind.type === "add" && "new",
+                        selectedEntry.kind.type === "delete" && "del",
+                      )}
+                    >
+                      {diffKindLabel(selectedEntry.kind)}
+                    </span>
+                    <span
+                      className={clsx(
+                        "diff-status",
+                        selectedEntry.status === "inProgress" && "live",
+                        selectedEntry.status === "failed" && "err",
+                      )}
+                    >
+                      {selectedEntry.status === "inProgress"
+                        ? "editing"
+                        : selectedEntry.status}
+                    </span>
+                    <span className="diff-stat-chip">+{selectedEntry.additions}</span>
+                    <span className="diff-stat-chip">-{selectedEntry.removals}</span>
+                    <span className="diff-stat-chip">
+                      {selectedEntry.hunks} hunk
+                      {selectedEntry.hunks === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </div>
+                <DiffPatchViewer entry={selectedEntry} />
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {findings.length > 0 ? (
+          <div className="review-list">
+            {findings.map((finding) => (
+              <div
+                className={clsx("review-item", finding.severity)}
+                key={finding.id}
+              >
+                <div className="review-header">
+                  <span>{finding.severity}</span>
+                  <span>{finding.file.split("/").slice(-2).join("/")}</span>
+                  <span>:{finding.line}</span>
+                </div>
+                <div className="review-title">{finding.title}</div>
+                <div className="review-summary">{finding.summary}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -43,7 +43,13 @@ export type QueuedComposerMessage = ComposerPayload & {
 };
 
 export type WorkspaceActions = {
-  createThread: (settings: SettingsState, title?: string) => Promise<string>;
+  createThread: (
+    settings: SettingsState,
+    options?: {
+      title?: string;
+      cwd?: string;
+    },
+  ) => Promise<string>;
   resumeThread: (threadId: string) => Promise<void>;
   interruptTurn: (threadId: string) => Promise<boolean>;
   sendComposer: (
