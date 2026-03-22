@@ -1,8 +1,9 @@
 import type { ThreadItem, Turn, UserInput } from "../../../protocol/v2";
 import {
-  activeProviderAdapter,
   buildProviderBrowseUrl,
   buildProviderImageUrl,
+  getProviderAdapter,
+  type ProviderId,
 } from "../providers";
 import type { ThreadRecord } from "../../mockData";
 import type {
@@ -112,12 +113,16 @@ function parseFileReference(value: string): { path: string; line: number | null 
 const looksLikeAbsolutePath = (candidate: string): boolean =>
   candidate.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(candidate);
 
-export function resolveLocalFileReference(value: string): LocalFileReference | null {
+export function resolveLocalFileReference(
+  value: string,
+  providerId?: ProviderId,
+): LocalFileReference | null {
   const normalized = value.trim();
   if (!normalized) {
     return null;
   }
 
+  const adapter = getProviderAdapter(providerId);
   const parsed = parseFileReference(normalized);
   if (!parsed?.path || !looksLikeAbsolutePath(parsed.path)) {
     return null;
@@ -126,7 +131,7 @@ export function resolveLocalFileReference(value: string): LocalFileReference | n
   return {
     path: parsed.path,
     line: parsed.line,
-    browseUrl: buildProviderBrowseUrl(activeProviderAdapter, parsed.path),
+    browseUrl: buildProviderBrowseUrl(adapter, parsed.path),
   };
 }
 
@@ -227,8 +232,8 @@ function isTransientImageReference(value: string): boolean {
   return value.startsWith("blob:") || value.startsWith("data:");
 }
 
-function extractUserRequestText(value: string): string {
-  const markerRegex = activeProviderAdapter.requestMarkerPattern;
+function extractUserRequestText(value: string, providerId?: ProviderId): string {
+  const markerRegex = getProviderAdapter(providerId).requestMarkerPattern;
   const matches = Array.from(value.matchAll(markerRegex));
   if (matches.length === 0) {
     return value.trim();
@@ -243,7 +248,10 @@ function extractUserRequestText(value: string): string {
   return value.slice(markerOffset).trim();
 }
 
-export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMessage" }>): UserMessageDisplay {
+export function getUserMessageDisplay(
+  item: Extract<ThreadItem, { type: "userMessage" }>,
+  providerId?: ProviderId,
+): UserMessageDisplay {
   const textChunks: string[] = [];
   const imageCandidates: string[] = [];
 
@@ -265,7 +273,7 @@ export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMes
   const images = [...new Set(persistedImages.length > 0 ? persistedImages : imageCandidates)];
   const fullText = textChunks.join("\n");
   return {
-    text: extractUserRequestText(fullText),
+    text: extractUserRequestText(fullText, providerId),
     images,
     fileAttachments: extractFileAttachments(fullText),
   };
@@ -352,49 +360,51 @@ export function parseInlineSegments(text: string): InlineSegment[] {
   return segments;
 }
 
-export function toRenderableImageUrl(value: string): string {
+export function toRenderableImageUrl(value: string, providerId?: ProviderId): string {
   const normalized = value.trim();
   if (!normalized) return "";
+  const adapter = getProviderAdapter(providerId);
   if (
     normalized.startsWith("data:") ||
     normalized.startsWith("blob:") ||
     normalized.startsWith("http://") ||
     normalized.startsWith("https://") ||
-    normalized.startsWith(`${activeProviderAdapter.localImagePath}?`)
+    normalized.startsWith(`${adapter.localImagePath}?`)
   ) {
     return normalized;
   }
 
   if (normalized.startsWith("file://")) {
-    return buildProviderImageUrl(activeProviderAdapter, normalized);
+    return buildProviderImageUrl(adapter, normalized);
   }
 
   const looksLikeUnixAbsolute = normalized.startsWith("/");
   const looksLikeWindowsAbsolute = /^[A-Za-z]:[\\/]/u.test(normalized);
   if (looksLikeUnixAbsolute || looksLikeWindowsAbsolute) {
-    return buildProviderImageUrl(activeProviderAdapter, normalized);
+    return buildProviderImageUrl(adapter, normalized);
   }
 
   return normalized;
 }
 
-export function toBrowseUrl(pathValue: string): string {
+export function toBrowseUrl(pathValue: string, providerId?: ProviderId): string {
   const normalized = pathValue.trim();
   if (!normalized) return "#";
 
-  const resolved = resolveLocalFileReference(normalized);
+  const adapter = getProviderAdapter(providerId);
+  const resolved = resolveLocalFileReference(normalized, providerId);
   if (resolved) {
     return resolved.browseUrl;
   }
 
   if (looksLikeAbsolutePath(normalized)) {
-    return buildProviderBrowseUrl(activeProviderAdapter, normalized);
+    return buildProviderBrowseUrl(adapter, normalized);
   }
 
   return "#";
 }
 
-export function parseMessageBlocks(text: string): MessageBlock[] {
+export function parseMessageBlocks(text: string, providerId?: ProviderId): MessageBlock[] {
   if (!text.includes("![") || !text.includes("](")) {
     return [{ kind: "text", value: text }];
   }
@@ -409,7 +419,7 @@ export function parseMessageBlocks(text: string): MessageBlock[] {
 
     const start = match.index;
     const end = start + fullMatch.length;
-    const imageUrl = toRenderableImageUrl(urlRaw.trim());
+    const imageUrl = toRenderableImageUrl(urlRaw.trim(), providerId);
     if (!imageUrl) continue;
 
     if (start > cursor) {

@@ -3,6 +3,12 @@ import { queryOptions } from "@tanstack/react-query";
 import type { ReasoningEffort, Tool } from "../protocol";
 import type { InputModality } from "../protocol/InputModality";
 import type { Model, McpServerStatus, Thread, ThreadItem, Turn, UserInput } from "../protocol/v2";
+import {
+  listProviderAdapters,
+  readStoredProviderId,
+  type ProviderAdapter,
+  type ProviderId,
+} from "./services/providers";
 
 export type WorkspaceMode = "chat" | "review" | "skills" | "mcp" | "settings";
 export type InspectorTab = "ops" | "agents" | "skills" | "mcp" | "review" | "settings";
@@ -101,6 +107,7 @@ export type ThreadPlan = {
 };
 
 export type SettingsState = {
+  provider: ProviderId;
   model: string;
   reasoningEffort: ReasoningEffort;
   approvalPolicy: "untrusted" | "on-failure" | "on-request" | "never";
@@ -139,6 +146,28 @@ export type AccountState = {
   }>;
 };
 
+export type ProviderSetupStatus =
+  | "unknown"
+  | "checking"
+  | "ready"
+  | "needsInstall"
+  | "needsAuth"
+  | "needsConfig"
+  | "error";
+
+export type ProviderSetupState = {
+  providerId: ProviderId;
+  status: ProviderSetupStatus;
+  summary: string;
+  detail: string | null;
+  installed: boolean | null;
+  configured: boolean | null;
+  authenticated: boolean | null;
+  version: string | null;
+  sourcePath: string | null;
+  checkedAt: string | null;
+};
+
 export type StreamSpec = {
   key: string;
   threadId: string;
@@ -174,6 +203,8 @@ export type CollaborationPreset = {
 
 export type DashboardData = {
   threads: ThreadRecord[];
+  providers: ProviderAdapter[];
+  providerSetup: Record<ProviderId, ProviderSetupState>;
   models: Model[];
   collaborationModes: CollaborationPreset[];
   settings: SettingsState;
@@ -505,6 +536,7 @@ const featureFlags: Array<FeatureFlag> = [
 ];
 
 const settings: SettingsState = {
+  provider: readStoredProviderId(),
   model: "gpt-5.4",
   reasoningEffort: "xhigh",
   approvalPolicy: "on-request",
@@ -1280,8 +1312,35 @@ const threadUiShellStreams: Array<StreamSpec> = [
   streamFor("thread-ui-shell", "turn-shell-2", "item-agent-2", "text", threadUiShellAgentLive?.text ?? "", 9),
 ];
 
+const createProviderSetupState = (
+  provider: ProviderAdapter,
+): ProviderSetupState => ({
+  providerId: provider.id,
+  status: "unknown",
+  summary:
+    provider.transportKind === "cli"
+      ? "Not checked yet."
+      : "Managed by the Nomadex bridge.",
+  detail: null,
+  installed: provider.transportKind === "cli" ? false : null,
+  configured: null,
+  authenticated: null,
+  version: null,
+  sourcePath: null,
+  checkedAt: null,
+});
+
+export const createProviderSetupMap = (
+  providers: ProviderAdapter[] = listProviderAdapters(),
+): Record<ProviderId, ProviderSetupState> =>
+  Object.fromEntries(
+    providers.map((provider) => [provider.id, createProviderSetupState(provider)]),
+  ) as Record<ProviderId, ProviderSetupState>;
+
 const initialDashboardData: DashboardData = {
   threads: [],
+  providers: listProviderAdapters(),
+  providerSetup: createProviderSetupMap(),
   models,
   collaborationModes,
   settings,
@@ -1340,7 +1399,7 @@ export const createBlankThreadRecord = (
     id: threadId,
     preview: title,
     ephemeral: false,
-    modelProvider: "openai",
+    modelProvider: currentSettings.provider,
     createdAt: Math.floor(Date.now() / 1000),
     updatedAt: Math.floor(Date.now() / 1000),
     status: { type: "idle" },

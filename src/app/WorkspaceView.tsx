@@ -22,6 +22,7 @@ import type {
   MentionAttachment,
   ThreadRecord,
 } from "./mockData";
+import type { ProviderId } from "./services/providers";
 import { toBrowseUrl } from "./services/presentation/workspacePresentationService";
 import {
   buildComposerHighlightSegments,
@@ -729,14 +730,16 @@ export function FileEditorPreview({
   onBack,
   backLabel = "Back",
   onSave,
+  providerId,
 }: {
   preview: FilePreviewState;
   variant?: "panel" | "page";
   onBack?: () => void;
   backLabel?: string;
   onSave?: (path: string, content: string) => Promise<void>;
+  providerId?: ProviderId;
 }) {
-  const browseHref = toBrowseUrl(preview.path);
+  const browseHref = toBrowseUrl(preview.path, providerId);
   const editorViewRef = useRef<EditorView | null>(null);
   const [draft, setDraft] = useState(preview.content);
   const [savedContent, setSavedContent] = useState(preview.content);

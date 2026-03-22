@@ -1,16 +1,22 @@
-import type { ProviderAdapter } from "./providerAdapter";
+import {
+  GENERIC_REQUEST_MARKER_PATTERN,
+  type ProviderAdapter,
+} from "./providerAdapter";
 
 export const codexProviderAdapter: ProviderAdapter = {
   id: "codex",
   displayName: "Codex",
+  description: "Live Codex bridge connected to the current Nomadex workspace.",
   transportLabel: "local agent bridge",
+  availability: "ready",
+  transportKind: "bridge",
+  defaultModel: "gpt-5.4",
   wsProxyPath: "/codex-ws",
   authCompletePath: "/codex-auth/complete",
   localImagePath: "/codex-local-image",
-  localBrowsePath: "/codex-local-browse",
+  localBrowsePath: "/codex-local-browse/",
   uploadRootDirName: ".codex-web/uploads",
   uploadFilesDirName: ".codex-web/uploads/files",
   requestHeading: "# My request:",
-  requestMarkerPattern:
-    /(?:^|\n)\s{0,3}#{0,6}\s*my request(?:\s+for\s+(?:codex|nomadex|assistant))?\s*:?\s*/giu,
+  requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

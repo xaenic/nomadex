@@ -5434,6 +5434,74 @@ pre::-webkit-scrollbar-thumb {
   color: var(--tx2);
 }
 
+.provider-setup-card {
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+  background: var(--panel-solid-2);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.provider-setup-head strong {
+  font-size: 10px;
+  color: var(--tx);
+}
+
+.provider-setup-badge {
+  border: 1px solid var(--bdr);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 9px;
+  color: var(--tx2);
+  background: var(--bg4);
+}
+
+.provider-setup-badge.ready {
+  border-color: rgb(16 185 129 / 35%);
+  color: rgb(110 231 183);
+}
+
+.provider-setup-badge.checking {
+  border-color: rgb(96 165 250 / 35%);
+  color: rgb(147 197 253);
+}
+
+.provider-setup-badge.needsInstall,
+.provider-setup-badge.needsConfig {
+  border-color: rgb(245 158 11 / 35%);
+  color: rgb(253 186 116);
+}
+
+.provider-setup-badge.needsAuth,
+.provider-setup-badge.error {
+  border-color: rgb(248 113 113 / 35%);
+  color: rgb(252 165 165);
+}
+
+.provider-setup-copy,
+.provider-setup-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provider-setup-copy span,
+.provider-setup-meta span {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--tx2);
+  word-break: break-word;
+}
+
 .account-error {
   color: #fca5a5;
 }
@@ -5492,6 +5560,26 @@ pre::-webkit-scrollbar-thumb {
   align-items: center;
   gap: 8px;
   padding: 4px 0;
+}
+
+.config-provider-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding: 0 1px;
+}
+
+.config-provider-note strong {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.config-provider-note span {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--tx2);
 }
 
 .sl {

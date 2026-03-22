@@ -1,8 +1,9 @@
 import type { Thread, ThreadItem, Turn, TurnError } from "../protocol/v2";
 import { getUserMessageDisplay } from "./services/presentation/workspacePresentationService";
 import {
-  activeProviderAdapter,
   buildProviderOptimisticUploadPath,
+  getProviderAdapter,
+  type ProviderId,
 } from "./services/providers";
 import {
   createFallbackDashboardData,
@@ -333,11 +334,16 @@ export const formatUploadSize = (bytes: number) =>
 export const localUploadedFilesToMentions = (
   cwd: string,
   files: Array<ComposerFile>,
+  providerId?: ProviderId,
 ): Array<MentionAttachment> =>
   files.map((file) => ({
     id: `upload-${file.id}`,
     name: file.name,
-    path: buildProviderOptimisticUploadPath(activeProviderAdapter, cwd, file.name),
+    path: buildProviderOptimisticUploadPath(
+      getProviderAdapter(providerId),
+      cwd,
+      file.name,
+    ),
     kind: "file",
   }));
 
@@ -398,7 +404,8 @@ export const isPathWithinRoot = (root: string, value: string) => {
 
 export const getUserText = (
   item: Extract<ThreadItem, { type: "userMessage" }>,
-) => getUserMessageDisplay(item).text;
+  providerId?: ProviderId,
+) => getUserMessageDisplay(item, providerId).text;
 
 export const latestThreadLabel = (record: ThreadRecord) => {
   if (record.thread.name?.trim()) {

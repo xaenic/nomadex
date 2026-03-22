@@ -408,6 +408,31 @@ export const ConfigPanel = memo(function ConfigPanel({
   const [mobileCallbackUrl, setMobileCallbackUrl] = useState("");
   const activeThemeLabel =
     activeTheme.charAt(0).toUpperCase() + activeTheme.slice(1);
+  const activeProvider =
+    snapshot.providers.find((entry) => entry.id === snapshot.settings.provider) ??
+    snapshot.providers[0];
+  const providerUsesExternalCliAccount = activeProvider?.transportKind === "cli";
+  const activeProviderSetup = activeProvider
+    ? snapshot.providerSetup[activeProvider.id]
+    : null;
+
+  useEffect(() => {
+    if (
+      !providerUsesExternalCliAccount ||
+      !activeProvider ||
+      !activeProviderSetup ||
+      activeProviderSetup.status !== "unknown"
+    ) {
+      return;
+    }
+
+    void actions.checkProviderSetup(activeProvider.id);
+  }, [
+    actions,
+    activeProvider,
+    activeProviderSetup,
+    providerUsesExternalCliAccount,
+  ]);
 
   const handleChatGptLogin = useCallback(async () => {
     try {
@@ -506,21 +531,29 @@ export const ConfigPanel = memo(function ConfigPanel({
           <div className="account-head">
             <div>
               <strong>
-                {snapshot.account.loggedIn
+                {providerUsesExternalCliAccount
+                  ? `${activeProvider.displayName} local session`
+                  : snapshot.account.loggedIn
                   ? snapshot.account.workspace
                   : "No active account"}
               </strong>
               <div className="account-copy">
-                {snapshot.account.planType} · {snapshot.account.authMode}
+                {providerUsesExternalCliAccount
+                  ? "Managed outside Nomadex"
+                  : `${snapshot.account.planType} · ${snapshot.account.authMode}`}
               </div>
             </div>
             <span
               className={clsx(
                 "account-badge",
-                snapshot.account.loggedIn ? "ok" : "off",
+                providerUsesExternalCliAccount || snapshot.account.loggedIn
+                  ? "ok"
+                  : "off",
               )}
             >
-              {snapshot.account.loginInProgress
+              {providerUsesExternalCliAccount
+                ? "External"
+                : snapshot.account.loginInProgress
                 ? "Signing in…"
                 : snapshot.account.loggedIn
                   ? "Active"
@@ -528,74 +561,168 @@ export const ConfigPanel = memo(function ConfigPanel({
             </span>
           </div>
           <div className="account-meta">
-            <span>{snapshot.account.credits}</span>
-            {snapshot.account.requiresOpenaiAuth ? (
+            {providerUsesExternalCliAccount ? (
+              <span>{activeProvider.transportLabel}</span>
+            ) : (
+              <span>{snapshot.account.credits}</span>
+            )}
+            {!providerUsesExternalCliAccount && snapshot.account.requiresOpenaiAuth ? (
               <span>OpenAI auth required</span>
             ) : null}
           </div>
-          <div className="usage-limit-list">
-            {snapshot.account.usageWindows.map((windowEntry) => (
-              <div className="usage-limit-card" key={windowEntry.id}>
-                <div className="usage-limit-head">
-                  <strong>{windowEntry.label}</strong>
-                  <span>{Math.round(windowEntry.usedPercent)}% used</span>
-                </div>
-                <div className="usage-limit-bar">
-                  <span
-                    className="usage-limit-fill"
-                    style={{
-                      width: `${Math.max(0, Math.min(100, windowEntry.usedPercent))}%`,
-                    }}
-                  />
-                </div>
-                <div className="usage-limit-copy">
-                  {formatRateReset(windowEntry.resetsAt)}
-                </div>
+          {providerUsesExternalCliAccount && activeProviderSetup ? (
+            <div className="provider-setup-card">
+              <div className="provider-setup-head">
+                <strong>Setup</strong>
+                <span
+                  className={clsx(
+                    "provider-setup-badge",
+                    activeProviderSetup.status,
+                  )}
+                >
+                  {activeProviderSetup.status === "ready"
+                    ? "Ready"
+                    : activeProviderSetup.status === "checking"
+                      ? "Checking"
+                      : activeProviderSetup.status === "needsInstall"
+                        ? "Install"
+                        : activeProviderSetup.status === "needsAuth"
+                          ? "Sign in"
+                          : activeProviderSetup.status === "needsConfig"
+                            ? "Config"
+                            : activeProviderSetup.status === "error"
+                              ? "Error"
+                              : "Unknown"}
+                </span>
               </div>
-            ))}
-            {snapshot.account.usageWindows.length === 0 ? (
-              <div className="usage-limit-empty">
-                Sign in to view your account usage windows.
+              <div className="provider-setup-copy">
+                <span>{activeProviderSetup.summary}</span>
+                {activeProviderSetup.detail ? (
+                  <span>{activeProviderSetup.detail}</span>
+                ) : null}
               </div>
-            ) : null}
-          </div>
+              <div className="provider-setup-meta">
+                {activeProviderSetup.version ? (
+                  <span>Version {activeProviderSetup.version}</span>
+                ) : null}
+                {activeProviderSetup.sourcePath ? (
+                  <span>{activeProviderSetup.sourcePath}</span>
+                ) : null}
+                {activeProviderSetup.checkedAt ? (
+                  <span>Checked {activeProviderSetup.checkedAt}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {providerUsesExternalCliAccount ? (
+            <div className="usage-limit-empty">
+              {activeProvider.installCommand ? (
+                <>
+                  Install with <code>{activeProvider.installCommand}</code>, then
+                  sign in or configure that CLI on the host machine. Nomadex will
+                  use the existing local session for new turns.
+                </>
+              ) : (
+                <>
+                  Sign in or configure {activeProvider.displayName} on the host
+                  machine first. Nomadex will use the existing local CLI session.
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="usage-limit-list">
+              {snapshot.account.usageWindows.map((windowEntry) => (
+                <div className="usage-limit-card" key={windowEntry.id}>
+                  <div className="usage-limit-head">
+                    <strong>{windowEntry.label}</strong>
+                    <span>{Math.round(windowEntry.usedPercent)}% used</span>
+                  </div>
+                  <div className="usage-limit-bar">
+                    <span
+                      className="usage-limit-fill"
+                      style={{
+                        width: `${Math.max(0, Math.min(100, windowEntry.usedPercent))}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="usage-limit-copy">
+                    {formatRateReset(windowEntry.resetsAt)}
+                  </div>
+                </div>
+              ))}
+              {snapshot.account.usageWindows.length === 0 ? (
+                <div className="usage-limit-empty">
+                  Sign in to view your account usage windows.
+                </div>
+              ) : null}
+            </div>
+          )}
           <div className="account-actions">
-            <button
-              className="mini-action"
-              type="button"
-              onClick={() => void handleRefreshAccount()}
-            >
-              Refresh
-            </button>
-            <button
-              className="mini-action"
-              type="button"
-              onClick={() => void handleChatGptLogin()}
-            >
-              {snapshot.account.authMode === "chatgpt"
-                ? "Switch ChatGPT"
-                : "Use ChatGPT"}
-            </button>
-            <button
-              className="mini-action"
-              type="button"
-              onClick={() => void handleApiKeyLogin()}
-            >
-              {snapshot.account.authMode === "apiKey"
-                ? "Replace API key"
-                : "Use API key"}
-            </button>
-            {snapshot.account.loggedIn ? (
-              <button
-                className="mini-action danger"
-                type="button"
-                onClick={() => void handleLogout()}
-              >
-                Log out
-              </button>
-            ) : null}
+            {providerUsesExternalCliAccount ? (
+              <>
+                <button
+                  className="mini-action"
+                  type="button"
+                  disabled={activeProviderSetup?.status === "checking"}
+                  onClick={() => void actions.checkProviderSetup(activeProvider.id)}
+                >
+                  {activeProviderSetup?.status === "checking"
+                    ? "Checking…"
+                    : "Check setup"}
+                </button>
+                <button
+                  className="mini-action"
+                  type="button"
+                  onClick={() =>
+                    pushToast(
+                      `${activeProvider.displayName} auth is managed by the local CLI on the host machine`,
+                      "warn",
+                    )
+                  }
+                >
+                  Local CLI auth
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="mini-action"
+                  type="button"
+                  onClick={() => void handleRefreshAccount()}
+                >
+                  Refresh
+                </button>
+                <button
+                  className="mini-action"
+                  type="button"
+                  onClick={() => void handleChatGptLogin()}
+                >
+                  {snapshot.account.authMode === "chatgpt"
+                    ? "Switch ChatGPT"
+                    : "Use ChatGPT"}
+                </button>
+                <button
+                  className="mini-action"
+                  type="button"
+                  onClick={() => void handleApiKeyLogin()}
+                >
+                  {snapshot.account.authMode === "apiKey"
+                    ? "Replace API key"
+                    : "Use API key"}
+                </button>
+                {snapshot.account.loggedIn ? (
+                  <button
+                    className="mini-action danger"
+                    type="button"
+                    onClick={() => void handleLogout()}
+                  >
+                    Log out
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
-          {snapshot.account.loginInProgress ? (
+          {!providerUsesExternalCliAccount && snapshot.account.loginInProgress ? (
             <div className="account-helper">
               <div className="account-helper-copy">
                 On mobile, if ChatGPT returns to <code>localhost:1455</code>,
@@ -623,7 +750,7 @@ export const ConfigPanel = memo(function ConfigPanel({
               </div>
             </div>
           ) : null}
-          {snapshot.account.loginError ? (
+          {!providerUsesExternalCliAccount && snapshot.account.loginError ? (
             <div className="account-error">{snapshot.account.loginError}</div>
           ) : null}
         </div>
@@ -632,18 +759,59 @@ export const ConfigPanel = memo(function ConfigPanel({
       <div className="sg">
         <div className="sg-t">Model</div>
         <div className="sr">
-          <span className="sl">model</span>
+          <span className="sl">provider</span>
           <select
             className="ssel"
-            value={snapshot.settings.model}
-            onChange={(event) => void selectModel(event.target.value)}
+            value={snapshot.settings.provider}
+            onChange={(event) => {
+              const nextProvider = snapshot.providers.find(
+                (entry) => entry.id === event.target.value,
+              );
+              void actions.updateSettings({
+                provider: event.target.value as SettingsState["provider"],
+                model: nextProvider?.defaultModel ?? snapshot.settings.model,
+              });
+            }}
           >
-            {snapshot.models.map((entry) => (
-              <option key={entry.id} value={entry.id}>
+            {snapshot.providers.map((entry) => (
+              <option
+                disabled={entry.availability !== "ready"}
+                key={entry.id}
+                value={entry.id}
+              >
                 {entry.displayName}
+                {entry.availability === "ready" ? "" : " (scaffolded)"}
               </option>
             ))}
           </select>
+        </div>
+        <div className="config-provider-note">
+          <strong>{activeProvider?.displayName ?? "Provider"}</strong>
+          <span>
+            {activeProvider?.availability === "ready"
+              ? activeProvider.installCommand
+                ? `${activeProvider.transportLabel} · ${activeProvider.installCommand}`
+                : activeProvider.transportLabel
+              : "Scaffolded on this branch. Transport wiring comes next."}
+          </span>
+        </div>
+        <div className="sr">
+          <span className="sl">model</span>
+          {activeProvider?.transportKind === "cli" ? (
+            <span className="sl">provider default</span>
+          ) : (
+            <select
+              className="ssel"
+              value={snapshot.settings.model}
+              onChange={(event) => void selectModel(event.target.value)}
+            >
+              {snapshot.models.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.displayName}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="sr">
           <span className="sl">reasoning_effort</span>
@@ -801,6 +969,7 @@ export const ConfigPanel = memo(function ConfigPanel({
       <div className="config-preview">
         <div className="config-title">Session config snapshot</div>
         <div># Nomadex workspace config</div>
+        <div>provider = "{snapshot.settings.provider}"</div>
         <div>model = "{snapshot.settings.model}"</div>
         <div>approval_policy = "{snapshot.settings.approvalPolicy}"</div>
         <div>model_reasoning_effort = "{snapshot.settings.reasoningEffort}"</div>

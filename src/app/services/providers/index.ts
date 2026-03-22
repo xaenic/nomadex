@@ -5,12 +5,20 @@ export {
   buildProviderOptimisticFileUploadPath,
   buildProviderOptimisticUploadPath,
   buildProviderUploadRoot,
+  providerIsReady,
 } from "./providerAdapter";
 export {
-  activeProviderAdapter,
   DEFAULT_PROVIDER_ID,
   getProviderAdapter,
+  isProviderId,
   listProviderAdapters,
+  persistProviderId,
+  readStoredProviderId,
+  WORKSPACE_PROVIDER_STORAGE_KEY,
 } from "./providerRegistry";
-export type { ProviderAdapter } from "./providerAdapter";
-export type { ProviderId } from "./providerRegistry";
+export type {
+  ProviderAdapter,
+  ProviderAvailability,
+  ProviderId,
+  ProviderTransportKind,
+} from "./providerAdapter";

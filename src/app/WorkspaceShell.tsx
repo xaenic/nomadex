@@ -25,7 +25,11 @@ import {
   summarizeTurnFileChanges,
   toBrowseUrl,
 } from "./services/presentation/workspacePresentationService";
-import { activeProviderAdapter } from "./services/providers";
+import {
+  getProviderAdapter,
+  persistProviderId,
+  type ProviderId,
+} from "./services/providers";
 import { WorkspaceRuntimeService } from "./services/runtime/WorkspaceRuntimeService";
 import { LiveStatusInline } from "./LiveStatusInline";
 import {
@@ -369,14 +373,17 @@ const formatUsageWindowShortLabel = (
   return label;
 };
 
-const estimateConversationTokens = (turns: Array<Turn>) => {
+const estimateConversationTokens = (
+  turns: Array<Turn>,
+  providerId?: ProviderId,
+) => {
   let characters = 0;
 
   for (const turn of turns) {
     for (const item of turn.items) {
       switch (item.type) {
         case "userMessage":
-          characters += getUserText(item).length;
+          characters += getUserText(item, providerId).length;
           break;
         case "agentMessage":
         case "plan":
@@ -634,7 +641,14 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         prompt,
         mode,
         settings,
-        mentions: [...mentions, ...localUploadedFilesToMentions(threadCwd, files)],
+        mentions: [
+          ...mentions,
+          ...localUploadedFilesToMentions(
+            threadCwd,
+            files,
+            settings.provider,
+          ),
+        ],
         skills,
         images,
         steer: null,
@@ -954,7 +968,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             return await runtime.readFile(path);
           },
           async () => {
-            const href = toBrowseUrl(path);
+            const href = toBrowseUrl(path, snapshot.settings.provider);
             if (href === "#") {
               throw new Error("File preview is unavailable for this path.");
             }
@@ -997,6 +1011,25 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
           },
           async () => "",
         ),
+      checkProviderSetup: async (providerId) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.checkProviderSetup(providerId);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              const targetProvider = providerId ?? draft.settings.provider;
+              draft.providerSetup[targetProvider] = {
+                ...draft.providerSetup[targetProvider],
+                status: "error",
+                summary: "Setup checks require a live workspace connection.",
+                detail: "Reconnect Nomadex to the host bridge, then check again.",
+                checkedAt: "just now",
+              };
+            });
+          },
+        ),
       updateSettings: async (patch) =>
         await withLiveFallback(
           async () => {
@@ -1004,6 +1037,9 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             await runtime.updateSettings(patch);
           },
           async () => {
+            if (patch.provider) {
+              persistProviderId(patch.provider);
+            }
             mutateLocal((draft) => {
               draft.settings = {
                 ...draft.settings,
@@ -1115,13 +1151,16 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       completeChatGptLogin: async (callbackUrl) =>
         await withLiveFallback(
           async () => {
-            const response = await fetch(activeProviderAdapter.authCompletePath, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
+            const response = await fetch(
+              getProviderAdapter(snapshot.settings.provider).authCompletePath,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ callbackUrl }),
               },
-              body: JSON.stringify({ callbackUrl }),
-            });
+            );
 
             const payload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
             if (!response.ok) {
@@ -1732,6 +1771,13 @@ export function WorkspacePage() {
   }, [uniqueThreads]);
 
   const modelOptions = snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models;
+  const activeProvider = useMemo(
+    () =>
+      snapshot.providers.find((entry) => entry.id === snapshot.settings.provider) ??
+      getProviderAdapter(snapshot.settings.provider),
+    [snapshot.providers, snapshot.settings.provider],
+  );
+  const providerModelLabel = `${activeProvider.displayName} · ${snapshot.settings.model}`;
   const activeThemeOption = useMemo(
     () => getUiThemeOption(uiTheme),
     [uiTheme],
@@ -4003,8 +4049,8 @@ export function WorkspacePage() {
       ? "Queue a follow-up while the agent is still running…"
       : QUICK_HINTS.slash;
   const conversationTokenEstimate = useMemo(
-    () => estimateConversationTokens(activeTurns),
-    [activeTurns],
+    () => estimateConversationTokens(activeTurns, snapshot.settings.provider),
+    [activeTurns, snapshot.settings.provider],
   );
   const contextUsageLabel = `${compactNumber(conversationTokenEstimate)} / 200k`;
   const footerUsageWindows = useMemo(
@@ -4631,14 +4677,23 @@ export function WorkspacePage() {
           className="hmodel"
           id="hmodel"
           type="button"
+          disabled={activeProvider.transportKind === "cli"}
           ref={modelButtonRef}
           onClick={() => {
+            if (activeProvider.transportKind === "cli") {
+              return;
+            }
             setThemePickerOpen(false);
             setModelPickerOpen((current) => !current);
           }}
+          title={
+            activeProvider.transportKind === "cli"
+              ? `${activeProvider.displayName} uses its own CLI model configuration`
+              : undefined
+          }
         >
           <div className="mdot" />
-          <span id="mlabel">{snapshot.settings.model}</span>
+          <span id="mlabel">{providerModelLabel}</span>
           <span className="hmodel-arrow">▾</span>
         </button>
       </header>
@@ -4762,6 +4817,7 @@ export function WorkspacePage() {
                   onBack={closeEditor}
                   onSave={saveEditorFile}
                   preview={editorPreviewState}
+                  providerId={snapshot.settings.provider}
                   variant="page"
                 />
               ) : (
@@ -4794,6 +4850,7 @@ export function WorkspacePage() {
                   onPlan={triggerPlan}
                   onReview={handleTranscriptReview}
                   onSlash={triggerSlash}
+                  providerId={snapshot.settings.provider}
                   streamVisible={streamVisible}
                 />
                 <LiveStatusInline
@@ -5110,7 +5167,7 @@ export function WorkspacePage() {
         </div>
         <div className="sbi sbi-model" id="sb-model">
           <ChromeIcon name="model" />
-          <span>{snapshot.settings.model}</span>
+          <span>{providerModelLabel}</span>
         </div>
         <div className="sbi sbi-access">
           <ChromeIcon name="shield" />
@@ -5121,7 +5178,7 @@ export function WorkspacePage() {
         </div>
       </div>
 
-      {modelPickerOpen ? (
+      {modelPickerOpen && activeProvider.transportKind !== "cli" ? (
         <div
           id="mpicker"
           style={{
@@ -5255,7 +5312,9 @@ export function WorkspacePage() {
                 void copyText(item.text).then(() => pushToast("Copied", "ok"));
               }
               if (item?.type === "userMessage") {
-                void copyText(getUserText(item)).then(() => pushToast("Copied", "ok"));
+                void copyText(
+                  getUserText(item, snapshot.settings.provider),
+                ).then(() => pushToast("Copied", "ok"));
               }
               setContextMenu(null);
             }}
@@ -5271,7 +5330,7 @@ export function WorkspacePage() {
                 fillComposer(item.text);
               }
               if (item?.type === "userMessage") {
-                fillComposer(getUserText(item));
+                fillComposer(getUserText(item, snapshot.settings.provider));
               }
               setContextMenu(null);
             }}

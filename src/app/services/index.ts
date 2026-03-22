@@ -7,10 +7,12 @@ export {
   toRenderableImageUrl,
 } from "./presentation/workspacePresentationService";
 export {
-  activeProviderAdapter,
   DEFAULT_PROVIDER_ID,
   getProviderAdapter,
+  isProviderId,
   listProviderAdapters,
+  persistProviderId,
+  readStoredProviderId,
 } from "./providers";
 export {
   buildProviderOptimisticFileUploadPath,

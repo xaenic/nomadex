@@ -17,6 +17,7 @@ import type { Components } from "react-markdown";
 
 import type { ThreadItem, Turn } from "../../protocol/v2";
 import type { ThreadRecord } from "../mockData";
+import type { ProviderId } from "../services/providers";
 import {
   getUserMessageDisplay,
   parseInlineSegments,
@@ -146,6 +147,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onEdit,
   onContext,
   onOpenFile,
+  providerId,
 }: {
   activeThread: ThreadRecord | null;
   activeThreadLabel: string;
@@ -161,6 +163,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onEdit: (value: string) => void;
   onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
   onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
 }) {
   if (!activeThread) {
     return <WelcomeState onFill={onFill} onSlash={onSlash} />;
@@ -196,6 +199,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                 onFork={onFork}
                 onOpenFile={onOpenFile}
                 onPlan={onPlan}
+                providerId={providerId}
                 onReview={onReview}
                 outputVisible={
                   item.type === "commandExecution"
@@ -215,6 +219,7 @@ export const ChatTranscript = memo(function ChatTranscript({
               <TurnErrorCard
                 code={formatTurnErrorCode(turn.error?.codexErrorInfo ?? null)}
                 onOpenFile={onOpenFile}
+                providerId={providerId}
                 status={turn.status}
                 text={errorText}
               />
@@ -340,11 +345,13 @@ const TurnErrorCard = memo(function TurnErrorCard({
   text,
   code,
   onOpenFile,
+  providerId,
 }: {
   status: Turn["status"];
   text: string;
   code: string | null;
   onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
 }) {
   return (
     <div className="msg">
@@ -355,7 +362,11 @@ const TurnErrorCard = memo(function TurnErrorCard({
       </div>
       <div className="mb">
         <div className="turn-error-card">
-          <MessageTextFlow onOpenFile={onOpenFile} text={text} />
+          <MessageTextFlow
+            onOpenFile={onOpenFile}
+            providerId={providerId}
+            text={text}
+          />
           {code ? <div className="turn-error-code">{code}</div> : null}
         </div>
       </div>
@@ -366,9 +377,11 @@ const TurnErrorCard = memo(function TurnErrorCard({
 const MessageInlineFlow = memo(function MessageInlineFlow({
   text,
   onOpenFile,
+  providerId,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
 }) {
   const segments = useMemo(() => parseInlineSegments(text), [text]);
 
@@ -387,7 +400,7 @@ const MessageInlineFlow = memo(function MessageInlineFlow({
           );
         }
 
-        const href = toBrowseUrl(segment.path);
+        const href = toBrowseUrl(segment.path, providerId);
         if (href === "#") {
           return onOpenFile ? (
             <button
@@ -492,11 +505,13 @@ const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
   onOpenFile,
   streaming = false,
   showCursor = false,
+  providerId,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
   streaming?: boolean;
   showCursor?: boolean;
+  providerId?: ProviderId;
 }) {
   const deferredText = useDeferredValue(text);
   const sourceText = streaming ? deferredText : text;
@@ -507,7 +522,10 @@ const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
   const components = useMemo<Components>(
     () => ({
       a({ href, children }) {
-        const localFile = typeof href === "string" ? resolveLocalFileReference(href) : null;
+        const localFile =
+          typeof href === "string"
+            ? resolveLocalFileReference(href, providerId)
+            : null;
         if (localFile) {
           return (
             <button
@@ -537,7 +555,10 @@ const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
         );
       },
       img({ src, alt }) {
-        const renderableUrl = typeof src === "string" ? toRenderableImageUrl(src) : "";
+        const renderableUrl =
+          typeof src === "string"
+            ? toRenderableImageUrl(src, providerId)
+            : "";
         if (!renderableUrl) {
           return alt ? <span className="message-inline-code">{alt}</span> : null;
         }
@@ -566,7 +587,7 @@ const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
         return <code className={clsx("message-markdown-code", className)}>{children}</code>;
       },
     }),
-    [onOpenFile],
+    [onOpenFile, providerId],
   );
 
   return (
@@ -596,14 +617,19 @@ const MessageTextFlow = memo(function MessageTextFlow({
   textFx,
   streaming = false,
   showCursor = false,
+  providerId,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
   textFx?: TextStreamFx;
   streaming?: boolean;
   showCursor?: boolean;
+  providerId?: ProviderId;
 }) {
-  const blocks = useMemo(() => (streaming ? [] : parseMessageBlocks(text)), [streaming, text]);
+  const blocks = useMemo(
+    () => (streaming ? [] : parseMessageBlocks(text, providerId)),
+    [providerId, streaming, text],
+  );
 
   if (streaming) {
     const activeFx = textFx ?? null;
@@ -668,7 +694,11 @@ const MessageTextFlow = memo(function MessageTextFlow({
         if (!hasFade) {
           return (
             <p className="message-text" key={`text-${index}`}>
-              <MessageInlineFlow onOpenFile={onOpenFile} text={block.value} />
+              <MessageInlineFlow
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+                text={block.value}
+              />
             </p>
           );
         }
@@ -680,18 +710,30 @@ const MessageTextFlow = memo(function MessageTextFlow({
         return (
           <p className="message-text" key={`text-${index}`}>
             {stablePrefix ? (
-              <MessageInlineFlow onOpenFile={onOpenFile} text={stablePrefix} />
+              <MessageInlineFlow
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+                text={stablePrefix}
+              />
             ) : null}
             {freshText ? (
               <span
                 className="message-text-tail"
                 key={`tail-${index}-${activeFx?.to ?? block.value.length}`}
               >
-                <MessageInlineFlow onOpenFile={onOpenFile} text={freshText} />
+                <MessageInlineFlow
+                  onOpenFile={onOpenFile}
+                  providerId={providerId}
+                  text={freshText}
+                />
               </span>
             ) : null}
             {trailingSuffix ? (
-              <MessageInlineFlow onOpenFile={onOpenFile} text={trailingSuffix} />
+              <MessageInlineFlow
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+                text={trailingSuffix}
+              />
             ) : null}
           </p>
         );
@@ -713,6 +755,7 @@ const ThreadItemView = memo(function ThreadItemView({
   onEdit,
   onContext,
   onOpenFile,
+  providerId,
 }: {
   item: ThreadItem;
   turnStatus: Turn["status"];
@@ -726,6 +769,7 @@ const ThreadItemView = memo(function ThreadItemView({
   onEdit: (value: string) => void;
   onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
   onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
 }) {
   const [commandExpanded, setCommandExpanded] = useState(
     item.type === "commandExecution" ? item.status === "inProgress" : false,
@@ -775,7 +819,7 @@ const ThreadItemView = memo(function ThreadItemView({
   }, [commandStatus, item.type]);
 
   if (item.type === "userMessage") {
-    const display = getUserMessageDisplay(item);
+    const display = getUserMessageDisplay(item, providerId);
     const fileAttachmentKeys = new Set(
       display.fileAttachments.map((attachment) =>
         messageAttachmentIdentity(attachment.label, attachment.path),
@@ -808,7 +852,7 @@ const ThreadItemView = memo(function ThreadItemView({
           {display.images.length > 0 ? (
             <div className="message-image-list">
               {display.images.map((imageUrl, index) => {
-                const renderableUrl = toRenderableImageUrl(imageUrl);
+                const renderableUrl = toRenderableImageUrl(imageUrl, providerId);
                 if (!renderableUrl) {
                   return null;
                 }
@@ -890,7 +934,13 @@ const ThreadItemView = memo(function ThreadItemView({
               })}
             </div>
           ) : null}
-          {display.text ? <MessageTextFlow onOpenFile={onOpenFile} text={display.text} /> : null}
+          {display.text ? (
+            <MessageTextFlow
+              onOpenFile={onOpenFile}
+              providerId={providerId}
+              text={display.text}
+            />
+          ) : null}
           <div className="msg-time">{userMessageTimeLabel}</div>
         </div>
         <div className="macts">
@@ -924,12 +974,17 @@ const ThreadItemView = memo(function ThreadItemView({
             streaming ? (
               <MessageMarkdownFlow
                 onOpenFile={onOpenFile}
+                providerId={providerId}
                 showCursor={streaming}
                 streaming={streaming}
                 text={text}
               />
             ) : (
-              <MessageMarkdownFlow onOpenFile={onOpenFile} text={text} />
+              <MessageMarkdownFlow
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+                text={text}
+              />
             )
           ) : null}
         </div>

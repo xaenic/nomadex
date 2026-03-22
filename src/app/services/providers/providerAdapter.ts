@@ -1,7 +1,23 @@
+export type ProviderId =
+  | "codex"
+  | "antigravity"
+  | "opencode"
+  | "qwen-code"
+  | "gemini-cli"
+  | "github-copilot";
+
+export type ProviderAvailability = "ready" | "scaffolded";
+export type ProviderTransportKind = "bridge" | "cli";
+
 export type ProviderAdapter = {
-  id: string;
+  id: ProviderId;
   displayName: string;
+  description: string;
   transportLabel: string;
+  availability: ProviderAvailability;
+  transportKind: ProviderTransportKind;
+  defaultModel: string | null;
+  installCommand?: string;
   wsProxyPath: string;
   authCompletePath: string;
   localImagePath: string;
@@ -11,6 +27,9 @@ export type ProviderAdapter = {
   requestHeading: string;
   requestMarkerPattern: RegExp;
 };
+
+export const GENERIC_REQUEST_MARKER_PATTERN =
+  /(?:^|\n)\s{0,3}#{0,6}\s*my request(?:\s+for\s+[^:\n]+)?\s*:?\s*/giu;
 
 const trimWorkspaceRoot = (cwd: string) => cwd.replace(/[\\/]+$/u, "");
 
@@ -48,3 +67,6 @@ export const buildProviderBrowseUrl = (
   adapter: ProviderAdapter,
   pathValue: string,
 ) => `${adapter.localBrowsePath}${encodeURI(pathValue)}`;
+
+export const providerIsReady = (adapter: ProviderAdapter) =>
+  adapter.availability === "ready";

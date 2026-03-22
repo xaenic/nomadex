@@ -37,7 +37,9 @@ import type {
   UserInput,
 } from "../../../protocol/v2";
 import {
+  createBlankThreadRecord,
   createFallbackDashboardData,
+  createProviderSetupMap,
   type ApprovalRequest,
   type CollaborationPreset,
   type ComposerFile,
@@ -45,6 +47,7 @@ import {
   type DashboardData,
   type FeatureFlag as UiFeatureFlag,
   type MentionAttachment,
+  type ProviderSetupState,
   type RemoteSkillCard,
   type SettingsState,
   type SkillCard,
@@ -54,10 +57,16 @@ import {
   type WorkspaceMode,
 } from "../../mockData";
 import {
-  activeProviderAdapter,
   buildProviderFilesUploadRoot,
   buildProviderOptimisticFileUploadPath,
   buildProviderUploadRoot,
+  getProviderAdapter,
+  isProviderId,
+  listProviderAdapters,
+  persistProviderId,
+  providerIsReady,
+  type ProviderAdapter,
+  type ProviderId,
 } from "../providers";
 
 type EventListener = (snapshot: DashboardData) => void;
@@ -75,16 +84,16 @@ type ServerEnvelope = {
   error?: unknown;
 };
 
-const inferProxyWsUrl = () => {
+const inferProxyWsUrl = (adapter: ProviderAdapter) => {
   if (typeof window === "undefined") {
     return "ws://127.0.0.1:3901";
   }
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}${activeProviderAdapter.wsProxyPath}`;
+  return `${protocol}//${window.location.host}${adapter.wsProxyPath}`;
 };
 
-const resolveWsUrls = () => {
+const resolveWsUrls = (adapter: ProviderAdapter) => {
   const urls: string[] = [];
   const addUrl = (value: string | undefined) => {
     if (!value || urls.includes(value)) {
@@ -101,12 +110,26 @@ const resolveWsUrls = () => {
   }
 
   addUrl(import.meta.env.VITE_WORKSPACE_WS_URL || import.meta.env.VITE_CODEX_WS_URL);
-  addUrl(inferProxyWsUrl());
+  addUrl(inferProxyWsUrl(adapter));
   return urls;
 };
 
-const WS_URL_CANDIDATES = resolveWsUrls();
-const DEFAULT_WS_URL = WS_URL_CANDIDATES[0] ?? "ws://127.0.0.1:3901";
+const defaultWsUrlForProvider = (adapter: ProviderAdapter) =>
+  resolveWsUrls(adapter)[0] ?? "ws://127.0.0.1:3901";
+
+const providerUnavailableMessage = (adapter: ProviderAdapter) =>
+  `${adapter.displayName} is scaffolded in Nomadex but its transport is not wired yet.`;
+
+const LOCAL_PROVIDER_THREAD_PREFIX = "local-provider:";
+
+const isLocalProviderThreadId = (threadId: string) =>
+  threadId.startsWith(LOCAL_PROVIDER_THREAD_PREFIX);
+
+const randomLocalProviderThreadId = (providerId: ProviderId) =>
+  `${LOCAL_PROVIDER_THREAD_PREFIX}${providerId}:${Date.now().toString(36)}`;
+
+const isHeadlessCliProvider = (providerId: ProviderId) =>
+  providerId === "opencode" || providerId === "qwen-code";
 
 const DEFAULT_STEER_SUGGESTIONS = [
   "Keep the answer terse and operational.",
@@ -124,6 +147,17 @@ const relativeNow = () => "just now";
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const safeString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
+const stripAnsi = (value: string) => value.replace(/\x1B\[[0-9;]*m/gu, "");
+
+const cloneProviderSetupMap = (
+  value: DashboardData["providerSetup"],
+): DashboardData["providerSetup"] =>
+  Object.fromEntries(
+    Object.entries(value).map(([providerId, setup]) => [
+      providerId,
+      { ...setup },
+    ]),
+  ) as DashboardData["providerSetup"];
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message.trim()) {
@@ -183,6 +217,7 @@ const toSettingsState = (config: Config, fallback: SettingsState): SettingsState
       : fallback.analytics;
 
   return {
+    provider: isProviderId(config.model_provider) ? config.model_provider : fallback.provider,
     model: config.model ?? fallback.model,
     reasoningEffort: config.model_reasoning_effort ?? fallback.reasoningEffort,
     approvalPolicy: mapApprovalPolicy(config.approval_policy, fallback.approvalPolicy),
@@ -756,7 +791,11 @@ const settingEditsFromPatch = (patch: Partial<SettingsState>): Array<{ keyPath: 
   return edits;
 };
 
-const buildPromptText = (text: string, mentions: Array<MentionAttachment>) => {
+const buildPromptText = (
+  text: string,
+  mentions: Array<MentionAttachment>,
+  adapter: ProviderAdapter,
+) => {
   const sections: string[] = [];
   const normalizedText = text.trim();
   const fileMentions = mentions.filter((mention) => mention.kind === "file");
@@ -780,7 +819,7 @@ const buildPromptText = (text: string, mentions: Array<MentionAttachment>) => {
   }
 
   if (sections.length > 0 || normalizedText) {
-    sections.push("# My request:");
+    sections.push(adapter.requestHeading);
     if (normalizedText) {
       sections.push(normalizedText);
     }
@@ -790,9 +829,16 @@ const buildPromptText = (text: string, mentions: Array<MentionAttachment>) => {
   return "";
 };
 
-const toTurnInputs = (text: string, mentions: Array<MentionAttachment>, skills: Array<SkillCard>, images: Array<string>): Array<UserInput> => {
+const toTurnInputs = (
+  text: string,
+  mentions: Array<MentionAttachment>,
+  skills: Array<SkillCard>,
+  images: Array<string>,
+  providerId: ProviderId,
+): Array<UserInput> => {
   const inputs: Array<UserInput> = [];
-  const promptText = buildPromptText(text, mentions);
+  const adapter = getProviderAdapter(providerId);
+  const promptText = buildPromptText(text, mentions, adapter);
 
   if (promptText) {
     inputs.push({
@@ -828,20 +874,65 @@ const toTurnInputs = (text: string, mentions: Array<MentionAttachment>, skills: 
   return inputs;
 };
 
+const buildExternalCliPrompt = (
+  adapter: ProviderAdapter,
+  text: string,
+  mentions: Array<MentionAttachment>,
+) => buildPromptText(text, mentions, adapter);
+
+const buildExternalCliCommand = ({
+  adapter,
+  prompt,
+  cwd,
+  model,
+  filePaths,
+}: {
+  adapter: ProviderAdapter;
+  prompt: string;
+  cwd: string;
+  model: string;
+  filePaths: Array<string>;
+}) => {
+  if (adapter.id === "opencode") {
+    const command = ["opencode", "run"];
+    if (model && model !== "default" && model.includes("/")) {
+      command.push("--model", model);
+    }
+    for (const filePath of filePaths) {
+      command.push("--file", filePath);
+    }
+    command.push("--dir", cwd, prompt);
+    return command;
+  }
+
+  if (adapter.id === "qwen-code") {
+    return ["qwen", "-p", prompt];
+  }
+
+  return null;
+};
+
 const toOptimisticFileMentions = (
   cwd: string,
   files: Array<ComposerFile>,
+  providerId: ProviderId,
 ): Array<MentionAttachment> =>
   files.map((file) => ({
     id: `optimistic-file:${file.id}`,
     name: file.name,
-    path: buildProviderOptimisticFileUploadPath(activeProviderAdapter, cwd, file.name),
+    path: buildProviderOptimisticFileUploadPath(
+      getProviderAdapter(providerId),
+      cwd,
+      file.name,
+    ),
     kind: "file",
   }));
 
 const cloneDashboardSnapshot = (snapshot: DashboardData): DashboardData => ({
   ...snapshot,
   threads: [...snapshot.threads],
+  providers: [...snapshot.providers],
+  providerSetup: cloneProviderSetupMap(snapshot.providerSetup),
   models: [...snapshot.models],
   collaborationModes: [...snapshot.collaborationModes],
   settings: { ...snapshot.settings },
@@ -868,10 +959,15 @@ const settingsToCollaborationMode = (settings: SettingsState): CollaborationMode
   },
 });
 
-const toRuntimeStatus = (mode: DashboardData["transport"]["mode"], status: DashboardData["transport"]["status"], error: string | null) => ({
+const toRuntimeStatus = (
+  mode: DashboardData["transport"]["mode"],
+  status: DashboardData["transport"]["status"],
+  error: string | null,
+  endpoint: string,
+) => ({
   mode,
   status,
-  endpoint: DEFAULT_WS_URL,
+  endpoint,
   error,
 });
 
@@ -1194,6 +1290,16 @@ export class WorkspaceRuntimeService {
     string,
     { threadId: string; cwd: string; command: string; title: string }
   >();
+  private externalProviderRuns = new Map<
+    string,
+    {
+      threadId: string;
+      turnId: string;
+      itemId: string;
+      providerId: ProviderId;
+      stderr: string;
+    }
+  >();
   private standaloneTerminalDecoders = new Map<
     string,
     { stdout: TextDecoder; stderr: TextDecoder }
@@ -1203,10 +1309,34 @@ export class WorkspaceRuntimeService {
   private emitTimer: number | null = null;
 
   constructor(initialData = createFallbackDashboardData()) {
+    const initialAdapter = getProviderAdapter(initialData.settings.provider);
     this.snapshot = {
       ...initialData,
-      transport: toRuntimeStatus("mock", "connecting", null),
+      providers: [...initialData.providers],
+      providerSetup: cloneProviderSetupMap(initialData.providerSetup),
+      transport: toRuntimeStatus(
+        "mock",
+        "connecting",
+        null,
+        defaultWsUrlForProvider(initialAdapter),
+      ),
     };
+  }
+
+  private getActiveProviderId() {
+    return this.snapshot.settings.provider;
+  }
+
+  private getActiveProviderAdapter() {
+    return getProviderAdapter(this.getActiveProviderId());
+  }
+
+  private getWsUrlCandidates(adapter = this.getActiveProviderAdapter()) {
+    return resolveWsUrls(adapter);
+  }
+
+  private getDefaultWsUrl(adapter = this.getActiveProviderAdapter()) {
+    return defaultWsUrlForProvider(adapter);
   }
 
   subscribe(listener: EventListener) {
@@ -1220,6 +1350,7 @@ export class WorkspaceRuntimeService {
   disconnect() {
     this.clearScheduledEmit();
     this.markStandaloneTerminalsDisconnected("Connection closed.");
+    this.markExternalProviderRunsDisconnected("Connection closed.");
     this.socket?.close();
     this.socket = null;
     this.failPending(new Error("Local agent bridge connection closed."));
@@ -1234,13 +1365,19 @@ export class WorkspaceRuntimeService {
     }
 
     this.markStandaloneTerminalsDisconnected("Connection closed.");
+    this.markExternalProviderRunsDisconnected("Connection closed.");
     this.socket = null;
     this.connectPromise = null;
     this.failPending(new Error("Local agent bridge connection closed."));
     this.loadingThreads.clear();
     this.resumedThreads.clear();
     this.mutate((snapshot) => {
-      snapshot.transport = toRuntimeStatus(snapshot.transport.mode, "offline", snapshot.transport.error);
+      snapshot.transport = toRuntimeStatus(
+        snapshot.transport.mode,
+        "offline",
+        snapshot.transport.error,
+        this.getDefaultWsUrl(),
+      );
     });
   }
 
@@ -1404,6 +1541,213 @@ export class WorkspaceRuntimeService {
     }
   }
 
+  private appendExternalProviderDelta(
+    threadId: string,
+    turnId: string,
+    itemId: string,
+    delta: string,
+    live: boolean,
+  ) {
+    if (!delta) {
+      return;
+    }
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, threadId, (record) => {
+        const turns = ensureTurnExists(record.thread.turns, turnId).map((turn) => {
+          if (turn.id !== turnId) {
+            return turn;
+          }
+
+          const hasItem = turn.items.some(
+            (item) => item.id === itemId && item.type === "agentMessage",
+          );
+          const baseItems = hasItem
+            ? turn.items
+            : [
+                ...turn.items,
+                {
+                  type: "agentMessage",
+                  id: itemId,
+                  text: "",
+                  phase: null,
+                } satisfies Extract<ThreadItem, { type: "agentMessage" }>,
+              ];
+
+          const items = baseItems.map((item) =>
+            item.id === itemId && item.type === "agentMessage"
+              ? {
+                  ...item,
+                  text: `${item.text}${delta}`,
+                }
+              : item,
+          );
+
+          const agentMessage = items.find(
+            (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
+              item.id === itemId && item.type === "agentMessage",
+          );
+
+          if (agentMessage) {
+            ensureStream(
+              snapshot,
+              threadId,
+              turnId,
+              agentMessage.id,
+              "text",
+              agentMessage.text,
+              live,
+            );
+          }
+
+          return {
+            ...turn,
+            items,
+          };
+        });
+
+        return {
+          ...record,
+          thread: {
+            ...record.thread,
+            status: live ? { type: "active", activeFlags: [] } : { type: "idle" },
+            turns,
+            updatedAt: Math.floor(Date.now() / 1000),
+          },
+        };
+      });
+    });
+  }
+
+  private finalizeExternalProviderRun(
+    processId: string,
+    result:
+      | { type: "response"; response: CommandExecResponse }
+      | { type: "error"; error: unknown }
+      | { type: "disconnected"; detail: string },
+  ) {
+    const meta = this.externalProviderRuns.get(processId);
+    if (!meta) {
+      return;
+    }
+
+    const decoderTail = this.flushStandaloneTerminalDecoders(processId);
+    const trailingText =
+      result.type === "response"
+        ? `${result.response.stdout}${result.response.stderr}`
+        : result.type === "disconnected"
+          ? result.detail
+          : getErrorMessage(result.error) || "Unable to run external provider.";
+    const combinedTail = [decoderTail, trailingText]
+      .filter((value) => value.trim().length > 0)
+      .join("");
+
+    if (combinedTail) {
+      this.appendExternalProviderDelta(
+        meta.threadId,
+        meta.turnId,
+        meta.itemId,
+        combinedTail,
+        false,
+      );
+    }
+
+    const failed =
+      result.type !== "response" || result.response.exitCode !== 0;
+    const errorMessage =
+      result.type === "response"
+        ? [result.response.stderr, meta.stderr]
+            .filter((value) => value.trim().length > 0)
+            .join("\n")
+            .trim()
+        : result.type === "disconnected"
+          ? result.detail
+          : getErrorMessage(result.error);
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, meta.threadId, (record) => {
+        const nextTurnStatus: Turn["status"] = failed ? "failed" : "completed";
+        const nextTurnError: TurnError | null = failed
+          ? {
+              message:
+                errorMessage ||
+                `${getProviderAdapter(meta.providerId).displayName} run failed.`,
+              codexErrorInfo: null,
+              additionalDetails: null,
+            }
+          : null;
+        const turns: Array<Turn> = record.thread.turns.map((turn) => {
+          if (turn.id !== meta.turnId) {
+            return turn;
+          }
+
+          const items: Array<ThreadItem> = turn.items.some(
+            (item) => item.id === meta.itemId && item.type === "agentMessage",
+          )
+            ? turn.items
+            : [
+                ...turn.items,
+                {
+                  type: "agentMessage",
+                  id: meta.itemId,
+                  text: "",
+                  phase: null,
+                } satisfies Extract<ThreadItem, { type: "agentMessage" }>,
+              ];
+
+          if (!combinedTail) {
+            const agentMessage = items.find(
+              (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
+                item.id === meta.itemId && item.type === "agentMessage",
+            );
+            if (agentMessage) {
+              ensureStream(
+                snapshot,
+                meta.threadId,
+                meta.turnId,
+                agentMessage.id,
+                "text",
+                agentMessage.text,
+                false,
+              );
+            }
+          }
+
+          stopStreamsForItem(snapshot, meta.itemId);
+
+          return {
+            ...turn,
+            items,
+            status: nextTurnStatus,
+            error: nextTurnError,
+          };
+        });
+
+        return {
+          ...record,
+          thread: {
+            ...record.thread,
+            status: { type: "idle" },
+            turns,
+            updatedAt: Math.floor(Date.now() / 1000),
+          },
+        };
+      });
+    });
+
+    this.externalProviderRuns.delete(processId);
+  }
+
+  private markExternalProviderRunsDisconnected(detail: string) {
+    const processIds = [...this.externalProviderRuns.keys()];
+    for (const processId of processIds) {
+      this.finalizeExternalProviderRun(processId, {
+        type: "disconnected",
+        detail,
+      });
+    }
+  }
+
   private clearScheduledEmit() {
     if (typeof window === "undefined") {
       return;
@@ -1513,8 +1857,23 @@ export class WorkspaceRuntimeService {
     }
 
     this.connectPromise = (async () => {
+      const adapter = this.getActiveProviderAdapter();
+      if (!providerIsReady(adapter)) {
+        const error = providerUnavailableMessage(adapter);
+        this.mutate((snapshot) => {
+          snapshot.transport = toRuntimeStatus(
+            "mock",
+            "error",
+            error,
+            this.getDefaultWsUrl(adapter),
+          );
+        });
+        throw new Error(error);
+      }
+
+      const wsUrlCandidates = this.getWsUrlCandidates(adapter);
       let connected = false;
-      for (const candidate of WS_URL_CANDIDATES) {
+      for (const candidate of wsUrlCandidates) {
         try {
           this.socket = await this.openSocket(candidate);
           connected = true;
@@ -1526,12 +1885,17 @@ export class WorkspaceRuntimeService {
 
       if (!connected || !this.socket) {
         const error =
-          WS_URL_CANDIDATES.length > 1
-            ? `Failed to connect to the local agent bridge. Tried: ${WS_URL_CANDIDATES.join(", ")}`
-            : `Failed to connect to ${DEFAULT_WS_URL}`;
+          wsUrlCandidates.length > 1
+            ? `Failed to connect to the ${adapter.transportLabel}. Tried: ${wsUrlCandidates.join(", ")}`
+            : `Failed to connect to ${this.getDefaultWsUrl(adapter)}`;
 
         this.mutate((snapshot) => {
-          snapshot.transport = toRuntimeStatus("mock", "error", error);
+          snapshot.transport = toRuntimeStatus(
+            "mock",
+            "error",
+            error,
+            this.getDefaultWsUrl(adapter),
+          );
         });
         throw new Error(error);
       }
@@ -1550,7 +1914,12 @@ export class WorkspaceRuntimeService {
         await this.bootstrap();
       } catch (error) {
         this.mutate((snapshot) => {
-          snapshot.transport = toRuntimeStatus("mock", "error", error instanceof Error ? error.message : String(error));
+          snapshot.transport = toRuntimeStatus(
+            "mock",
+            "error",
+            error instanceof Error ? error.message : String(error),
+            this.getDefaultWsUrl(adapter),
+          );
         });
         throw error;
       }
@@ -1610,6 +1979,11 @@ export class WorkspaceRuntimeService {
 
     this.mutate((snapshot) => {
       snapshot.threads = sortThreads(threads);
+      snapshot.providers = listProviderAdapters();
+      snapshot.providerSetup = {
+        ...createProviderSetupMap(snapshot.providers),
+        ...snapshot.providerSetup,
+      };
       snapshot.models = modelsResult.status === "fulfilled" ? modelsResult.value.data : snapshot.models;
       snapshot.collaborationModes = toCollaborationModes(
         collabResult.status === "fulfilled" ? collabResult.value : null,
@@ -1633,7 +2007,12 @@ export class WorkspaceRuntimeService {
       snapshot.mcpServers = mcpResult.status === "fulfilled" ? mcpResult.value.data : snapshot.mcpServers;
       snapshot.settings =
         configResult.status === "fulfilled" ? toSettingsState(configResult.value.config, snapshot.settings) : snapshot.settings;
-      snapshot.transport = toRuntimeStatus("live", "connected", null);
+      snapshot.transport = toRuntimeStatus(
+        "live",
+        "connected",
+        null,
+        this.getDefaultWsUrl(),
+      );
     });
 
     const firstThread = this.snapshot.threads[0]?.thread;
@@ -1644,6 +2023,10 @@ export class WorkspaceRuntimeService {
   }
 
   async ensureThreadLoaded(threadId: string) {
+    if (isLocalProviderThreadId(threadId)) {
+      return;
+    }
+
     if (this.loadingThreads.has(threadId)) {
       return;
     }
@@ -1675,6 +2058,10 @@ export class WorkspaceRuntimeService {
   }
 
   async resumeThread(threadId: string, force = false) {
+    if (isLocalProviderThreadId(threadId)) {
+      return;
+    }
+
     if (!threadId || this.loadingThreads.has(threadId)) {
       return;
     }
@@ -1732,6 +2119,35 @@ export class WorkspaceRuntimeService {
       cwd?: string;
     },
   ) {
+    if (isHeadlessCliProvider(settings.provider)) {
+      const threadId = randomLocalProviderThreadId(settings.provider);
+      const cwd =
+        options?.cwd ?? this.snapshot.threads[0]?.thread.cwd ?? "/home/allan";
+      const record = createBlankThreadRecord(
+        threadId,
+        "New Session",
+        settings,
+        cwd,
+      );
+
+      this.mutate((snapshot) => {
+        upsertThreadRecord(snapshot, {
+          ...record,
+          thread: {
+            ...record.thread,
+            source: "cli",
+            status: { type: "idle" },
+            modelProvider: settings.provider,
+            preview: "New Session",
+            name: "New Session",
+          },
+        });
+      });
+
+      await this.loadDirectory(cwd).catch(() => undefined);
+      return threadId;
+    }
+
     const response = await this.request<ThreadStartResponse>("thread/start", {
       cwd: options?.cwd ?? this.snapshot.threads[0]?.thread.cwd ?? "/home/allan",
       model: settings.model,
@@ -1756,7 +2172,7 @@ export class WorkspaceRuntimeService {
       return [];
     }
 
-    const uploadDir = buildProviderUploadRoot(activeProviderAdapter, cwd);
+    const uploadDir = buildProviderUploadRoot(this.getActiveProviderAdapter(), cwd);
     await this.request("fs/createDirectory", {
       path: uploadDir,
       recursive: true,
@@ -1786,7 +2202,7 @@ export class WorkspaceRuntimeService {
       return [];
     }
 
-    const uploadDir = buildProviderFilesUploadRoot(activeProviderAdapter, cwd);
+    const uploadDir = buildProviderFilesUploadRoot(this.getActiveProviderAdapter(), cwd);
     await this.request("fs/createDirectory", {
       path: uploadDir,
       recursive: true,
@@ -1815,6 +2231,111 @@ export class WorkspaceRuntimeService {
     return mentions;
   }
 
+  private async runHeadlessCliTurn(
+    args: {
+      threadId: string;
+      mode: WorkspaceMode;
+      prompt: string;
+      mentions: Array<MentionAttachment>;
+      skills: Array<SkillCard>;
+      files: Array<ComposerFile>;
+      images: Array<ComposerImage>;
+      settings: SettingsState;
+    },
+    thread: Thread,
+  ) {
+    const adapter = getProviderAdapter(args.settings.provider);
+    const uploadedFileMentions = await this.uploadFiles(thread.cwd, args.files);
+    const uploadedImages = await this.uploadImages(thread.cwd, args.images);
+    const combinedMentions = [...args.mentions, ...uploadedFileMentions];
+    const prompt = buildExternalCliPrompt(adapter, args.prompt, combinedMentions);
+    const command = buildExternalCliCommand({
+      adapter,
+      prompt,
+      cwd: thread.cwd,
+      model: args.settings.model,
+      filePaths: uploadedFileMentions.map((entry) => entry.path),
+    });
+
+    if (!command) {
+      throw new Error(`${adapter.displayName} is not wired for headless execution.`);
+    }
+
+    const userInputs = toTurnInputs(
+      args.prompt,
+      combinedMentions,
+      args.skills,
+      uploadedImages,
+      args.settings.provider,
+    );
+    const turnId = `${OPTIMISTIC_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
+    const userItemId = `${OPTIMISTIC_USER_MESSAGE_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
+    const agentItemId = `external-agent:${args.threadId}:${Date.now().toString(36)}`;
+    const processId = randomTerminalProcessId();
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, args.threadId, (record) => ({
+        ...record,
+        thread: {
+          ...record.thread,
+          preview: args.prompt.trim() || record.thread.preview,
+          modelProvider: args.settings.provider,
+          status: { type: "active", activeFlags: [] },
+          turns: sortTurnsById([
+            ...stripOptimisticTurns(record.thread.turns),
+            {
+              id: turnId,
+              status: "inProgress",
+              error: null,
+              items: [
+                {
+                  type: "userMessage",
+                  id: userItemId,
+                  content: userInputs,
+                },
+                {
+                  type: "agentMessage",
+                  id: agentItemId,
+                  text: "",
+                  phase: null,
+                },
+              ],
+            },
+          ]),
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
+      }));
+    });
+
+    this.externalProviderRuns.set(processId, {
+      threadId: args.threadId,
+      turnId,
+      itemId: agentItemId,
+      providerId: args.settings.provider,
+      stderr: "",
+    });
+
+    void this.request<CommandExecResponse>("command/exec", {
+      command,
+      cwd: thread.cwd,
+      processId,
+      streamStdoutStderr: true,
+      disableTimeout: true,
+    })
+      .then((response) => {
+        this.finalizeExternalProviderRun(processId, {
+          type: "response",
+          response,
+        });
+      })
+      .catch((error) => {
+        this.finalizeExternalProviderRun(processId, {
+          type: "error",
+          error,
+        });
+      });
+  }
+
   async sendComposer(args: {
     threadId: string;
     mode: WorkspaceMode;
@@ -1832,6 +2353,11 @@ export class WorkspaceRuntimeService {
     }
 
     if (!thread) {
+      return;
+    }
+
+    if (isHeadlessCliProvider(args.settings.provider)) {
+      await this.runHeadlessCliTurn(args, thread);
       return;
     }
 
@@ -1866,9 +2392,13 @@ export class WorkspaceRuntimeService {
 
     const optimisticInputs = toTurnInputs(
       args.prompt,
-      [...args.mentions, ...toOptimisticFileMentions(thread.cwd, args.files)],
+      [
+        ...args.mentions,
+        ...toOptimisticFileMentions(thread.cwd, args.files, args.settings.provider),
+      ],
       args.skills,
       args.images.map((image) => image.url),
+      args.settings.provider,
     );
     const optimisticUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
       type: "userMessage",
@@ -1907,6 +2437,7 @@ export class WorkspaceRuntimeService {
         combinedMentions,
         args.skills,
         uploadedImages,
+        args.settings.provider,
       );
       const submittedUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
         ...optimisticUserMessage,
@@ -2041,6 +2572,21 @@ export class WorkspaceRuntimeService {
       }));
     });
 
+    const externalProcessEntry = [...this.externalProviderRuns.entries()].find(
+      ([, meta]) => meta.threadId === threadId && meta.turnId === activeTurn.id,
+    );
+    if (externalProcessEntry) {
+      const [processId] = externalProcessEntry;
+      try {
+        await this.request("command/exec/terminate", { processId });
+        this.externalProviderRuns.delete(processId);
+        this.flushStandaloneTerminalDecoders(processId);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     try {
       await this.request<TurnInterruptResponse>("turn/interrupt", {
         threadId,
@@ -2068,9 +2614,19 @@ export class WorkspaceRuntimeService {
       return false;
     }
 
+    if (isHeadlessCliProvider(record.thread.modelProvider as ProviderId)) {
+      return false;
+    }
+
     const uploadedFileMentions = await this.uploadFiles(record.thread.cwd, args.files);
     const uploadedImages = await this.uploadImages(record.thread.cwd, args.images);
-    const inputs = toTurnInputs(args.prompt, [...args.mentions, ...uploadedFileMentions], args.skills, uploadedImages);
+    const inputs = toTurnInputs(
+      args.prompt,
+      [...args.mentions, ...uploadedFileMentions],
+      args.skills,
+      uploadedImages,
+      this.getActiveProviderId(),
+    );
 
     this.mutate((snapshot) => {
       activeTurn.items.forEach((item) => stopStreamsForItem(snapshot, item.id));
@@ -2196,6 +2752,333 @@ export class WorkspaceRuntimeService {
     return response.stdout;
   }
 
+  private providerCheckCwd() {
+    return this.snapshot.threads[0]?.thread.cwd ?? "/home/allan/codex-console";
+  }
+
+  private defaultProviderSetupState(providerId: ProviderId) {
+    return createProviderSetupMap([getProviderAdapter(providerId)])[providerId];
+  }
+
+  private async inspectOpenCodeSetup(cwd: string): Promise<ProviderSetupState> {
+    const adapter = getProviderAdapter("opencode");
+    const installResponse = await this.request<CommandExecResponse>("command/exec", {
+      command: ["bash", "-lc", "command -v opencode >/dev/null 2>&1 && opencode --version"],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    const versionOutput = stripAnsi(
+      [installResponse.stdout, installResponse.stderr].join("\n"),
+    ).trim();
+    if (installResponse.exitCode !== 0) {
+      return {
+        ...this.defaultProviderSetupState("opencode"),
+        status: "needsInstall",
+        summary: "OpenCode is not installed on the host machine.",
+        detail: adapter.installCommand ?? "Install the OpenCode CLI, then check again.",
+        installed: false,
+        configured: false,
+        authenticated: false,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    const authResponse = await this.request<CommandExecResponse>("command/exec", {
+      command: ["opencode", "auth", "list"],
+      cwd,
+      timeoutMs: 8000,
+    });
+    const authOutput = stripAnsi(
+      [authResponse.stdout, authResponse.stderr].join("\n"),
+    ).trim();
+    if (authResponse.exitCode !== 0) {
+      return {
+        ...this.defaultProviderSetupState("opencode"),
+        status: "error",
+        summary: "OpenCode is installed, but its auth status could not be read.",
+        detail: authOutput || "OpenCode auth check failed.",
+        installed: true,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    const credentialsMatch = authOutput.match(/(\d+)\s+credentials?/iu);
+    const credentialsCount = credentialsMatch ? Number(credentialsMatch[1]) : 0;
+    const sourcePath =
+      authOutput.match(/Credentials\s+([^\n]+)/iu)?.[1]?.trim() ?? null;
+
+    return {
+      ...this.defaultProviderSetupState("opencode"),
+      status: credentialsCount > 0 ? "ready" : "needsAuth",
+      summary:
+        credentialsCount > 0
+          ? "OpenCode credentials detected."
+          : "OpenCode is installed, but no provider credentials are configured.",
+      detail:
+        credentialsCount > 0
+          ? `${credentialsCount} credential${credentialsCount === 1 ? "" : "s"} available for OpenCode.`
+          : "Run `opencode auth login` on the host machine, then check again.",
+      installed: true,
+      configured: credentialsCount > 0,
+      authenticated: credentialsCount > 0,
+      version: versionOutput.split(/\s+/u)[0] ?? null,
+      sourcePath,
+      checkedAt: relativeNow(),
+    };
+  }
+
+  private async inspectQwenCodeSetup(cwd: string): Promise<ProviderSetupState> {
+    const adapter = getProviderAdapter("qwen-code");
+    const installResponse = await this.request<CommandExecResponse>("command/exec", {
+      command: ["bash", "-lc", "command -v qwen >/dev/null 2>&1 && qwen --version"],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    const versionOutput = stripAnsi(
+      [installResponse.stdout, installResponse.stderr].join("\n"),
+    ).trim();
+    if (installResponse.exitCode !== 0) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "needsInstall",
+        summary: "Qwen Code is not installed on the host machine.",
+        detail: adapter.installCommand ?? "Install the Qwen Code CLI, then check again.",
+        installed: false,
+        configured: false,
+        authenticated: false,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    const script = `
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const projectRoot = process.argv[1] || process.cwd();
+const candidates = [
+  path.join(projectRoot, ".qwen", "settings.json"),
+  path.join(os.homedir(), ".qwen", "settings.json"),
+];
+const oauthPath = path.join(os.homedir(), ".qwen", "oauth_creds.json");
+let settingsPath = null;
+let settings = null;
+let parseError = null;
+for (const candidate of candidates) {
+  if (!fs.existsSync(candidate)) {
+    continue;
+  }
+  settingsPath = candidate;
+  try {
+    settings = JSON.parse(fs.readFileSync(candidate, "utf8"));
+  } catch (error) {
+    parseError = error instanceof Error ? error.message : String(error);
+  }
+  break;
+}
+const selectedType = settings?.security?.auth?.selectedType ?? null;
+const modelProviders = settings?.modelProviders && typeof settings.modelProviders === "object"
+  ? Object.values(settings.modelProviders).filter(Array.isArray).flat()
+  : [];
+const inlineEnvCount = settings?.env && typeof settings.env === "object"
+  ? Object.values(settings.env).filter((value) => typeof value === "string" && value.trim().length > 0).length
+  : 0;
+const envBackedProviderCount = modelProviders.filter(
+  (entry) =>
+    entry &&
+    typeof entry === "object" &&
+    typeof entry.envKey === "string" &&
+    entry.envKey.length > 0 &&
+    typeof process.env[entry.envKey] === "string" &&
+    process.env[entry.envKey].trim().length > 0,
+).length;
+console.log(JSON.stringify({
+  settingsPath,
+  parseError,
+  selectedType,
+  modelProviderCount: modelProviders.length,
+  inlineEnvCount,
+  envBackedProviderCount,
+  hasOauthCreds: fs.existsSync(oauthPath),
+  oauthPath,
+}));
+`.trim();
+
+    const configResponse = await this.request<CommandExecResponse>("command/exec", {
+      command: ["node", "-e", script, cwd],
+      cwd,
+      timeoutMs: 5000,
+    });
+    const configOutput = stripAnsi(
+      [configResponse.stdout, configResponse.stderr].join("\n"),
+    ).trim();
+    if (configResponse.exitCode !== 0) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "error",
+        summary: "Qwen Code is installed, but its setup could not be inspected.",
+        detail: configOutput || "Qwen Code setup check failed.",
+        installed: true,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    let parsed:
+      | {
+          settingsPath: string | null;
+          parseError: string | null;
+          selectedType: string | null;
+          modelProviderCount: number;
+          inlineEnvCount: number;
+          envBackedProviderCount: number;
+          hasOauthCreds: boolean;
+          oauthPath: string;
+        }
+      | null = null;
+    try {
+      parsed = JSON.parse(configResponse.stdout.trim());
+    } catch {
+      parsed = null;
+    }
+
+    if (!parsed) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "error",
+        summary: "Qwen Code setup output could not be parsed.",
+        detail: configOutput || "Unexpected Qwen Code setup output.",
+        installed: true,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    const selectedType = parsed.selectedType;
+    const hasApiConfig =
+      parsed.modelProviderCount > 0 ||
+      parsed.inlineEnvCount > 0 ||
+      parsed.envBackedProviderCount > 0;
+    const sourcePath =
+      parsed.settingsPath ?? (parsed.hasOauthCreds ? parsed.oauthPath : null);
+
+    if (parsed.parseError) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "error",
+        summary: "Qwen settings.json is invalid.",
+        detail: parsed.parseError,
+        installed: true,
+        configured: false,
+        authenticated: false,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        sourcePath,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    if (!selectedType) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "needsConfig",
+        summary: "Qwen Code is installed, but no auth type is selected.",
+        detail:
+          "Set `security.auth.selectedType` in `~/.qwen/settings.json`, or open `qwen` and use `/auth` first.",
+        installed: true,
+        configured: false,
+        authenticated: false,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        sourcePath,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    if (selectedType === "qwen-oauth") {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: parsed.hasOauthCreds ? "ready" : "needsAuth",
+        summary: parsed.hasOauthCreds
+          ? "Qwen OAuth credentials detected."
+          : "Qwen OAuth is selected, but cached credentials are missing or expired.",
+        detail: parsed.hasOauthCreds
+          ? "Qwen Code can use the cached OAuth session on this host."
+          : "Open `qwen` on the host machine and run `/auth`, then check again.",
+        installed: true,
+        configured: true,
+        authenticated: parsed.hasOauthCreds,
+        version: versionOutput.split(/\s+/u)[0] ?? null,
+        sourcePath,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    return {
+      ...this.defaultProviderSetupState("qwen-code"),
+      status: hasApiConfig ? "ready" : "needsConfig",
+      summary: hasApiConfig
+        ? `Qwen Code is configured for ${selectedType}.`
+        : `Qwen Code selected ${selectedType}, but no provider credentials were found.`,
+      detail: hasApiConfig
+        ? parsed.settingsPath
+          ? "Headless runs will use the configured Qwen settings for this host."
+          : "Qwen Code is relying on environment-level configuration."
+        : "Add provider credentials in `~/.qwen/settings.json` or export the required API key env vars, then check again.",
+      installed: true,
+      configured: hasApiConfig,
+      authenticated: hasApiConfig,
+      version: versionOutput.split(/\s+/u)[0] ?? null,
+      sourcePath,
+      checkedAt: relativeNow(),
+    };
+  }
+
+  async checkProviderSetup(providerId: ProviderId = this.snapshot.settings.provider) {
+    const adapter = getProviderAdapter(providerId);
+
+    this.mutate((snapshot) => {
+      snapshot.providerSetup[providerId] = {
+        ...this.defaultProviderSetupState(providerId),
+        status: "checking",
+        summary: "Checking setup…",
+      };
+    });
+
+    let nextState: ProviderSetupState;
+    if (adapter.transportKind !== "cli") {
+      nextState = {
+        ...this.defaultProviderSetupState(providerId),
+        status: "ready",
+        summary: "Managed by the Nomadex bridge.",
+        detail: "This provider does not use a local CLI binary.",
+        installed: null,
+        configured: null,
+        authenticated: null,
+        checkedAt: relativeNow(),
+      };
+    } else if (providerId === "opencode") {
+      nextState = await this.inspectOpenCodeSetup(this.providerCheckCwd());
+    } else if (providerId === "qwen-code") {
+      nextState = await this.inspectQwenCodeSetup(this.providerCheckCwd());
+    } else {
+      nextState = {
+        ...this.defaultProviderSetupState(providerId),
+        status: "error",
+        summary: `${adapter.displayName} setup checks are not wired yet.`,
+        detail: "This provider still needs its runtime integration.",
+        installed: false,
+        configured: false,
+        authenticated: false,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    this.mutate((snapshot) => {
+      snapshot.providerSetup[providerId] = nextState;
+    });
+  }
+
   async startProjectTerminal(threadId: string, cwd: string) {
     const processId = randomTerminalProcessId();
     const command = "/bin/bash -l";
@@ -2266,11 +3149,22 @@ export class WorkspaceRuntimeService {
   }
 
   async updateSettings(patch: Partial<SettingsState>) {
+    if (patch.provider) {
+      persistProviderId(patch.provider);
+    }
+
     this.mutate((snapshot) => {
       snapshot.settings = {
         ...snapshot.settings,
         ...patch,
       };
+      if (patch.provider) {
+        const adapter = getProviderAdapter(snapshot.settings.provider);
+        snapshot.transport = {
+          ...snapshot.transport,
+          endpoint: this.getDefaultWsUrl(adapter),
+        };
+      }
       snapshot.lastSavedAt = relativeNow();
     });
 
@@ -3118,6 +4012,31 @@ export class WorkspaceRuntimeService {
         const deltaBase64 = safeString(params.deltaBase64);
 
         if (!processId || !deltaBase64) {
+          return;
+        }
+
+        if (this.externalProviderRuns.has(processId)) {
+          const decoded = this.decodeStandaloneTerminalChunk(
+            processId,
+            stream,
+            deltaBase64,
+          );
+          const meta = this.externalProviderRuns.get(processId);
+          if (!meta) {
+            return;
+          }
+
+          if (stream === "stderr") {
+            meta.stderr = `${meta.stderr}${decoded}`;
+          } else {
+            this.appendExternalProviderDelta(
+              meta.threadId,
+              meta.turnId,
+              meta.itemId,
+              decoded,
+              true,
+            );
+          }
           return;
         }
 

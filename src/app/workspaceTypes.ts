@@ -85,6 +85,7 @@ export type WorkspaceActions = {
   saveFile: (path: string, content: string) => Promise<void>;
   readGitGraph: (cwd: string, limit?: number) => Promise<string>;
   readGitStatus: (cwd: string) => Promise<string>;
+  checkProviderSetup: (providerId?: SettingsState["provider"]) => Promise<void>;
   updateSettings: (patch: Partial<SettingsState>) => Promise<void>;
   toggleFeatureFlag: (name: string) => Promise<void>;
   toggleInstalledSkill: (skillId: string) => Promise<void>;
