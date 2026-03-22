@@ -29,7 +29,7 @@ export type UiThemeOption = {
   swatches: [string, string, string];
 };
 
-export type PanelTab = "files" | "diff" | "terminal" | "agents" | "config";
+export type PanelTab = "files" | "graph" | "diff" | "terminal" | "agents" | "config";
 export type QuickMode = "slash" | "mention" | "skill";
 export type RouteSection =
   | "chat"
@@ -82,6 +82,8 @@ export type WorkspaceActions = {
   searchMentions: (cwd: string, query: string) => Promise<void>;
   loadDirectory: (cwd: string) => Promise<void>;
   readFile: (path: string) => Promise<string>;
+  readGitGraph: (cwd: string, limit?: number) => Promise<string>;
+  readGitStatus: (cwd: string) => Promise<string>;
   updateSettings: (patch: Partial<SettingsState>) => Promise<void>;
   toggleFeatureFlag: (name: string) => Promise<void>;
   toggleInstalledSkill: (skillId: string) => Promise<void>;
@@ -157,4 +159,62 @@ export type DiffReviewLine = {
 export type ComposerHighlightSegment = {
   text: string;
   mention: MentionAttachment | null;
+};
+
+export type GitActivityGraphLane = {
+  id: string;
+  label: string;
+  accent: string;
+  emphasis: "base" | "active" | "peer";
+};
+
+export type GitActivityGraphRef = {
+  id: string;
+  label: string;
+  kind: "head" | "local" | "remote" | "tag" | "other";
+  active: boolean;
+};
+
+export type GitWorkingTreeEntry = {
+  id: string;
+  path: string;
+  originalPath: string | null;
+  badge: string;
+  kind: "add" | "update" | "delete" | "rename" | "copy" | "type" | "conflict" | "unknown";
+};
+
+export type GitWorkingTreeBucket = {
+  id: "staged" | "unstaged" | "untracked" | "conflicted";
+  label: string;
+  entries: Array<GitWorkingTreeEntry>;
+};
+
+export type GitWorkingTreeState = {
+  dirty: boolean;
+  summary: string;
+  buckets: Array<GitWorkingTreeBucket>;
+};
+
+export type GitActivityGraphRow = {
+  id: string;
+  graph: string;
+  subject: string;
+  dateLabel: string;
+  author: string;
+  sha: string;
+  refs: Array<GitActivityGraphRef>;
+  emphasis: "current" | "normal" | "muted";
+  threadId: string | null;
+  hint: string | null;
+};
+
+export type GitActivityGraphModel = {
+  repoLabel: string;
+  branchLabel: string;
+  commitLabel: string | null;
+  graphWidth: number;
+  source: "git" | "session";
+  lanes: Array<GitActivityGraphLane>;
+  rows: Array<GitActivityGraphRow>;
+  workingTree: GitWorkingTreeState | null;
 };

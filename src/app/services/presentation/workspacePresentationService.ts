@@ -4,6 +4,16 @@ import {
   buildProviderBrowseUrl,
   buildProviderImageUrl,
 } from "../providers";
+import type { ThreadRecord } from "../../mockData";
+import type {
+  GitActivityGraphLane,
+  GitActivityGraphModel,
+  GitActivityGraphRef,
+  GitActivityGraphRow,
+  GitWorkingTreeBucket,
+  GitWorkingTreeEntry,
+  GitWorkingTreeState,
+} from "../../workspaceTypes";
 
 export type UiFileAttachment = {
   label: string;
@@ -595,5 +605,665 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     statusText,
     reasoningText,
     errorText,
+  };
+}
+
+const MAIN_BRANCH_NAMES = new Set(["main", "master", "trunk"]);
+const GRAPH_ACCENTS = [
+  "var(--ac)",
+  "var(--ac2)",
+  "var(--ac3)",
+  "var(--gn)",
+  "var(--og)",
+];
+
+const compactText = (value: string, maxLength: number) =>
+  value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+
+const basename = (value: string) =>
+  value.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? value;
+
+const compactPath = (value: string, maxLength = 42) => {
+  const normalized = value.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  const tail = parts.slice(-2).join("/");
+  return compactText(tail || normalized, maxLength);
+};
+
+const normalizeBranchName = (value: string | null | undefined) => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "workspace";
+};
+
+const cleanShellWrapper = (command: string) => {
+  const trimmed = command.trim();
+  const shellWrapperMatch = trimmed.match(/^(?:\/bin\/)?(?:bash|sh|zsh)\s+-lc\s+['"](.+)['"]$/u);
+  return shellWrapperMatch?.[1]?.trim() || trimmed;
+};
+
+const firstMeaningfulLine = (value: string) =>
+  value
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean) ?? "";
+
+const formatShortDateFromTimestamp = (timestampSeconds: number) =>
+  new Intl.DateTimeFormat([], {
+    day: "2-digit",
+    month: "short",
+  }).format(new Date(timestampSeconds * 1000));
+
+const formatShortDateFromGit = (dateValue: string) => {
+  const parsed = new Date(`${dateValue.trim()}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateValue.trim();
+  }
+
+  return new Intl.DateTimeFormat([], {
+    day: "2-digit",
+    month: "short",
+  }).format(parsed);
+};
+
+const rowEmphasisFromStatus = (status: string | null | undefined): GitActivityGraphRow["emphasis"] => {
+  if (status === "inProgress" || status === "active") {
+    return "current";
+  }
+
+  if (status === "completed" || status === "idle" || status === "applied") {
+    return "normal";
+  }
+
+  return "muted";
+};
+
+const normalizeGraphRefLabel = (value: string) => {
+  if (value.startsWith("HEAD -> ")) {
+    return value.slice(8).trim();
+  }
+
+  if (value.startsWith("tag: ")) {
+    return value.slice(5).trim();
+  }
+
+  return value.trim();
+};
+
+function parseGitGraphRefs(rawValue: string, activeBranch: string): GitActivityGraphRef[] {
+  const trimmed = rawValue.trim().replace(/^\(|\)$/gu, "");
+  if (!trimmed) {
+    return [];
+  }
+
+  return trimmed
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry, index) => {
+      const label = normalizeGraphRefLabel(entry);
+      let kind: GitActivityGraphRef["kind"] = "other";
+      let active = false;
+
+      if (entry.startsWith("HEAD -> ")) {
+        kind = "head";
+        active = true;
+      } else if (entry.startsWith("tag: ")) {
+        kind = "tag";
+      } else if (entry.startsWith("origin/") || entry.startsWith("remotes/")) {
+        kind = "remote";
+      } else {
+        kind = "local";
+        active = label === activeBranch;
+      }
+
+      return {
+        id: `${label}:${index}`,
+        label,
+        kind,
+        active,
+      };
+    });
+}
+
+const buildGitLanes = (labels: string[], activeBranch: string): GitActivityGraphLane[] =>
+  labels.slice(0, 6).map((label, index) => {
+    let emphasis: GitActivityGraphLane["emphasis"] = "peer";
+    if (MAIN_BRANCH_NAMES.has(label)) {
+      emphasis = "base";
+    } else if (label === activeBranch) {
+      emphasis = "active";
+    }
+
+    return {
+      id: `lane:${label}`,
+      label,
+      accent: GRAPH_ACCENTS[index % GRAPH_ACCENTS.length],
+      emphasis,
+    };
+  });
+
+const collectLaneLabelsFromRefs = (rows: GitActivityGraphRow[], activeBranch: string) => {
+  const labels = new Set<string>();
+  if (activeBranch) {
+    labels.add(activeBranch);
+  }
+
+  rows.forEach((row) => {
+    row.refs.forEach((ref) => {
+      if (ref.kind === "tag" || ref.kind === "other") {
+        return;
+      }
+
+      labels.add(ref.label);
+    });
+  });
+
+  if (![...labels].some((entry) => MAIN_BRANCH_NAMES.has(entry))) {
+    labels.add("main");
+  }
+
+  return [...labels];
+};
+
+function summarizeFileChangeItem(item: Extract<ThreadItem, { type: "fileChange" }>) {
+  const paths = [...new Set(item.changes.map((change) => change.path.trim()).filter((path) => path && path !== "Editing files"))];
+  if (paths.length === 1) {
+    return compactPath(paths[0]);
+  }
+
+  if (paths.length > 1) {
+    return `Changed ${String(paths.length)} files`;
+  }
+
+  return item.status === "inProgress" ? "Editing files" : "Applied patch";
+}
+
+function describeThreadActivity(threadRecord: ThreadRecord): {
+  subject: string;
+  hint: string | null;
+  emphasis: GitActivityGraphRow["emphasis"];
+} {
+  const turns = threadRecord.thread.turns ?? [];
+  const latestTurn = turns.at(-1) ?? null;
+  const items = turns.flatMap((turn) => turn.items).reverse();
+
+  for (const item of items) {
+    if (item.type === "commandExecution") {
+      const commandText = cleanShellWrapper(item.command);
+      return {
+        subject: compactText(commandText, 84),
+        hint: item.status === "inProgress" ? "Running command" : "Last command",
+        emphasis: rowEmphasisFromStatus(item.status),
+      };
+    }
+
+    if (item.type === "fileChange") {
+      return {
+        subject: summarizeFileChangeItem(item),
+        hint: item.status === "inProgress" ? "Editing files" : "File changes",
+        emphasis: rowEmphasisFromStatus(item.status),
+      };
+    }
+
+    if (item.type === "plan") {
+      return {
+        subject: compactText(firstMeaningfulLine(item.text) || "Plan updated", 84),
+        hint: "Plan step",
+        emphasis: rowEmphasisFromStatus(latestTurn?.status ?? null),
+      };
+    }
+
+    if (item.type === "reasoning") {
+      return {
+        subject: compactText(item.summary[0] || item.content[0] || "Reasoning in progress", 84),
+        hint: "Thinking",
+        emphasis: rowEmphasisFromStatus(latestTurn?.status ?? "inProgress"),
+      };
+    }
+
+    if (item.type === "agentMessage") {
+      return {
+        subject: compactText(firstMeaningfulLine(item.text) || "Response updated", 84),
+        hint: latestTurn?.status === "inProgress" ? "Writing response" : "Last reply",
+        emphasis: rowEmphasisFromStatus(latestTurn?.status ?? null),
+      };
+    }
+  }
+
+  return {
+    subject: compactText(threadRecord.thread.preview || threadRecord.thread.name || "Session activity", 84),
+    hint: threadRecord.thread.status.type === "active" ? "Active session" : "Session",
+    emphasis: rowEmphasisFromStatus(threadRecord.thread.status.type),
+  };
+}
+
+function buildActiveDetailRows(
+  activeThread: ThreadRecord,
+  graph: string,
+  seenRowKeys: Set<string>,
+): GitActivityGraphRow[] {
+  const rows: GitActivityGraphRow[] = [];
+
+  const prioritizedSteps = [...(activeThread.plan?.steps ?? [])].sort((left, right) => {
+    const rank = (status: string) => {
+      if (status === "inProgress") return 0;
+      if (status === "pending") return 1;
+      return 2;
+    };
+
+    return rank(left.status) - rank(right.status);
+  });
+
+  for (const step of prioritizedSteps) {
+    const subject = compactText(step.step.trim(), 84);
+    if (!subject || seenRowKeys.has(`step:${subject}`)) {
+      continue;
+    }
+
+    seenRowKeys.add(`step:${subject}`);
+    rows.push({
+      id: `active-step:${subject}`,
+      graph,
+      subject,
+      dateLabel: formatShortDateFromTimestamp(activeThread.thread.updatedAt),
+      author: "session",
+      sha: activeThread.thread.gitInfo?.sha ?? "live",
+      refs: [],
+      emphasis: rowEmphasisFromStatus(step.status),
+      threadId: null,
+      hint: `Plan · ${step.status === "inProgress" ? "in progress" : step.status}`,
+    });
+
+    if (rows.length >= 2) {
+      break;
+    }
+  }
+
+  const recentFileItems = [...activeThread.thread.turns]
+    .flatMap((turn) => turn.items)
+    .reverse()
+    .filter((item): item is Extract<ThreadItem, { type: "fileChange" }> => item.type === "fileChange");
+
+  for (const item of recentFileItems) {
+    const subject = summarizeFileChangeItem(item);
+    if (!subject || seenRowKeys.has(`file:${subject}`)) {
+      continue;
+    }
+
+    seenRowKeys.add(`file:${subject}`);
+    rows.push({
+      id: `active-file:${item.id}`,
+      graph,
+      subject,
+      dateLabel: formatShortDateFromTimestamp(activeThread.thread.updatedAt),
+      author: "workspace",
+      sha: activeThread.thread.gitInfo?.sha ?? "live",
+      refs: [],
+      emphasis: rowEmphasisFromStatus(item.status),
+      threadId: null,
+      hint: item.status === "inProgress" ? "Editing files" : "Recent file change",
+    });
+
+    if (rows.length >= 4) {
+      break;
+    }
+  }
+
+  return rows;
+}
+
+const CONFLICT_STATUS_CODES = new Set([
+  "DD",
+  "AU",
+  "UD",
+  "UA",
+  "DU",
+  "AA",
+  "UU",
+]);
+
+const WORKING_TREE_BUCKET_ORDER: Array<GitWorkingTreeBucket["id"]> = [
+  "staged",
+  "unstaged",
+  "untracked",
+  "conflicted",
+];
+
+const WORKING_TREE_BUCKET_LABELS: Record<GitWorkingTreeBucket["id"], string> = {
+  staged: "Staged",
+  unstaged: "Unstaged",
+  untracked: "Untracked",
+  conflicted: "Conflicted",
+};
+
+const normalizeGitStatusPath = (value: string) => {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+};
+
+const splitGitStatusPath = (value: string) => {
+  const parts = value.split(/\s+->\s+/u).map((part) => normalizeGitStatusPath(part));
+  if (parts.length >= 2) {
+    return {
+      originalPath: parts[0] || null,
+      path: parts.at(-1) ?? value,
+    };
+  }
+
+  return {
+    originalPath: null,
+    path: normalizeGitStatusPath(value),
+  };
+};
+
+const parseGitStatusDescriptor = (
+  code: string,
+): Pick<GitWorkingTreeEntry, "badge" | "kind"> => {
+  switch (code) {
+    case "A":
+    case "?":
+      return { badge: "new", kind: "add" };
+    case "M":
+      return { badge: "mod", kind: "update" };
+    case "D":
+      return { badge: "del", kind: "delete" };
+    case "R":
+      return { badge: "ren", kind: "rename" };
+    case "C":
+      return { badge: "cpy", kind: "copy" };
+    case "T":
+      return { badge: "typ", kind: "type" };
+    case "U":
+      return { badge: "cf", kind: "conflict" };
+    default:
+      return { badge: "chg", kind: "unknown" };
+  }
+};
+
+const appendWorkingTreeEntry = (
+  buckets: Record<GitWorkingTreeBucket["id"], Array<GitWorkingTreeEntry>>,
+  bucketId: GitWorkingTreeBucket["id"],
+  statusCode: string,
+  path: string,
+  originalPath: string | null,
+) => {
+  const descriptor = parseGitStatusDescriptor(statusCode);
+  buckets[bucketId].push({
+    id: `${bucketId}:${statusCode}:${originalPath ?? ""}:${path}`,
+    path,
+    originalPath,
+    badge: descriptor.badge,
+    kind: descriptor.kind,
+  });
+};
+
+function buildGitWorkingTreeState(rawStatus: string): GitWorkingTreeState | null {
+  if (!rawStatus.trim()) {
+    return null;
+  }
+
+  const buckets: Record<GitWorkingTreeBucket["id"], Array<GitWorkingTreeEntry>> = {
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    conflicted: [],
+  };
+
+  rawStatus
+    .split("\n")
+    .map((line) => line.replace(/\r$/u, ""))
+    .filter(Boolean)
+    .forEach((line) => {
+      if (line.startsWith("## ") || line.startsWith("!! ")) {
+        return;
+      }
+
+      const x = line[0] ?? " ";
+      const y = line[1] ?? " ";
+      const rawPath = line.slice(3).trim();
+      if (!rawPath) {
+        return;
+      }
+
+      const { originalPath, path } = splitGitStatusPath(rawPath);
+      if (!path) {
+        return;
+      }
+
+      if (x === "?" && y === "?") {
+        appendWorkingTreeEntry(buckets, "untracked", "?", path, originalPath);
+        return;
+      }
+
+      if (CONFLICT_STATUS_CODES.has(`${x}${y}`)) {
+        appendWorkingTreeEntry(buckets, "conflicted", "U", path, originalPath);
+        return;
+      }
+
+      if (x !== " ") {
+        appendWorkingTreeEntry(buckets, "staged", x, path, originalPath);
+      }
+
+      if (y !== " ") {
+        appendWorkingTreeEntry(buckets, "unstaged", y, path, originalPath);
+      }
+    });
+
+  const orderedBuckets = WORKING_TREE_BUCKET_ORDER.flatMap((bucketId) =>
+    buckets[bucketId].length > 0
+      ? [
+          {
+            id: bucketId,
+            label: WORKING_TREE_BUCKET_LABELS[bucketId],
+            entries: buckets[bucketId],
+          } satisfies GitWorkingTreeBucket,
+        ]
+      : [],
+  );
+  const summary = orderedBuckets.length
+    ? orderedBuckets
+        .map((bucket) => `${String(bucket.entries.length)} ${bucket.label.toLowerCase()}`)
+        .join(" · ")
+    : "Working tree clean";
+
+  return {
+    dirty: orderedBuckets.length > 0,
+    summary,
+    buckets: orderedBuckets,
+  };
+}
+
+export function buildGitHistoryGraphModel(args: {
+  activeThread: ThreadRecord | null;
+  rawLog: string;
+  rawStatus?: string;
+}): GitActivityGraphModel | null {
+  const { activeThread, rawLog, rawStatus = "" } = args;
+  if (!activeThread || !rawLog.trim()) {
+    return null;
+  }
+
+  const activeBranch = normalizeBranchName(activeThread.thread.gitInfo?.branch);
+  const rows = rawLog
+    .split("\n")
+    .map((line) => line.replace(/\r$/u, ""))
+    .filter(Boolean)
+    .flatMap((line, index) => {
+      const parts = line.split("\u001f");
+      if (parts.length < 6) {
+        return [];
+      }
+
+      const graph = parts[0] ?? "*";
+      const sha = parts[1]?.trim() ?? "";
+      const dateRaw = parts[2]?.trim() ?? "";
+      const author = parts[3]?.trim() ?? "unknown";
+      const decorations = parts[4]?.trim() ?? "";
+      const subject = parts.slice(5).join("\u001f").trim() || "(no commit message)";
+      const refs = parseGitGraphRefs(decorations, activeBranch);
+      const current =
+        sha === activeThread.thread.gitInfo?.sha ||
+        refs.some((ref) => ref.active);
+
+      return [
+        {
+          id: `git:${sha || index}`,
+          graph,
+          subject,
+          dateLabel: formatShortDateFromGit(dateRaw),
+          author,
+          sha: sha || "unknown",
+          refs,
+          emphasis: current ? "current" : "normal",
+          threadId: null,
+          hint: decorations ? decorations.replace(/^\(|\)$/gu, "") : null,
+        } satisfies GitActivityGraphRow,
+      ];
+    });
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const lanes = buildGitLanes(collectLaneLabelsFromRefs(rows, activeBranch), activeBranch);
+
+  return {
+    repoLabel: basename(activeThread.thread.cwd),
+    branchLabel: activeBranch,
+    commitLabel: activeThread.thread.gitInfo?.sha ?? null,
+    graphWidth: Math.max(...rows.map((row) => row.graph.length), 2),
+    source: "git",
+    lanes,
+    rows,
+    workingTree: buildGitWorkingTreeState(rawStatus),
+  };
+}
+
+export function buildGitActivityGraphModel(args: {
+  activeThread: ThreadRecord | null;
+  relatedThreads: ThreadRecord[];
+  rawStatus?: string;
+}): GitActivityGraphModel | null {
+  const { activeThread, relatedThreads, rawStatus = "" } = args;
+  if (!activeThread) {
+    return null;
+  }
+
+  const activeBranch = normalizeBranchName(activeThread.thread.gitInfo?.branch);
+  const repoLabel = basename(activeThread.thread.cwd);
+  const sameRepoThreads = relatedThreads.filter((thread) => thread.thread.cwd === activeThread.thread.cwd);
+  const distinctBranches = new Map<string, ThreadRecord>();
+
+  sameRepoThreads.forEach((thread) => {
+    const branch = normalizeBranchName(thread.thread.gitInfo?.branch);
+    if (!distinctBranches.has(branch)) {
+      distinctBranches.set(branch, thread);
+    }
+  });
+
+  if (!distinctBranches.has(activeBranch)) {
+    distinctBranches.set(activeBranch, activeThread);
+  }
+
+  const threadSourceLabel = (thread: ThreadRecord) => {
+    if (thread.thread.agentNickname) {
+      return thread.thread.agentNickname;
+    }
+
+    if (thread.thread.source === "appServer") {
+      return "workspace";
+    }
+
+    return typeof thread.thread.source === "string"
+      ? thread.thread.source
+      : "session";
+  };
+
+  const laneLabels = [...distinctBranches.keys()];
+  if (!laneLabels.some((label) => MAIN_BRANCH_NAMES.has(label))) {
+    laneLabels.unshift("main");
+  }
+
+  if (!laneLabels.includes(activeBranch)) {
+    laneLabels.unshift(activeBranch);
+  }
+
+  const lanes = buildGitLanes(laneLabels, activeBranch);
+  const laneIndexByLabel = new Map(lanes.map((lane, index) => [lane.label, index]));
+  const rowKeys = new Set<string>();
+  const rows: GitActivityGraphRow[] = [];
+
+  const primaryThreads = [
+    activeThread,
+    ...sameRepoThreads.filter((thread) => thread.thread.id !== activeThread.thread.id),
+  ]
+    .filter((thread) => laneIndexByLabel.has(normalizeBranchName(thread.thread.gitInfo?.branch)))
+    .filter((thread, index, all) => {
+      const branch = normalizeBranchName(thread.thread.gitInfo?.branch);
+      return all.findIndex((candidate) => normalizeBranchName(candidate.thread.gitInfo?.branch) === branch) === index;
+    });
+
+  for (const thread of primaryThreads) {
+    const branch = normalizeBranchName(thread.thread.gitInfo?.branch);
+    if (!laneIndexByLabel.has(branch)) {
+      continue;
+    }
+
+    const summary = describeThreadActivity(thread);
+    const rowKey = `thread:${branch}:${summary.subject}`;
+    if (rowKeys.has(rowKey)) {
+      continue;
+    }
+
+    rowKeys.add(rowKey);
+    const laneIndex = laneIndexByLabel.get(branch) ?? 0;
+    rows.push({
+      id: `thread:${thread.thread.id}`,
+      graph: [...lanes]
+        .map((_, index) => (index === laneIndex ? "*" : "│"))
+        .join(" "),
+      subject: summary.subject,
+      dateLabel: formatShortDateFromTimestamp(thread.thread.updatedAt),
+      author: threadSourceLabel(thread),
+      sha: thread.thread.gitInfo?.sha ?? "thread",
+      refs: [
+        {
+          id: `session-ref:${branch}`,
+          label: branch,
+          kind: MAIN_BRANCH_NAMES.has(branch) ? "local" : "head",
+          active: branch === activeBranch,
+        },
+      ],
+      emphasis: thread.thread.id === activeThread.thread.id ? "current" : summary.emphasis,
+      threadId: thread.thread.id,
+      hint: summary.hint,
+    });
+
+    if (rows.length >= 4) {
+      break;
+    }
+  }
+
+  if (rows.length < 4) {
+    const activeLaneIndex = laneIndexByLabel.get(activeBranch) ?? 0;
+    const activeGraph = [...lanes]
+      .map((_, index) => (index === activeLaneIndex ? "*" : "│"))
+      .join(" ");
+    rows.push(...buildActiveDetailRows(activeThread, activeGraph, rowKeys));
+  }
+
+  return {
+    repoLabel,
+    branchLabel: activeBranch,
+    commitLabel: activeThread.thread.gitInfo?.sha ?? null,
+    graphWidth: Math.max(...rows.map((row) => row.graph.length), 2),
+    source: "session",
+    lanes,
+    rows: rows.slice(0, 7),
+    workingTree: buildGitWorkingTreeState(rawStatus),
   };
 }

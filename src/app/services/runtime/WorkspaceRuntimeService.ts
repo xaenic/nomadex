@@ -3,6 +3,7 @@ import type { FuzzyFileSearchResult } from "../../../protocol/FuzzyFileSearchRes
 import type { CollaborationMode } from "../../../protocol/CollaborationMode";
 import type {
   CollaborationModeListResponse,
+  CommandExecResponse,
   CommandExecutionRequestApprovalParams,
   Config,
   ConfigReadResponse,
@@ -1936,6 +1937,67 @@ export class WorkspaceRuntimeService {
     });
 
     return base64ToText(response.dataBase64);
+  }
+
+  async readGitGraph(cwd: string, limit = 80) {
+    const fieldSeparator = String.fromCharCode(31);
+    const prettyFormat = [
+      `${fieldSeparator}%h`,
+      `%ad`,
+      `%an`,
+      `%d`,
+      `%s`,
+    ].join(fieldSeparator);
+
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: [
+        "git",
+        "log",
+        "--graph",
+        "--date=short",
+        "--decorate=short",
+        `--pretty=format:${prettyFormat}`,
+        "--all",
+        "-n",
+        String(Math.max(20, Math.min(limit, 120))),
+      ],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    if (response.exitCode !== 0) {
+      const details = [response.stderr, response.stdout]
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .join("\n")
+        .trim();
+      throw new Error(details || "Failed to read git history.");
+    }
+
+    return response.stdout;
+  }
+
+  async readGitStatus(cwd: string) {
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: [
+        "git",
+        "status",
+        "--short",
+        "--branch",
+        "--renames",
+      ],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    if (response.exitCode !== 0) {
+      const details = [response.stderr, response.stdout]
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .join("\n")
+        .trim();
+      throw new Error(details || "Failed to read git working tree status.");
+    }
+
+    return response.stdout;
   }
 
   async updateSettings(patch: Partial<SettingsState>) {

@@ -19,6 +19,8 @@ import clsx from "clsx";
 
 import type { ThreadItem, Turn } from "../protocol/v2";
 import {
+  buildGitActivityGraphModel,
+  buildGitHistoryGraphModel,
   deriveLiveOverlay,
   summarizeTurnFileChanges,
   toBrowseUrl,
@@ -85,6 +87,7 @@ import {
 import type {
   DiffReviewEntry,
   FilePreviewState,
+  GitActivityGraphModel,
   PanelTab,
   QuickEntry,
   QuickMode,
@@ -99,7 +102,9 @@ import type {
 } from "./workspaceTypes";
 import { ChatTranscript } from "./components/ChatTranscript";
 import { BrandMark } from "./components/BrandMark";
+import { ConnectionLoadingState } from "./components/ConnectionLoadingState";
 import { FileChangeSummary } from "./components/FileChangeSummary";
+import { GitActivityGraph } from "./components/GitActivityGraph";
 import {
   ConfigPanel,
   SkillsLibraryModal,
@@ -145,6 +150,18 @@ const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
 const SESSION_PROJECT_ROOT = "/home/allan";
 const INITIAL_VISIBLE_TURNS = 18;
 const TURN_HISTORY_BATCH = 14;
+const STARTUP_CONNECTION_MESSAGES = [
+  "Opening workspace",
+  "Setting environment",
+  "Initializing modules",
+  "Starting services",
+];
+const STARTUP_CONVERSATION_MESSAGES = [
+  "Opening conversation",
+  "Reattaching thread",
+  "Loading recent history",
+  "Syncing transcript",
+];
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -712,6 +729,22 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             return await response.text();
           },
         ),
+      readGitGraph: async (cwd, limit = 80) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.readGitGraph(cwd, limit);
+          },
+          async () => "",
+        ),
+      readGitStatus: async (cwd) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.readGitStatus(cwd);
+          },
+          async () => "",
+        ),
       updateSettings: async (patch) =>
         await withLiveFallback(
           async () => {
@@ -1186,6 +1219,9 @@ export function WorkspacePage() {
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [visibleTurnStartByThreadId, setVisibleTurnStartByThreadId] = useState<Record<string, number>>({});
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
+  const [gitActivityGraph, setGitActivityGraph] = useState<GitActivityGraphModel | null>(null);
+  const [gitActivityGraphLoading, setGitActivityGraphLoading] = useState(false);
+  const [gitActivityGraphError, setGitActivityGraphError] = useState<string | null>(null);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [composerSyncKey, setComposerSyncKey] = useState(0);
   const [uiTheme, setUiTheme] = useState<UiThemeId>(() => {
@@ -1209,6 +1245,8 @@ export function WorkspacePage() {
   const toastTimersRef = useRef<Record<string, number>>({});
   const composerInputFrameRef = useRef<number | null>(null);
   const latestComposerInputRef = useRef(composer);
+  const gitActivityGraphCacheRef = useRef<Record<string, string>>({});
+  const initialTransportConnectSeenRef = useRef(false);
   const pendingChatRestoreThreadIdRef = useRef<string | null>(null);
   const pendingHistoryPrependRef = useRef<{
     threadId: string;
@@ -1230,6 +1268,8 @@ export function WorkspacePage() {
   useEffect(() => {
     latestComposerInputRef.current = composer;
   }, [composer]);
+
+  const [showStartupConnectionLoader, setShowStartupConnectionLoader] = useState(true);
 
   useEffect(
     () => () => {
@@ -1450,10 +1490,92 @@ export function WorkspacePage() {
     [activeTurns],
   );
 
+  const relatedRepoThreads = useMemo(
+    () => uniqueThreads.filter((entry) => entry.thread.cwd === activeThread?.thread.cwd),
+    [activeThread?.thread.cwd, uniqueThreads],
+  );
+
   const selectedDiffEntry = useMemo(
     () => diffEntries.find((entry) => entry.id === selectedDiffEntryId) ?? diffEntries[0] ?? null,
     [diffEntries, selectedDiffEntryId],
   );
+
+  useEffect(() => {
+    if (!activeThread) {
+      setGitActivityGraph(null);
+      setGitActivityGraphLoading(false);
+      setGitActivityGraphError(null);
+      return;
+    }
+
+    const fallbackGraph = buildGitActivityGraphModel({
+      activeThread,
+      relatedThreads: relatedRepoThreads,
+    });
+    setGitActivityGraph(fallbackGraph);
+    setGitActivityGraphError(null);
+
+    if (panelTab !== "graph") {
+      setGitActivityGraphLoading(false);
+      return;
+    }
+
+    const cacheKey = `${activeThread.thread.cwd}:${activeThread.thread.gitInfo?.sha ?? "workspace"}`;
+    const cachedRawLog = gitActivityGraphCacheRef.current[cacheKey] ?? "";
+    let cancelled = false;
+    setGitActivityGraphLoading(true);
+
+    void Promise.allSettled([
+      cachedRawLog
+        ? Promise.resolve(cachedRawLog)
+        : actions.readGitGraph(activeThread.thread.cwd, 80),
+      actions.readGitStatus(activeThread.thread.cwd),
+    ])
+      .then(([rawLogResult, rawStatusResult]) => {
+        if (cancelled) {
+          return;
+        }
+
+        const rawLog = rawLogResult.status === "fulfilled" ? rawLogResult.value : "";
+        const rawStatus =
+          rawStatusResult.status === "fulfilled" ? rawStatusResult.value : "";
+
+        const fallbackWithStatus = buildGitActivityGraphModel({
+          activeThread,
+          relatedThreads: relatedRepoThreads,
+          rawStatus,
+        });
+        const liveGraph =
+          rawLog.trim().length > 0
+            ? buildGitHistoryGraphModel({
+                activeThread,
+                rawLog,
+                rawStatus,
+              })
+            : null;
+        const nextGraph = liveGraph ?? fallbackWithStatus ?? fallbackGraph;
+
+        if (rawLog.trim().length > 0) {
+          gitActivityGraphCacheRef.current[cacheKey] = rawLog;
+        }
+
+        setGitActivityGraphError(
+          rawLogResult.status === "rejected"
+            ? errorMessage(rawLogResult.reason, "Unable to read git history.")
+            : null,
+        );
+        setGitActivityGraph(nextGraph);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setGitActivityGraphLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actions, activeThread, panelTab, relatedRepoThreads]);
 
   const selectedDiffFindings = useMemo(() => {
     if (!activeThread) {
@@ -1643,14 +1765,42 @@ export function WorkspacePage() {
     hydratedScrollKeyRef.current = null;
   }, [activeThreadId]);
 
+  const activeConversationHydrationPending = useMemo(
+    () =>
+      snapshot.transport.mode === "live" &&
+      snapshot.transport.status === "connected" &&
+      Boolean(activeThread) &&
+      isExistingThreadHistoryPending(activeThread, activeTurns),
+    [activeThread, activeTurns, snapshot.transport.mode, snapshot.transport.status],
+  );
+
   const existingThreadHistoryPending = useMemo(
     () =>
       route.threadId === activeThread?.thread.id &&
-      snapshot.transport.mode === "live" &&
-      snapshot.transport.status === "connected" &&
-      isExistingThreadHistoryPending(activeThread, activeTurns),
-    [activeThread, activeTurns, route.threadId, snapshot.transport.mode, snapshot.transport.status],
+      activeConversationHydrationPending,
+    [activeConversationHydrationPending, activeThread?.thread.id, route.threadId],
   );
+
+  useEffect(() => {
+    if (!showStartupConnectionLoader) {
+      return;
+    }
+
+    if (snapshot.transport.status === "connecting") {
+      initialTransportConnectSeenRef.current = true;
+      return;
+    }
+
+    if (!initialTransportConnectSeenRef.current) {
+      return;
+    }
+
+    if (activeConversationHydrationPending) {
+      return;
+    }
+
+    setShowStartupConnectionLoader(false);
+  }, [activeConversationHydrationPending, showStartupConnectionLoader, snapshot.transport.status]);
 
   const requestQueuePump = useCallback(() => {
     setQueueWakeSignal((current) => current + 1);
@@ -1851,7 +2001,17 @@ export function WorkspacePage() {
       return;
     }
 
-    setPanelTab((current) => (current === routePanel ? current : routePanel));
+    setPanelTab((current) => {
+      if (current === routePanel) {
+        return current;
+      }
+
+      if (routePanel === "files" && current === "graph") {
+        return current;
+      }
+
+      return routePanel;
+    });
     setPanelOpen((current) => (current ? current : true));
   }, [desktopViewport, mobilePanelClosing, route.section, routePanel]);
 
@@ -3066,6 +3226,7 @@ export function WorkspacePage() {
         label: "Navigate",
         items: [
           { icon: "📁", name: "Files Panel", key: "", command: { type: "openPanel", tab: "files" } },
+          { icon: "⎇", name: "Branches Panel", key: "", command: { type: "openPanel", tab: "graph" } },
           { icon: "⬛", name: "Terminal Output (/ps)", key: "", command: { type: "openPanel", tab: "terminal" } },
           { icon: "⑂", name: "Multi-agent Panel", key: "", command: { type: "openPanel", tab: "agents" } },
           { icon: "📋", name: "Skills Library (/skills)", key: "", command: { type: "openSkills" } },
@@ -3682,6 +3843,27 @@ export function WorkspacePage() {
       return <div className="empty-panel">No active thread.</div>;
     }
 
+    if (panelTab === "graph") {
+      return gitActivityGraph ? (
+        <div className="graph-panel-stack">
+          {gitActivityGraph.source === "session" ? (
+            <div className="panel-hint">
+              {gitActivityGraphError
+                ? "Showing session-derived history because local git output is unavailable."
+                : "Showing session-derived history."}
+            </div>
+          ) : gitActivityGraphLoading ? (
+            <div className="panel-hint">Refreshing git history…</div>
+          ) : null}
+          <GitActivityGraph model={gitActivityGraph} onOpenThread={openThreadFromSidebar} />
+        </div>
+      ) : (
+        <div className="empty-panel">
+          {gitActivityGraphLoading ? "Loading git history…" : "No repository graph available for this session yet."}
+        </div>
+      );
+    }
+
     if (panelTab === "files") {
       const changedPaths = new Map<string, "mod" | "new" | "del">();
       const rootPath = activeThread.thread.cwd;
@@ -3947,6 +4129,27 @@ export function WorkspacePage() {
       </div>
     );
   };
+
+  const startupLoaderShowingConversation = showStartupConnectionLoader && activeConversationHydrationPending;
+
+  if (showStartupConnectionLoader) {
+    return (
+      <main className="workspace-shell connection-loading-shell">
+        <ConnectionLoadingState
+          messages={
+            startupLoaderShowingConversation
+              ? STARTUP_CONVERSATION_MESSAGES
+              : STARTUP_CONNECTION_MESSAGES
+          }
+          metaText={
+            startupLoaderShowingConversation
+              ? `Restoring ${shorten(activeThreadLabel, 42)}`
+              : "Connecting to workspace backend"
+          }
+        />
+      </main>
+    );
+  }
 
   return (
     <main className={clsx("workspace-shell", fullScreenOverlayOpen && "overlay-open")}>
@@ -4378,7 +4581,7 @@ export function WorkspacePage() {
             </button>
           </div>
           <div className="rptabs" id="rptabs">
-            {(["files", "diff", "terminal", "agents", "config"] as const).map((tab) => (
+            {(["files", "graph", "diff", "terminal", "agents", "config"] as const).map((tab) => (
               <button
                 className={clsx("rptab", panelTab === tab && "active")}
                 key={tab}

@@ -46,6 +46,7 @@ export const APPROVAL_CLASS: Record<UiApprovalMode, string> = {
 
 export const PANEL_TITLE: Record<PanelTab, string> = {
   files: "Files",
+  graph: "Branches",
   diff: "Diff",
   terminal: "Terminal",
   agents: "Agents",
@@ -238,6 +239,7 @@ export const sectionToPanel = (section: RouteSection): PanelTab | null => {
 export const panelToSection = (tab: PanelTab): RouteSection => {
   switch (tab) {
     case "files":
+    case "graph":
     case "terminal":
       return "ops";
     case "agents":

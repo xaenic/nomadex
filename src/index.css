@@ -341,6 +341,172 @@ code {
   background-size: 32px 32px, 32px 32px;
 }
 
+.connection-loading-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.connection-loading-screen {
+  min-height: 100vh;
+  width: min(100%, 440px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px 18px;
+  text-align: center;
+}
+
+.connection-loading-screen.inline {
+  min-height: 100%;
+  width: 100%;
+  flex: 1;
+  padding: 24px 14px;
+}
+
+.connection-loading-mark {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  opacity: 0.96;
+  filter:
+    drop-shadow(0 0 10px color-mix(in srgb, var(--ac) 18%, transparent))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--ac2) 14%, transparent));
+}
+
+.connection-loading-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: 100%;
+  min-height: 30px;
+}
+
+.connection-loading-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--tx2) 18%, transparent);
+  border-top-color: var(--ac);
+  border-right-color: var(--ac2);
+  border-radius: 999px;
+  animation: connectionLoadingSpin 0.9s linear infinite;
+}
+
+.connection-loading-slot {
+  position: relative;
+  width: min(24ch, calc(100vw - 124px));
+  max-width: 100%;
+  height: 1.5em;
+  overflow: hidden;
+}
+
+.connection-loading-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(13px, 2.2vw, 15px);
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tx);
+  will-change: transform, opacity;
+}
+
+.connection-loading-message.resting {
+  position: relative;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.connection-loading-message.entering {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+.connection-loading-message.leaving {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.connection-loading-message.entering.animate {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    transform 380ms ease-in-out,
+    opacity 380ms ease-in-out;
+}
+
+.connection-loading-message.leaving.animate {
+  opacity: 0;
+  transform: translateY(-100%);
+  transition:
+    transform 380ms ease-in-out,
+    opacity 380ms ease-in-out;
+}
+
+.connection-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 20px;
+  flex-shrink: 0;
+}
+
+.connection-loading-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--tx2);
+  opacity: 0.24;
+  animation: connectionLoadingDot 1.15s ease-in-out infinite;
+}
+
+.connection-loading-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.connection-loading-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.connection-loading-meta {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--tx2);
+}
+
+@keyframes connectionLoadingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes connectionLoadingDot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+
+  40% {
+    opacity: 0.82;
+  }
+}
+
 /* HEADER */
 #hdr {
   position: fixed;
@@ -3641,6 +3807,414 @@ pre::-webkit-scrollbar-thumb {
   min-height: 0;
 }
 
+.graph-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.git-activity-card {
+  background: var(--panel-solid);
+  border: 1px solid var(--bdr2);
+  border-radius: var(--r2);
+  padding: 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.git-activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.git-activity-copy {
+  min-width: 0;
+}
+
+.git-activity-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.git-activity-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--tx2);
+}
+
+.git-activity-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.git-activity-summary-label,
+.git-activity-summary-code,
+.git-activity-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--bdr2);
+  background: var(--bg4);
+  font-size: 10px;
+  color: var(--tx);
+}
+
+.git-activity-summary-code {
+  font-family: var(--mono);
+  color: var(--tx2);
+}
+
+.git-activity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.git-activity-legend-item {
+  --lane-accent: var(--ac);
+  border-color: color-mix(in srgb, var(--lane-accent) 24%, var(--bdr2));
+}
+
+.git-activity-legend-item.base {
+  border-color: var(--bdr2);
+}
+
+.git-activity-legend-swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--lane-accent);
+}
+
+.git-activity-legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-working-tree-card {
+  margin-bottom: 10px;
+  border: 1px solid var(--bdr);
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--bg4) 94%, var(--bg) 6%);
+  overflow: hidden;
+}
+
+.git-working-tree-toolbar {
+  min-height: 30px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--bdr);
+  background: color-mix(in srgb, var(--bg4) 92%, var(--bg) 8%);
+}
+
+.git-working-tree-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.git-working-tree-summary {
+  font-size: 10px;
+  color: var(--tx2);
+}
+
+.git-working-tree-summary.dirty {
+  color: var(--tx);
+}
+
+.git-working-tree-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.git-working-tree-group {
+  min-width: 0;
+  border-right: 1px solid var(--bdr);
+}
+
+.git-working-tree-group:last-child {
+  border-right: 0;
+}
+
+.git-working-tree-group-head {
+  min-height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--bdr);
+  font-size: 10px;
+  color: var(--tx2);
+}
+
+.git-working-tree-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-working-tree-item,
+.git-working-tree-more,
+.git-working-tree-clean {
+  min-height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--bdr);
+}
+
+.git-working-tree-item:last-child,
+.git-working-tree-more:last-child {
+  border-bottom: 0;
+}
+
+.git-working-tree-clean {
+  border-bottom: 0;
+  font-size: 11px;
+  color: var(--tx2);
+}
+
+.git-working-tree-more {
+  font-size: 10px;
+  color: var(--tx3);
+}
+
+.git-working-tree-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bdr2);
+  background: var(--bg4);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: lowercase;
+  color: var(--tx2);
+  flex: none;
+}
+
+.git-working-tree-badge.add {
+  color: #4ade80;
+}
+
+.git-working-tree-badge.update {
+  color: #fbbf24;
+}
+
+.git-working-tree-badge.delete {
+  color: #f87171;
+}
+
+.git-working-tree-badge.rename,
+.git-working-tree-badge.copy,
+.git-working-tree-badge.type {
+  color: var(--ac2);
+}
+
+.git-working-tree-badge.conflict {
+  color: #fb7185;
+}
+
+.git-working-tree-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--tx);
+}
+
+.git-activity-layout {
+  min-height: 0;
+}
+
+.git-activity-table {
+  border: 1px solid var(--bdr);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg4) 94%, var(--bg) 6%);
+}
+
+.git-activity-table-head,
+.git-activity-table-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 64px 88px 70px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+}
+
+.git-activity-table-head {
+  min-height: 28px;
+  border-bottom: 1px solid var(--bdr);
+  background: color-mix(in srgb, var(--bg4) 92%, var(--bg) 8%);
+  font-size: 10px;
+  color: var(--tx3);
+}
+
+.git-activity-table-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-activity-table-row {
+  min-height: 34px;
+  border-bottom: 1px solid var(--bdr);
+  background: transparent;
+  text-align: left;
+}
+
+.git-activity-table-row:last-child {
+  border-bottom: 0;
+}
+
+.git-activity-table-row.current {
+  background: color-mix(in srgb, var(--bg4) 78%, var(--ac) 22%);
+}
+
+.git-activity-table-row.muted {
+  color: var(--tx2);
+}
+
+.git-activity-table-row.interactive {
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.git-activity-table-row.interactive:hover,
+.git-activity-table-row.interactive:focus-visible {
+  outline: none;
+  background: var(--panel-solid-2);
+}
+
+.git-activity-graph-head {
+  height: 1px;
+}
+
+.git-activity-graph-cell {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--tx2);
+  white-space: pre;
+  overflow: hidden;
+}
+
+.git-activity-graph-text {
+  display: inline-flex;
+}
+
+.git-activity-graph-char {
+  width: 1ch;
+  color: transparent;
+}
+
+.git-activity-graph-char.on {
+  color: var(--graph-accent);
+}
+
+.git-activity-graph-char.node {
+  font-weight: 700;
+}
+
+.git-activity-message-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.git-activity-ref-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.git-activity-ref {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bdr2);
+  background: var(--bg4);
+  font-size: 10px;
+  color: var(--tx2);
+}
+
+.git-activity-ref.current {
+  border-color: rgb(255 166 0 / 32%);
+  background: rgb(255 166 0 / 14%);
+  color: #ffcf6c;
+}
+
+.git-activity-ref.remote {
+  border-color: color-mix(in srgb, var(--ac2) 26%, var(--bdr2));
+  color: var(--ac2);
+}
+
+.git-activity-ref.tag {
+  border-color: color-mix(in srgb, var(--ac3) 26%, var(--bdr2));
+  color: var(--ac3);
+}
+
+.git-activity-message-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--tx);
+}
+
+.git-activity-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--tx2);
+}
+
+.git-activity-date-cell,
+.git-activity-head-date {
+  text-align: left;
+}
+
+.git-activity-author-cell,
+.git-activity-head-author {
+  text-align: left;
+}
+
+.git-activity-sha-cell,
+.git-activity-head-sha {
+  font-family: var(--mono);
+}
+
 .file-explorer-scroll {
   min-height: 0;
   max-height: 52vh;
@@ -3660,6 +4234,75 @@ pre::-webkit-scrollbar-thumb {
 
 .file-explorer-list {
   position: relative;
+}
+
+@media (max-width: 640px) {
+  .git-activity-card {
+    padding: 7px;
+  }
+
+  .git-working-tree-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .git-working-tree-group {
+    border-right: 0;
+    border-bottom: 1px solid var(--bdr);
+  }
+
+  .git-working-tree-group:last-child {
+    border-bottom: 0;
+  }
+
+  .git-activity-toolbar {
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .git-activity-layout {
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .git-activity-summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .git-activity-summary-label,
+  .git-activity-summary-code,
+  .git-activity-legend-item {
+    height: 22px;
+    padding: 0 7px;
+  }
+
+  .git-activity-table-head,
+  .git-activity-table-row {
+    grid-template-columns: auto minmax(0, 1fr) 64px;
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .git-activity-head-author,
+  .git-activity-author-cell {
+    display: none;
+  }
+
+  .git-activity-head-date,
+  .git-activity-date-cell {
+    display: none;
+  }
+
+  .git-activity-message-cell {
+    gap: 6px;
+  }
+
+  .git-activity-ref-row {
+    max-width: 38%;
+    overflow: hidden;
+  }
 }
 
 .panel-meta code,
