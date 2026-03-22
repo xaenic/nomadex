@@ -15,7 +15,7 @@
 
   <rect x="18" y="18" width="394" height="68" rx="30" fill="#0D0D1B"/>
   <rect x="36" y="36" width="34" height="34" rx="11" fill="url(#macc)"/>
-  <text x="84" y="58" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700">Codex Console</text>
+  <text x="84" y="58" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700">Nomadex</text>
   <rect x="184" y="34" width="118" height="36" rx="18" fill="#0B291F" stroke="#0F5E46"/>
   <text x="209" y="58" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="14">Full Access</text>
 

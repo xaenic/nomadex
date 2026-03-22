@@ -466,7 +466,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 0;
-  contain: layout paint;
+  contain: layout;
 }
 
 #chat::-webkit-scrollbar {
@@ -597,6 +597,22 @@ code {
 
 .msg.user {
   align-items: flex-end;
+}
+
+.msg.assistant {
+  animation: none;
+}
+
+.msg.streaming {
+  animation: none;
+}
+
+.msg.assistant .mb > * {
+  animation: none;
+}
+
+.msg.streaming .mb > * {
+  animation: none;
 }
 
 .msg.assistant .mb > *,
@@ -794,6 +810,10 @@ code {
   gap: 10px;
 }
 
+.message-text-flow-streaming {
+  gap: 0;
+}
+
 .message-text {
   margin: 0;
   color: var(--tx);
@@ -803,8 +823,13 @@ code {
   word-break: break-word;
 }
 
+.message-text-streaming {
+  contain: content;
+}
+
 .message-text-tail {
-  animation: messageTextTail 0.16s ease-out both;
+  animation: messageTextTail 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity;
 }
 
 .message-inline-code {
@@ -1180,24 +1205,20 @@ code {
   0%,
   100% {
     opacity: 0.34;
-    transform: scaleY(0.92);
   }
 
   50% {
     opacity: 1;
-    transform: scaleY(1.04);
   }
 }
 
 @keyframes messageTextTail {
   from {
-    opacity: 0.22;
-    filter: blur(1.8px);
+    opacity: 0.18;
   }
 
   to {
     opacity: 1;
-    filter: blur(0);
   }
 }
 
@@ -4191,8 +4212,12 @@ pre::-webkit-scrollbar-thumb {
   background: var(--tx2);
   vertical-align: middle;
   border-radius: 999px;
-  box-shadow: 0 0 14px rgb(140 183 255 / 28%);
-  animation: liveCursorPulse 0.95s ease-in-out infinite;
+  box-shadow: 0 0 8px rgb(140 183 255 / 18%);
+  animation: liveCursorPulse 1.05s ease-in-out infinite;
+}
+
+.live-cursor-inline {
+  margin-left: 4px;
 }
 
 .hidden-input {

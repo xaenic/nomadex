@@ -1,4 +1,4 @@
-# ⚡ Codex Console
+# ⚡ Nomadex
 
 A standalone **React + TanStack** workspace for **Codex CLI**, built for desktop and mobile use with a live local Codex app-server bridge.
 

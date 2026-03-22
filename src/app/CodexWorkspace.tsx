@@ -1169,6 +1169,7 @@ export function CodexWorkspacePage() {
   const queueProcessingRef = useRef<Record<string, boolean>>({});
   const toastTimersRef = useRef<Record<string, number>>({});
   const hydratedScrollKeyRef = useRef<string | null>(null);
+  const chatPinnedToBottomRef = useRef(true);
   const streamVisibleRef = useRef<Record<string, number>>({});
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
   const [streamTextFx, setStreamTextFx] = useState<
@@ -1208,6 +1209,13 @@ export function CodexWorkspacePage() {
     return [...new Set(tabIds.filter((id) => availableIds.has(id)))].slice(0, 6);
   }, [tabIds, uniqueThreads]);
   const activeTurns = useMemo(() => sortTurnsById(activeThread?.thread.turns ?? []), [activeThread?.thread.turns]);
+  const transcriptScrollKey = useMemo(
+    () =>
+      activeTurns
+        .map((turn) => `${turn.id}:${turn.status}:${turn.items.length}:${turn.error?.message ?? ""}`)
+        .join("|"),
+    [activeTurns],
+  );
   const activeTurn = [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ?? null;
   const activeQueuedMessages = activeThreadId ? queuedByThreadId[activeThreadId] ?? [] : [];
   const liveOverlay = useMemo(() => deriveLiveOverlay(activeTurn), [activeTurn]);
@@ -1847,17 +1855,50 @@ export function CodexWorkspacePage() {
     };
   }, [snapshot.streams, snapshot.transport.mode]);
 
-  const scrollChatToBottom = useCallback((extraDelay = false) => {
+  const isChatNearBottom = useCallback((node: HTMLDivElement) => {
+    const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
+    return remaining <= 72;
+  }, []);
+
+  const flushChatToBottom = useCallback((force = false) => {
+    const node = chatRef.current;
+    if (!node) {
+      return;
+    }
+
+    if (!force && !chatPinnedToBottomRef.current) {
+      return;
+    }
+
+    node.scrollTop = node.scrollHeight;
+    chatPinnedToBottomRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    const node = chatRef.current;
+    if (!node) {
+      return;
+    }
+
+    const syncPinnedState = () => {
+      chatPinnedToBottomRef.current = isChatNearBottom(node);
+    };
+
+    syncPinnedState();
+    node.addEventListener("scroll", syncPinnedState, { passive: true });
+
+    return () => {
+      node.removeEventListener("scroll", syncPinnedState);
+    };
+  }, [activeThreadId, isChatNearBottom]);
+
+  const scrollChatToBottom = useCallback((options?: { extraDelay?: boolean; force?: boolean }) => {
     const run = () => {
-      if (chatEndRef.current) {
-        chatEndRef.current.scrollIntoView({ block: "end" });
-      } else if (chatRef.current) {
-        chatRef.current.scrollTop = chatRef.current.scrollHeight;
-      }
+      flushChatToBottom(options?.force ?? false);
     };
 
     const frame = window.requestAnimationFrame(run);
-    const timeout = extraDelay ? window.setTimeout(run, 90) : null;
+    const timeout = options?.extraDelay ? window.setTimeout(run, 90) : null;
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -1865,15 +1906,15 @@ export function CodexWorkspacePage() {
         window.clearTimeout(timeout);
       }
     };
-  }, []);
+  }, [flushChatToBottom]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!chatRef.current) {
       return;
     }
 
-    return scrollChatToBottom();
-  }, [activeTurns, scrollChatToBottom, streamVisible]);
+    flushChatToBottom();
+  }, [flushChatToBottom, streamVisible, transcriptScrollKey]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -1893,7 +1934,7 @@ export function CodexWorkspacePage() {
     }
 
     hydratedScrollKeyRef.current = scrollKey;
-    return scrollChatToBottom(true);
+    return scrollChatToBottom({ extraDelay: true, force: true });
   }, [activeThreadId, activeTurns, existingThreadHistoryPending, scrollChatToBottom]);
 
   useEffect(() => () => selectedImages.forEach((image) => image.url.startsWith("blob:") && URL.revokeObjectURL(image.url)), [selectedImages]);
@@ -3373,7 +3414,7 @@ export function CodexWorkspacePage() {
         </button>
         <div className="logo">
           <div className="logo-ico">⬡</div>
-          <span>Codex Console</span>
+          <span>Nomadex</span>
         </div>
         <div className="hsep" />
         <button

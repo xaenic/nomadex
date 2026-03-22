@@ -1232,7 +1232,7 @@ export class CodexLiveRuntime {
       try {
         await this.request("initialize", {
           clientInfo: {
-            name: "codex-console",
+            name: "nomadex",
             version: "0.0.0",
           },
           capabilities: {

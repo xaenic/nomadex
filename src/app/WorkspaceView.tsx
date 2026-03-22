@@ -61,7 +61,7 @@ export function WelcomeState({
   return (
     <div className="ww">
       <div className="wico">⬡</div>
-      <h1>Codex Console</h1>
+      <h1>Nomadex</h1>
       <p>
         Agentic coding assistant — reads repos, patches files, runs sandboxed
         commands, streams live turns, and tracks operational state inline.
@@ -495,6 +495,10 @@ export const ChatTranscript = memo(function ChatTranscript({
     <>
       {activeTurns.map((turn) => {
         const errorText = turnErrorText(turn);
+        const liveAgentMessageId =
+          turn.status === "inProgress"
+            ? [...turn.items].reverse().find((entry) => entry.type === "agentMessage")?.id ?? null
+            : null;
 
         return (
           <div className="turn-block" key={turn.id}>
@@ -503,6 +507,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                 item={item}
                 key={item.id}
                 turnStatus={turn.status}
+                streaming={item.type === "agentMessage" && item.id === liveAgentMessageId}
                 textVisible={
                   item.type === "agentMessage"
                     ? streamVisible[`${item.id}:text`]
@@ -694,12 +699,38 @@ const MessageTextFlow = memo(function MessageTextFlow({
   text,
   onOpenFile,
   textFx,
+  streaming = false,
+  showCursor = false,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
   textFx?: TextStreamFx;
+  streaming?: boolean;
+  showCursor?: boolean;
 }) {
-  const blocks = useMemo(() => parseMessageBlocks(text), [text]);
+  const blocks = useMemo(() => (streaming ? [] : parseMessageBlocks(text)), [streaming, text]);
+
+  if (streaming) {
+    const activeFx = textFx ?? null;
+    const fadeFrom = activeFx ? Math.max(0, Math.min(text.length, activeFx.from)) : 0;
+    const fadeTo = activeFx ? Math.max(fadeFrom, Math.min(text.length, activeFx.to)) : 0;
+
+    return (
+      <div className="message-text-flow message-text-flow-streaming">
+        <p className="message-text message-text-streaming">
+          {text.slice(0, fadeFrom)}
+          {fadeTo > fadeFrom ? (
+            <span className="message-text-tail">
+              {text.slice(fadeFrom, fadeTo)}
+            </span>
+          ) : null}
+          {text.slice(fadeTo)}
+          {showCursor ? <span aria-hidden="true" className="live-cursor live-cursor-inline" /> : null}
+        </p>
+      </div>
+    );
+  }
+
   let blockCursor = 0;
 
   return (
@@ -788,6 +819,7 @@ const MessageTextFlow = memo(function MessageTextFlow({
 const ThreadItemView = memo(function ThreadItemView({
   item,
   turnStatus,
+  streaming = false,
   textVisible,
   textFx,
   outputVisible,
@@ -801,6 +833,7 @@ const ThreadItemView = memo(function ThreadItemView({
 }: {
   item: ThreadItem;
   turnStatus: Turn["status"];
+  streaming?: boolean;
   textVisible?: number;
   textFx?: TextStreamFx;
   outputVisible?: number;
@@ -958,12 +991,10 @@ const ThreadItemView = memo(function ThreadItemView({
       typeof textVisible === "number"
         ? item.text.slice(0, textVisible)
         : item.text;
-    const streaming =
-      typeof textVisible === "number" && textVisible < item.text.length;
 
     return (
       <div
-        className="msg assistant"
+        className={clsx("msg assistant", streaming && "streaming")}
         onContextMenu={(event) => onContext(event, item)}
       >
         <div className="mh">
@@ -975,11 +1006,12 @@ const ThreadItemView = memo(function ThreadItemView({
           {text ? (
             <MessageTextFlow
               onOpenFile={onOpenFile}
+              showCursor={streaming}
+              streaming={streaming}
               text={text}
               textFx={textFx}
             />
           ) : null}
-          {streaming ? <div className="live-cursor" /> : null}
         </div>
         <div className="macts">
           <button className="mact" type="button" onClick={() => onFork()}>
@@ -1858,7 +1890,7 @@ export function ConfigPanel({
 
       <div className="config-preview">
         <div className="config-title">~/.codex/config.toml</div>
-        <div># Codex Console config</div>
+        <div># Nomadex config</div>
         <div>model = "{snapshot.settings.model}"</div>
         <div>approval_policy = "{snapshot.settings.approvalPolicy}"</div>
         <div>model_reasoning_effort = "{snapshot.settings.reasoningEffort}"</div>

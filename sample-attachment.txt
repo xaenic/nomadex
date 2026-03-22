@@ -1,0 +1,7 @@
+Sample file attachment for Nomadex upload testing.
+
+- Type: plain text
+- Purpose: verify generic file upload works
+- Note: use the `File` button, not `Image`, for non-image attachments
+
+If this attaches correctly, the current file-upload path is working.
