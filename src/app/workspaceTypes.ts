@@ -82,6 +82,7 @@ export type WorkspaceActions = {
   searchMentions: (cwd: string, query: string) => Promise<void>;
   loadDirectory: (cwd: string) => Promise<void>;
   readFile: (path: string) => Promise<string>;
+  saveFile: (path: string, content: string) => Promise<void>;
   readGitGraph: (cwd: string, limit?: number) => Promise<string>;
   readGitStatus: (cwd: string) => Promise<string>;
   updateSettings: (patch: Partial<SettingsState>) => Promise<void>;

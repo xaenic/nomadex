@@ -4629,11 +4629,19 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .file-editor {
+  --file-editor-surface: rgb(8 12 22 / 98%);
+  --file-editor-gutter: rgb(6 9 17 / 96%);
+  --file-editor-rule: rgb(255 255 255 / 6%);
+  --file-editor-active: rgb(140 183 255 / 10%);
+  --file-editor-selection: rgb(140 183 255 / 22%);
+  --file-editor-caret: #8cb7ff;
+  --file-editor-ink: #edf3ff;
+  --file-editor-muted: rgb(156 168 191 / 78%);
   margin-top: 12px;
   border: 1px solid var(--bdr);
   border-radius: 12px;
   overflow: hidden;
-  background: rgb(10 11 23 / 92%);
+  background: var(--file-editor-surface);
 }
 
 #editor-page {
@@ -4663,17 +4671,17 @@ pre::-webkit-scrollbar-thumb {
   height: 100%;
   border-radius: 18px;
   border-color: rgb(140 183 255 / 14%);
-  background: var(--panel-solid);
+  background: var(--file-editor-surface);
   box-shadow: 0 24px 64px rgb(0 0 0 / 26%);
 }
 
 .file-editor-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--bdr);
-  background: rgb(255 255 255 / 3%);
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--file-editor-rule);
+  background: rgb(255 255 255 / 2.5%);
 }
 
 .file-editor.page .file-editor-head {
@@ -4682,7 +4690,7 @@ pre::-webkit-scrollbar-thumb {
   top: 0;
   z-index: 2;
   backdrop-filter: blur(18px);
-  background: rgb(15 18 31 / 92%);
+  background: rgb(10 13 22 / 92%);
 }
 
 .file-editor-back {
@@ -4709,17 +4717,18 @@ pre::-webkit-scrollbar-thumb {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
 }
 
 .file-editor-title {
   font-size: 11px;
   font-weight: 600;
-  color: var(--tx);
+  color: var(--file-editor-ink);
 }
 
 .file-editor-path {
   font-size: 10px;
-  color: var(--tx3);
+  color: var(--file-editor-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4727,19 +4736,96 @@ pre::-webkit-scrollbar-thumb {
 
 .file-editor-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.file-editor-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.file-editor-chip,
+.file-editor-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--file-editor-rule);
+  background: rgb(255 255 255 / 4%);
+  font-size: 10px;
+  color: var(--file-editor-muted);
+}
+
+.file-editor-status {
+  color: #b8d7ff;
+}
+
+.file-editor-status.dirty {
+  border-color: rgb(245 158 11 / 24%);
+  background: rgb(245 158 11 / 12%);
+  color: #ffd58a;
+}
+
+.file-editor-status.error {
+  border-color: rgb(239 68 68 / 26%);
+  background: rgb(239 68 68 / 10%);
+  color: #ffb3b3;
 }
 
 .file-editor-link {
-  color: #8cb7ff;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--file-editor-rule);
+  background: rgb(255 255 255 / 3%);
+  color: #9bc4ff;
   font-size: 10px;
   text-decoration: none;
 }
 
 .file-editor-link:hover,
 .file-editor-link:focus-visible {
-  color: #d8e8ff;
-  text-decoration: underline;
+  border-color: rgb(140 183 255 / 28%);
+  background: rgb(140 183 255 / 10%);
+  color: #eef5ff;
   outline: none;
+}
+
+.file-editor-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid rgb(140 183 255 / 26%);
+  background: rgb(140 183 255 / 14%);
+  color: #e8f2ff;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.file-editor-save:hover,
+.file-editor-save:focus-visible {
+  border-color: rgb(140 183 255 / 38%);
+  background: rgb(140 183 255 / 20%);
+  outline: none;
+}
+
+.file-editor-save:disabled {
+  opacity: 0.58;
+  cursor: default;
 }
 
 .file-editor-body {
@@ -4747,7 +4833,8 @@ pre::-webkit-scrollbar-thumb {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  max-height: min(42vh, 520px);
+  flex: 1 1 auto;
+  background: var(--file-editor-surface);
 }
 
 .file-editor.page .file-editor-body {
@@ -4756,81 +4843,51 @@ pre::-webkit-scrollbar-thumb {
   min-height: 0;
 }
 
-.file-editor-scroll {
+.file-editor-empty {
+  padding: 20px 14px;
+  color: var(--file-editor-muted);
+  font-size: 11px;
+}
+
+.file-editor-surface {
   flex: 1 1 auto;
   min-height: 0;
+  background: var(--file-editor-surface);
+}
+
+.file-editor-surface .cm-editor {
   height: 100%;
-  overflow: auto;
+  min-height: 0;
+  background: transparent;
+}
+
+.file-editor-surface .cm-scroller {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y pinch-zoom;
   scrollbar-gutter: stable both-edges;
 }
 
-.file-editor-empty {
-  padding: 20px 14px;
-  color: var(--tx3);
-  font-size: 11px;
+.file-editor-surface .cm-focused {
+  outline: none;
 }
 
-.file-editor-code {
-  position: relative;
-  min-width: 100%;
-  width: max-content;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.65;
+.file-editor-surface .cm-gutters {
+  min-height: 100%;
 }
 
-.file-editor-code-virtual {
-  display: block;
+.file-editor-surface .cm-foldPlaceholder {
+  border: 1px solid var(--file-editor-rule);
+  background: rgb(255 255 255 / 4%);
+  color: var(--file-editor-muted);
 }
 
-.file-editor-line {
-  position: absolute;
-  inset-inline: 0;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  min-width: 100%;
-  width: max-content;
-  min-height: 20px;
+.file-editor-surface .cm-tooltip-autocomplete ul li[aria-selected="true"] {
+  background: rgb(140 183 255 / 14%);
 }
 
-.file-editor-line:hover {
-  background: rgb(255 255 255 / 2.5%);
-}
-
-.file-editor-line.active {
-  background:
-    linear-gradient(90deg, rgb(140 183 255 / 16%), rgb(140 183 255 / 5%));
-}
-
-.file-editor-gutter {
-  padding: 0 10px 0 0;
-  text-align: right;
-  color: var(--tx3);
-  user-select: none;
-  border-right: 1px solid rgb(255 255 255 / 4%);
-}
-
-.file-editor-line.active .file-editor-gutter {
-  color: #dbe8ff;
-  border-right-color: rgb(140 183 255 / 22%);
-}
-
-.file-editor-text {
-  display: block;
-  padding: 0 0 0 12px;
-  color: var(--tx);
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
-}
-
-.file-editor-line.active .file-editor-text {
-  color: #f3f7ff;
+.file-editor-surface .cm-lineTarget {
+  background: rgb(140 183 255 / 8%);
 }
 
 @media (min-width: 960px) {

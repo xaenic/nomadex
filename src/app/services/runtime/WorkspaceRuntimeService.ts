@@ -649,6 +649,8 @@ const base64ToText = (value: string) => {
   return new TextDecoder().decode(bytes);
 };
 
+const textToBase64 = (value: string) => bytesToBase64(new TextEncoder().encode(value).buffer);
+
 const settingEditsFromPatch = (patch: Partial<SettingsState>): Array<{ keyPath: string; value: unknown }> => {
   const edits: Array<{ keyPath: string; value: unknown }> = [];
 
@@ -1937,6 +1939,13 @@ export class WorkspaceRuntimeService {
     });
 
     return base64ToText(response.dataBase64);
+  }
+
+  async writeFile(path: string, content: string) {
+    await this.request("fs/writeFile", {
+      path,
+      dataBase64: textToBase64(content),
+    });
   }
 
   async readGitGraph(cwd: string, limit = 80) {

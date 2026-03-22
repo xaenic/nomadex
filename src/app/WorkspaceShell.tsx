@@ -161,6 +161,10 @@ const STARTUP_CONVERSATION_MESSAGES = [
   "Loading recent history",
   "Syncing transcript",
 ];
+const STARTUP_MESSAGE_SEQUENCE = [
+  ...STARTUP_CONNECTION_MESSAGES,
+  ...STARTUP_CONVERSATION_MESSAGES,
+];
 
 type ChromeIconName =
   | "auto"
@@ -961,6 +965,20 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             }
 
             return await response.text();
+          },
+        ),
+      saveFile: async (path, content) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.writeFile(path, content);
+          },
+          async () => {
+            throw new Error("Saving files requires a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       readGitGraph: async (cwd, limit = 80) =>
@@ -4052,6 +4070,23 @@ export function WorkspacePage() {
       line: editorLine,
     };
   }, [editorLine, editorPath, filePreview, route.section]);
+  const saveEditorFile = useCallback(
+    async (path: string, content: string) => {
+      await actions.saveFile(path, content);
+      setFilePreview((current) =>
+        current?.path === path
+          ? {
+              ...current,
+              content,
+              loading: false,
+              error: null,
+            }
+          : current,
+      );
+      pushToast(`Saved ${path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path}`, "ok");
+    },
+    [actions, pushToast],
+  );
   const editorBackLabel = editorSource === "ops" ? "Back to Files" : "Back to Chat";
   const openExplorerEntry = useCallback(
     async (entry: MentionAttachment) => {
@@ -4365,15 +4400,21 @@ export function WorkspacePage() {
     return (
       <main className="workspace-shell connection-loading-shell">
         <ConnectionLoadingState
-          messages={
-            startupLoaderShowingConversation
-              ? STARTUP_CONVERSATION_MESSAGES
-              : STARTUP_CONNECTION_MESSAGES
-          }
+          messages={STARTUP_MESSAGE_SEQUENCE}
           metaText={
             startupLoaderShowingConversation
               ? `Restoring ${shorten(activeThreadLabel, 42)}`
               : "Connecting to workspace backend"
+          }
+          visibleRangeEnd={
+            startupLoaderShowingConversation
+              ? STARTUP_MESSAGE_SEQUENCE.length - 1
+              : STARTUP_CONNECTION_MESSAGES.length - 1
+          }
+          visibleRangeStart={
+            startupLoaderShowingConversation
+              ? STARTUP_CONNECTION_MESSAGES.length
+              : 0
           }
         />
       </main>
@@ -4562,6 +4603,7 @@ export function WorkspacePage() {
                 <FileEditorPreview
                   backLabel={editorBackLabel}
                   onBack={closeEditor}
+                  onSave={saveEditorFile}
                   preview={editorPreviewState}
                   variant="page"
                 />

@@ -17,32 +17,58 @@ export function ConnectionLoadingState({
   messages = DEFAULT_MESSAGES,
   metaText = "Connecting to workspace backend",
   variant = "screen",
+  visibleRangeStart = 0,
+  visibleRangeEnd,
 }: {
   messages?: string[];
   metaText?: string;
   variant?: "screen" | "inline";
+  visibleRangeStart?: number;
+  visibleRangeEnd?: number;
 }) {
+  const safeMessages = messages.length > 0 ? messages : DEFAULT_MESSAGES;
+  const lastIndex = safeMessages.length - 1;
+  const rangeStart = Math.max(0, Math.min(visibleRangeStart, lastIndex));
+  const rangeEnd = Math.max(
+    rangeStart,
+    Math.min(visibleRangeEnd ?? lastIndex, lastIndex),
+  );
   const [activeIndex, setActiveIndex] = useState(0);
   const [previousIndex, setPreviousIndex] = useState<number | null>(null);
   const [animating, setAnimating] = useState(false);
 
   useEffect(() => {
-    if (messages.length <= 1) {
+    setActiveIndex((current) => {
+      const safeCurrent = Math.max(0, Math.min(current, lastIndex));
+      if (safeCurrent >= rangeStart && safeCurrent <= rangeEnd) {
+        return safeCurrent;
+      }
+
+      setPreviousIndex(safeCurrent);
+      setAnimating(false);
+      return rangeStart;
+    });
+  }, [lastIndex, rangeEnd, rangeStart]);
+
+  useEffect(() => {
+    if (rangeEnd - rangeStart < 1) {
       return;
     }
 
     const interval = window.setInterval(() => {
       setActiveIndex((current) => {
+        const safeCurrent =
+          current < rangeStart || current > rangeEnd ? rangeStart : current;
         setPreviousIndex(current);
         setAnimating(false);
-        return (current + 1) % messages.length;
+        return safeCurrent >= rangeEnd ? rangeStart : safeCurrent + 1;
       });
     }, SWITCH_INTERVAL_MS);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [messages]);
+  }, [rangeEnd, rangeStart]);
 
   useEffect(() => {
     if (previousIndex === null) {
@@ -63,9 +89,9 @@ export function ConnectionLoadingState({
     };
   }, [activeIndex, previousIndex]);
 
-  const activeMessage = messages[activeIndex] ?? DEFAULT_MESSAGES[0];
+  const activeMessage = safeMessages[activeIndex] ?? safeMessages[rangeStart];
   const previousMessage =
-    previousIndex !== null ? messages[previousIndex] ?? null : null;
+    previousIndex !== null ? safeMessages[previousIndex] ?? null : null;
 
   return (
     <div

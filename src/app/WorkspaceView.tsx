@@ -9,8 +9,14 @@ import {
   type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import type { Extension } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
+import { tags } from "@lezer/highlight";
 
 import type {
   MentionAttachment,
@@ -29,6 +35,92 @@ import type {
   FilePreviewState,
   QueuedComposerMessage,
 } from "./workspaceTypes";
+
+const FILE_EDITOR_THEME = EditorView.theme(
+  {
+    "&": {
+      height: "100%",
+      color: "var(--file-editor-ink)",
+      backgroundColor: "var(--file-editor-surface)",
+    },
+    "&.cm-focused": {
+      outline: "none",
+    },
+    ".cm-scroller": {
+      overflow: "auto",
+      fontFamily: "var(--mono)",
+      lineHeight: "1.72",
+    },
+    ".cm-content": {
+      minHeight: "100%",
+      padding: "14px 0 24px",
+      caretColor: "var(--file-editor-caret)",
+    },
+    ".cm-line": {
+      padding: "0 20px 0 16px",
+    },
+    ".cm-gutters": {
+      backgroundColor: "var(--file-editor-gutter)",
+      color: "var(--file-editor-muted)",
+      borderRight: "1px solid var(--file-editor-rule)",
+    },
+    ".cm-lineNumbers .cm-gutterElement": {
+      padding: "0 12px 0 16px",
+      minWidth: "42px",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "var(--file-editor-active)",
+    },
+    ".cm-activeLineGutter": {
+      color: "var(--file-editor-ink)",
+      backgroundColor: "transparent",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection": {
+      backgroundColor: "var(--file-editor-selection)",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--file-editor-caret)",
+    },
+    ".cm-searchMatch": {
+      backgroundColor: "rgb(255 214 102 / 16%)",
+      outline: "1px solid rgb(255 214 102 / 18%)",
+    },
+    ".cm-searchMatch.cm-searchMatch-selected": {
+      backgroundColor: "rgb(255 214 102 / 26%)",
+    },
+    ".cm-tooltip": {
+      border: "1px solid var(--file-editor-rule)",
+      borderRadius: "10px",
+      backgroundColor: "rgb(11 15 27 / 98%)",
+      boxShadow: "0 20px 48px rgb(0 0 0 / 38%)",
+    },
+    ".cm-panels": {
+      backgroundColor: "rgb(11 15 27 / 96%)",
+      borderBottom: "1px solid var(--file-editor-rule)",
+    },
+  },
+  { dark: true },
+);
+
+const FILE_EDITOR_HIGHLIGHT_STYLE = HighlightStyle.define([
+  { tag: tags.keyword, color: "#c792ea" },
+  { tag: [tags.name, tags.deleted, tags.character, tags.propertyName, tags.macroName], color: "#82aaff" },
+  { tag: [tags.function(tags.variableName), tags.labelName], color: "#82aaff" },
+  { tag: [tags.color, tags.constant(tags.name), tags.standard(tags.name)], color: "#f78c6c" },
+  { tag: [tags.definition(tags.name), tags.separator], color: "#eeffff" },
+  { tag: [tags.className, tags.typeName], color: "#ffcb6b" },
+  { tag: [tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace], color: "#f78c6c" },
+  { tag: [tags.operator, tags.operatorKeyword], color: "#89ddff" },
+  { tag: [tags.url, tags.escape, tags.regexp, tags.link], color: "#80cbc4" },
+  { tag: [tags.meta, tags.comment], color: "#637777", fontStyle: "italic" },
+  { tag: [tags.string, tags.inserted], color: "#c3e88d" },
+  { tag: [tags.invalid], color: "#ff5370" },
+  { tag: [tags.bool, tags.null], color: "#f78c6c" },
+  { tag: tags.heading, color: "#82aaff", fontWeight: "700" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "700" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+]);
 
 export const FileExplorerPanel = memo(function FileExplorerPanel({
   breadcrumbs,
@@ -636,47 +728,146 @@ export function FileEditorPreview({
   variant = "panel",
   onBack,
   backLabel = "Back",
+  onSave,
 }: {
   preview: FilePreviewState;
   variant?: "panel" | "page";
   onBack?: () => void;
   backLabel?: string;
+  onSave?: (path: string, content: string) => Promise<void>;
 }) {
-  const highlightedLine = preview.line;
-  const lines = preview.loading || preview.error ? [] : preview.content.split("\n");
   const browseHref = toBrowseUrl(preview.path);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 20,
-    overscan: 16,
-  });
+  const editorViewRef = useRef<EditorView | null>(null);
+  const [draft, setDraft] = useState(preview.content);
+  const [savedContent, setSavedContent] = useState(preview.content);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [languageName, setLanguageName] = useState("Plain text");
+  const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
+  const isDirty = draft !== savedContent;
 
   useEffect(() => {
-    const node = scrollContainerRef.current;
-    if (!node || preview.loading) {
+    setDraft(preview.content);
+    setSavedContent(preview.content);
+    setSaveError(null);
+    setIsSaving(false);
+  }, [preview.content, preview.error, preview.loading, preview.path]);
+
+  useEffect(() => {
+    const fileName = preview.path || preview.name;
+    const description = LanguageDescription.matchFilename(languages, fileName);
+    let cancelled = false;
+
+    setLanguageExtension(null);
+    setLanguageName(description?.name ?? "Plain text");
+
+    if (!description) {
       return;
     }
 
-    if (typeof highlightedLine === "number" && highlightedLine > 0) {
-      rowVirtualizer.scrollToIndex(Math.max(0, highlightedLine - 1), {
-        align: "center",
+    void description
+      .load()
+      .then((support) => {
+        if (!cancelled) {
+          setLanguageExtension(support.extension);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLanguageExtension(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preview.name, preview.path]);
+
+  const saveChanges = useCallback(async () => {
+    if (!onSave || preview.loading || preview.error || isSaving || !isDirty) {
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      await onSave(preview.path, draft);
+      setSavedContent(draft);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save this file.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [draft, isDirty, isSaving, onSave, preview.error, preview.loading, preview.path]);
+
+  const editorExtensions = useMemo<Extension[]>(() => {
+    const extensions: Extension[] = [
+      FILE_EDITOR_THEME,
+      syntaxHighlighting(FILE_EDITOR_HIGHLIGHT_STYLE),
+      keymap.of([
+        {
+          key: "Mod-s",
+          preventDefault: true,
+          run: () => {
+            void saveChanges();
+            return true;
+          },
+        },
+      ]),
+    ];
+
+    if (languageExtension) {
+      extensions.push(languageExtension);
+    }
+
+    return extensions;
+  }, [languageExtension, saveChanges]);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || preview.loading || preview.error) {
+      return;
+    }
+
+    if (typeof preview.line === "number" && preview.line > 0) {
+      const targetLine = view.state.doc.line(Math.min(preview.line, view.state.doc.lines));
+      view.dispatch({
+        selection: { anchor: targetLine.from },
+        effects: EditorView.scrollIntoView(targetLine.from, { y: "center" }),
       });
       return;
     }
 
-    node.scrollTo({
+    view.scrollDOM.scrollTo({
       left: 0,
       top: 0,
     });
-  }, [highlightedLine, preview.loading, preview.path, rowVirtualizer]);
+  }, [preview.error, preview.line, preview.loading, preview.path]);
+
+  const handleBack = useCallback(() => {
+    if (!onBack) {
+      return;
+    }
+
+    if (isDirty && typeof window !== "undefined") {
+      const confirmed = window.confirm(`Discard unsaved changes to ${preview.name}?`);
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    onBack();
+  }, [isDirty, onBack, preview.name]);
+
+  const saveLabel = isSaving ? "Saving…" : isDirty ? "Save" : "Saved";
+  const statusLabel = saveError ? "Save failed" : isSaving ? "Saving" : isDirty ? "Unsaved" : "Saved";
 
   return (
     <div className={clsx("file-editor", variant === "page" && "page")}>
       <div className="file-editor-head">
         {variant === "page" ? (
-          <button className="file-editor-back" onClick={onBack} type="button">
+          <button className="file-editor-back" onClick={handleBack} type="button">
             ← {backLabel}
           </button>
         ) : null}
@@ -685,11 +876,28 @@ export function FileEditorPreview({
           <div className="file-editor-path">{preview.path}</div>
         </div>
         <div className="file-editor-actions">
+          <div className="file-editor-meta">
+            <span className="file-editor-chip">{languageName}</span>
+            {typeof preview.line === "number" && preview.line > 0 ? (
+              <span className="file-editor-chip">Line {preview.line}</span>
+            ) : null}
+            <span className={clsx("file-editor-status", isDirty && "dirty", saveError && "error")}>
+              {statusLabel}
+            </span>
+          </div>
           {browseHref !== "#" ? (
             <a className="file-editor-link" href={browseHref} rel="noreferrer noopener" target="_blank">
-              Open raw
+              Raw
             </a>
           ) : null}
+          <button
+            className="file-editor-save"
+            disabled={!onSave || preview.loading || Boolean(preview.error) || isSaving || !isDirty}
+            onClick={() => void saveChanges()}
+            type="button"
+          >
+            {saveLabel}
+          </button>
         </div>
       </div>
       <div className="file-editor-body">
@@ -698,35 +906,22 @@ export function FileEditorPreview({
           <div className="file-editor-empty">{preview.error}</div>
         ) : null}
         {!preview.loading && !preview.error ? (
-          <div
-            className="file-editor-scroll"
-            ref={scrollContainerRef}
-          >
-            <div
-              className="file-editor-code file-editor-code-virtual"
-              role="presentation"
-              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-            >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const line = lines[virtualRow.index] ?? "";
-                const lineNumber = virtualRow.index + 1;
-
-                return (
-                  <div
-                    className={clsx(
-                      "file-editor-line",
-                      highlightedLine === lineNumber && "active",
-                    )}
-                    key={`${preview.path}:${virtualRow.index}`}
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
-                  >
-                    <span className="file-editor-gutter">{lineNumber}</span>
-                    <code className="file-editor-text">{line || " "}</code>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <CodeMirror
+            className="file-editor-surface"
+            editable={Boolean(onSave)}
+            extensions={editorExtensions}
+            height="100%"
+            onChange={(value) => {
+              setDraft(value);
+              if (saveError) {
+                setSaveError(null);
+              }
+            }}
+            onCreateEditor={(view) => {
+              editorViewRef.current = view;
+            }}
+            value={draft}
+          />
         ) : null}
       </div>
     </div>
