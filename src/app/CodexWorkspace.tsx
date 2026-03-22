@@ -41,6 +41,7 @@ import {
   PANEL_TITLE,
   QUICK_HINTS,
   SLASH_COMMANDS,
+  UI_THEME_OPTIONS,
   approvalModeFromSettings,
   countDiffStats,
   deriveLocalDirectoryCatalog,
@@ -68,6 +69,7 @@ import {
   statusTone,
   stopStreamsForThreadTurn,
   composerHasMentionToken,
+  isUiThemeId,
   mentionInlineToken,
   threadDayGroup,
   threadLabel,
@@ -83,6 +85,7 @@ import type {
   ToastItem,
   ToastTone,
   UiApprovalMode,
+  UiThemeId,
   WorkspaceActions,
   WorkspaceContextValue,
 } from "./workspaceTypes";
@@ -96,6 +99,7 @@ import {
   ProjectFolderPickerModal,
   QueuedMessagesStrip,
   SkillsLibraryModal,
+  ThemePickerPanel,
 } from "./WorkspaceView";
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -125,6 +129,7 @@ type CommandPaletteGroup = {
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
 const SESSION_PROJECT_ROOT = "/home/allan";
+const UI_THEME_STORAGE_KEY = "nomadex-ui-theme";
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -1134,6 +1139,7 @@ export function CodexWorkspacePage() {
   const [panelTab, setPanelTab] = useState<PanelTab>(routePanel ?? "files");
   const [commandOpen, setCommandOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [projectPickerStarting, setProjectPickerStarting] = useState(false);
@@ -1163,6 +1169,14 @@ export function CodexWorkspacePage() {
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [composerSyncKey, setComposerSyncKey] = useState(0);
+  const [uiTheme, setUiTheme] = useState<UiThemeId>(() => {
+    if (typeof window === "undefined") {
+      return "void";
+    }
+
+    const storedTheme = window.localStorage.getItem(UI_THEME_STORAGE_KEY);
+    return isUiThemeId(storedTheme) ? storedTheme : "void";
+  });
 
   const chatRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -1192,6 +1206,25 @@ export function CodexWorkspacePage() {
       right: Math.max(12, window.innerWidth - (rect?.right ?? window.innerWidth - 12)),
     });
   }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.dataset.uiTheme = uiTheme;
+    root.style.setProperty(
+      "color-scheme",
+      UI_THEME_OPTIONS.find((theme) => theme.id === uiTheme)?.mode === "light" ? "light" : "dark",
+    );
+    window.localStorage.setItem(UI_THEME_STORAGE_KEY, uiTheme);
+
+    return () => {
+      delete root.dataset.uiTheme;
+      root.style.removeProperty("color-scheme");
+    };
+  }, [uiTheme]);
 
   useLayoutEffect(() => {
     if (!modelPickerOpen) {
@@ -1267,6 +1300,10 @@ export function CodexWorkspacePage() {
   }, [uniqueThreads]);
 
   const modelOptions = snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models;
+  const activeThemeOption = useMemo(
+    () => UI_THEME_OPTIONS.find((theme) => theme.id === uiTheme) ?? UI_THEME_OPTIONS[0],
+    [uiTheme],
+  );
 
   const fileChanges = useMemo(
     () =>
@@ -2308,6 +2345,17 @@ export function CodexWorkspacePage() {
     }
   }, [activeThreadId, navigateToThread, route.section]);
 
+  const openThemePicker = useCallback(() => {
+    setThemePickerOpen(true);
+    setSidebarOpen(false);
+    setModelPickerOpen(false);
+    setCommandOpen(false);
+  }, []);
+
+  const closeThemePicker = useCallback(() => {
+    setThemePickerOpen(false);
+  }, []);
+
   const createSessionInCwd = useCallback(
     async (cwd: string) => {
       if (projectPickerStarting) {
@@ -2411,6 +2459,12 @@ export function CodexWorkspacePage() {
     [actions, pushToast],
   );
 
+  const selectTheme = useCallback((themeId: UiThemeId) => {
+    setUiTheme(themeId);
+    setThemePickerOpen(false);
+    pushToast(`Theme: ${themeId}`, "");
+  }, [pushToast]);
+
   const cycleApproval = useCallback(async () => {
     const currentIndex = APPROVAL_ORDER.indexOf(activeUiApproval);
     const next = APPROVAL_ORDER[(currentIndex + 1) % APPROVAL_ORDER.length];
@@ -2448,6 +2502,7 @@ export function CodexWorkspacePage() {
       if (event.key === "Escape") {
         setCommandOpen(false);
         setModelPickerOpen(false);
+        setThemePickerOpen(false);
         setProjectPickerOpen(false);
         setContextMenu(null);
         closeQuickPicker();
@@ -2471,6 +2526,10 @@ export function CodexWorkspacePage() {
 
       if (!target.closest("#hmodel") && !target.closest("#mpicker")) {
         setModelPickerOpen(false);
+      }
+
+      if (!target.closest("#htheme") && !target.closest("#tpicker")) {
+        setThemePickerOpen(false);
       }
 
       if (!target.closest("#ta") && !target.closest("#slashpop")) {
@@ -2602,6 +2661,10 @@ export function CodexWorkspacePage() {
             navigateToThread(activeThreadId, "mcp");
           }
           break;
+        case "/theme":
+          openThemePicker();
+          pushToast("Theme picker opened", "ok");
+          break;
         case "/status":
           openPanel("config");
           pushToast("Session diagnostics opened", "ok");
@@ -2624,7 +2687,6 @@ export function CodexWorkspacePage() {
           focusComposerEnd("/init Generate AGENTS.md for this repo");
           break;
         case "/resume":
-        case "/theme":
         case "/feedback":
         case "/apps":
         case "/exit":
@@ -2663,6 +2725,7 @@ export function CodexWorkspacePage() {
       latestAgentMessage,
       navigateToThread,
       openPanel,
+      openThemePicker,
       openSkillsLibrary,
       pushToast,
       resetComposer,
@@ -3476,12 +3539,20 @@ export function CodexWorkspacePage() {
           {activeThread.terminals.length === 0 ? <div className="empty-panel">No terminal sessions yet.</div> : null}
           {activeThread.terminals.map((terminal) => (
             <div className="terminal-card" key={terminal.id}>
-              <div className="terminal-title-row">
-                <div>
-                  <strong>{terminal.title}</strong>
-                  <div className="terminal-meta">{terminal.command}</div>
+              <div className="terminal-window-bar">
+                <div className="terminal-traffic" aria-hidden="true">
+                  <span className="terminal-dot close" />
+                  <span className="terminal-dot minimize" />
+                  <span className="terminal-dot zoom" />
                 </div>
-                <span className={clsx("status-chip", terminal.status)}>{terminal.status}</span>
+                <div className="terminal-window-title">{terminal.title}</div>
+                <span className={clsx("status-chip", "terminal-status-chip", terminal.status)}>{terminal.status}</span>
+              </div>
+              <div className="terminal-title-row">
+                <div className="terminal-command-strip">
+                  <span className="terminal-command-prefix">$</span>
+                  <span>{terminal.command}</span>
+                </div>
               </div>
               <div className="term">
                 {terminal.log.map((line, index) => (
@@ -3560,7 +3631,9 @@ export function CodexWorkspacePage() {
           snapshot={snapshot}
           activeThreadLabel={activeThreadLabel}
           actions={actions}
-          onOpenSkills={() => setSkillsModalOpen(true)}
+          activeTheme={uiTheme}
+          onOpenSkills={openSkillsLibrary}
+          onOpenTheme={openThemePicker}
           pushToast={pushToast}
           selectModel={selectModel}
         />
@@ -3646,11 +3719,28 @@ export function CodexWorkspacePage() {
           ⚙
         </button>
         <button
+          className="htheme"
+          id="htheme"
+          type="button"
+          onClick={() => {
+            setModelPickerOpen(false);
+            setThemePickerOpen((current) => !current);
+          }}
+          title="Theme picker"
+        >
+          <span className="theme-dot" />
+          <span className="theme-label">{activeThemeOption.name}</span>
+          <span className="hmodel-arrow">▾</span>
+        </button>
+        <button
           className="hmodel"
           id="hmodel"
           type="button"
           ref={modelButtonRef}
-          onClick={() => setModelPickerOpen((current) => !current)}
+          onClick={() => {
+            setThemePickerOpen(false);
+            setModelPickerOpen((current) => !current);
+          }}
         >
           <div className="mdot" />
           <span id="mlabel">{snapshot.settings.model}</span>
@@ -3715,6 +3805,10 @@ export function CodexWorkspacePage() {
             <button className="slink" type="button" onClick={openSkillsLibrary}>
               <span>📋</span>
               <span>Skills library</span>
+            </button>
+            <button className="slink" type="button" onClick={openThemePicker}>
+              <span>◐</span>
+              <span>Theme picker</span>
             </button>
             <button className="slink" type="button" onClick={() => fillComposer("/init Generate AGENTS.md scaffold")}>
               <span>📋</span>
@@ -4069,6 +4163,15 @@ export function CodexWorkspacePage() {
             </div>
           ))}
         </div>
+      ) : null}
+
+      {themePickerOpen ? (
+        <ThemePickerPanel
+          activeTheme={uiTheme}
+          onClose={closeThemePicker}
+          onSelect={selectTheme}
+          themes={UI_THEME_OPTIONS}
+        />
       ) : null}
 
       {projectPickerOpen ? (

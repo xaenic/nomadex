@@ -17,6 +17,8 @@ import type {
   ParsedRoute,
   RouteSection,
   UiApprovalMode,
+  UiThemeId,
+  UiThemeOption,
 } from "./workspaceTypes";
 
 const FALLBACK_MENTIONS = createFallbackDashboardData().mentionCatalog;
@@ -78,6 +80,68 @@ export const SLASH_COMMANDS: Array<{ cmd: string; dsc: string }> = [
   { cmd: "/theme", dsc: "Preview and save UI theme variants" },
   { cmd: "/experimental", dsc: "Toggle experimental feature flags" },
 ];
+
+export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
+  {
+    id: "void",
+    name: "Void",
+    description: "Teal-black glass with a cold terminal edge.",
+    mode: "dark",
+    swatches: ["#081019", "#3de8c8", "#4a9eff"],
+  },
+  {
+    id: "ember",
+    name: "Ember",
+    description: "Burnt amber surfaces with warm relay highlights.",
+    mode: "dark",
+    swatches: ["#140c08", "#ff8c42", "#ffcc44"],
+  },
+  {
+    id: "plasma",
+    name: "Plasma",
+    description: "Electric magenta-violet glow without neon overload.",
+    mode: "dark",
+    swatches: ["#110b18", "#c060ff", "#ff60c0"],
+  },
+  {
+    id: "arctic",
+    name: "Arctic",
+    description: "Icy cyan layers with cleaner blue signal tones.",
+    mode: "dark",
+    swatches: ["#071523", "#40c8ff", "#40ffcc"],
+  },
+  {
+    id: "crimson",
+    name: "Crimson",
+    description: "Red-black control room with warmer alert contrast.",
+    mode: "dark",
+    swatches: ["#140707", "#ff4466", "#ff8844"],
+  },
+  {
+    id: "matrix",
+    name: "Matrix",
+    description: "Green phosphor palette for a sharper terminal feel.",
+    mode: "dark",
+    swatches: ["#041007", "#00ff46", "#80ff40"],
+  },
+  {
+    id: "solar",
+    name: "Solar",
+    description: "Warm light mode with paper-like translucent panes.",
+    mode: "light",
+    swatches: ["#f8f4ec", "#e05820", "#d4980a"],
+  },
+  {
+    id: "midnight",
+    name: "Midnight",
+    description: "Muted indigo glass for a calmer late-night shell.",
+    mode: "dark",
+    swatches: ["#0d1020", "#8888ff", "#ff88cc"],
+  },
+];
+
+export const isUiThemeId = (value: string | null | undefined): value is UiThemeId =>
+  UI_THEME_OPTIONS.some((theme) => theme.id === value);
 
 export const nextId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

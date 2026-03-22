@@ -44,6 +44,8 @@ import type {
   FilePreviewState,
   QueuedComposerMessage,
   ToastTone,
+  UiThemeId,
+  UiThemeOption,
   WorkspaceActions,
 } from "./workspaceTypes";
 
@@ -1887,22 +1889,86 @@ export function SkillsLibraryModal({
   );
 }
 
+export function ThemePickerPanel({
+  activeTheme,
+  onClose,
+  onSelect,
+  themes,
+}: {
+  activeTheme: UiThemeId;
+  onClose: () => void;
+  onSelect: (themeId: UiThemeId) => void;
+  themes: Array<UiThemeOption>;
+}) {
+  return (
+    <div
+      className="theme-picker-overlay"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div id="tpicker">
+        <div className="tpicker-head">
+          <div>
+            <div className="tpicker-title">Theme</div>
+            <div className="tpicker-subtitle">Transparent shell palettes for Nomadex.</div>
+          </div>
+          <button className="tpicker-close" onClick={onClose} type="button" aria-label="Close theme picker">
+            ×
+          </button>
+        </div>
+        <div className="tpicker-grid">
+          {themes.map((theme) => (
+            <button
+              className={clsx("theme-card", activeTheme === theme.id && "active")}
+              key={theme.id}
+              onClick={() => onSelect(theme.id)}
+              type="button"
+            >
+              <div className="theme-card-preview">
+                <span className="theme-card-surface" style={{ background: theme.swatches[0] }} />
+                <span className="theme-card-accent" style={{ background: theme.swatches[1] }} />
+                <span className="theme-card-accent" style={{ background: theme.swatches[2] }} />
+              </div>
+              <div className="theme-card-copy">
+                <div className="theme-card-name">
+                  {theme.name}
+                  <span className="theme-card-mode">{theme.mode}</span>
+                </div>
+                <div className="theme-card-description">{theme.description}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConfigPanel({
   snapshot,
   activeThreadLabel,
   actions,
   pushToast,
   selectModel,
+  activeTheme,
   onOpenSkills,
+  onOpenTheme,
 }: {
   snapshot: DashboardData;
   activeThreadLabel: string;
   actions: WorkspaceActions;
   pushToast: (message: string, tone: ToastTone) => void;
   selectModel: (modelId: string) => Promise<void>;
+  activeTheme: UiThemeId;
   onOpenSkills: () => void;
+  onOpenTheme: () => void;
 }) {
   const [mobileCallbackUrl, setMobileCallbackUrl] = useState("");
+  const activeThemeLabel =
+    activeTheme.charAt(0).toUpperCase() + activeTheme.slice(1);
 
   const handleChatGptLogin = useCallback(async () => {
     try {
@@ -2132,6 +2198,19 @@ export function ConfigPanel({
             tabIndex={0}
             onKeyDown={() => undefined}
           />
+        </div>
+      </div>
+
+      <div className="sg">
+        <div className="sg-t">Appearance</div>
+        <div className="config-shortcut-card appearance-shortcut-card">
+          <div className="config-shortcut-copy">
+            <strong>{activeThemeLabel} theme active</strong>
+            <span>Ambient background, translucent panels, and persistent palette selection.</span>
+          </div>
+          <button className="mini-action" onClick={onOpenTheme} type="button">
+            Open Theme Picker
+          </button>
         </div>
       </div>
 

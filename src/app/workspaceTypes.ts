@@ -10,6 +10,24 @@ import type {
 } from "./mockData";
 
 export type UiApprovalMode = "auto" | "ro" | "fa";
+export type UiThemeId =
+  | "void"
+  | "ember"
+  | "plasma"
+  | "arctic"
+  | "crimson"
+  | "matrix"
+  | "solar"
+  | "midnight";
+
+export type UiThemeOption = {
+  id: UiThemeId;
+  name: string;
+  description: string;
+  mode: "dark" | "light";
+  swatches: [string, string, string];
+};
+
 export type PanelTab = "files" | "diff" | "terminal" | "agents" | "config";
 export type QuickMode = "slash" | "mention" | "skill";
 export type RouteSection =
