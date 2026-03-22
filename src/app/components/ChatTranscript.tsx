@@ -32,8 +32,9 @@ import {
   shorten,
   turnErrorText,
 } from "../workspaceHelpers";
-import { FileChangeSummary } from "./FileChangeSummary";
 import { BrandMark } from "./BrandMark";
+import { ConnectionLoadingState } from "./ConnectionLoadingState";
+import { FileChangeSummary } from "./FileChangeSummary";
 
 type TextStreamFx = {
   from: number;
@@ -116,22 +117,16 @@ export function LoadingConversationState({
   threadLabelText: string;
 }) {
   return (
-    <div className="ww">
-      <BrandMark alt="" className="wico" />
-      <h1>Loading conversation</h1>
-      <p>
-        Reattaching this saved thread and pulling its history into the
-        transcript.
-      </p>
-      <div className="wbadges">
-        <div className="wbadge">Thread</div>
-        <div className="wbadge">{shorten(threadLabelText, 42)}</div>
-        <div className="wbadge">History sync</div>
-      </div>
-      <p className="welcome-foot">
-        The starter cards are hidden until the saved turns are loaded.
-      </p>
-    </div>
+    <ConnectionLoadingState
+      messages={[
+        "Opening conversation",
+        "Reattaching thread",
+        "Loading recent history",
+        "Syncing transcript",
+      ]}
+      metaText={`Restoring ${shorten(threadLabelText, 42)}`}
+      variant="inline"
+    />
   );
 }
 
