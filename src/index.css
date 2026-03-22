@@ -1537,8 +1537,16 @@ code {
   gap: 12px;
 }
 
+.message-markdown-streaming {
+  contain: content;
+}
+
 .message-markdown > * {
   margin: 0;
+}
+
+.message-markdown-streaming > * {
+  animation: none !important;
 }
 
 .message-markdown p,
@@ -1694,6 +1702,11 @@ code {
 
 .message-text-streaming {
   contain: content;
+}
+
+.message-stream-cursor {
+  margin-top: 2px;
+  margin-left: 0;
 }
 
 .message-text-tail {

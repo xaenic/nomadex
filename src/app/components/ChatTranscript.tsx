@@ -2,6 +2,7 @@ import {
   Children,
   isValidElement,
   memo,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -136,7 +137,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeTurns,
   existingThreadHistoryPending,
   streamVisible,
-  streamTextFx,
   onReview,
   onFill,
   onSlash,
@@ -152,7 +152,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeTurns: Array<Turn>;
   existingThreadHistoryPending: boolean;
   streamVisible: Record<string, number>;
-  streamTextFx: Record<string, TextStreamFx>;
   onReview: (diffId?: string) => void;
   onFill: (value: string) => void;
   onSlash: (value: string) => void;
@@ -204,11 +203,6 @@ export const ChatTranscript = memo(function ChatTranscript({
                     : undefined
                 }
                 streaming={item.type === "agentMessage" && item.id === liveAgentMessageId}
-                textFx={
-                  item.type === "agentMessage"
-                    ? streamTextFx[`${item.id}:text`]
-                    : undefined
-                }
                 textVisible={
                   item.type === "agentMessage"
                     ? streamVisible[`${item.id}:text`]
@@ -478,13 +472,38 @@ const extractCodeBlockLanguage = (children: ReactNode): string | null => {
   return null;
 };
 
+const normalizeStreamingMarkdown = (text: string) => {
+  let nextText = text;
+  const backtickFenceCount = (nextText.match(/```/gu) ?? []).length;
+  if (backtickFenceCount % 2 === 1) {
+    nextText = `${nextText}\n\`\`\``;
+  }
+
+  const tildeFenceCount = (nextText.match(/~~~/gu) ?? []).length;
+  if (tildeFenceCount % 2 === 1) {
+    nextText = `${nextText}\n~~~`;
+  }
+
+  return nextText;
+};
+
 const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
   text,
   onOpenFile,
+  streaming = false,
+  showCursor = false,
 }: {
   text: string;
   onOpenFile: (path: string, line?: number | null) => void;
+  streaming?: boolean;
+  showCursor?: boolean;
 }) {
+  const deferredText = useDeferredValue(text);
+  const sourceText = streaming ? deferredText : text;
+  const markdownText = useMemo(
+    () => (streaming ? normalizeStreamingMarkdown(sourceText) : sourceText),
+    [sourceText, streaming],
+  );
   const components = useMemo<Components>(
     () => ({
       a({ href, children }) {
@@ -551,10 +570,22 @@ const MessageMarkdownFlow = memo(function MessageMarkdownFlow({
   );
 
   return (
-    <div className="message-text-flow message-markdown">
+    <div
+      className={clsx(
+        "message-text-flow",
+        "message-markdown",
+        streaming && "message-text-flow-streaming message-markdown-streaming",
+      )}
+    >
       <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
-        {text}
+        {markdownText}
       </ReactMarkdown>
+      {showCursor ? (
+        <span
+          aria-hidden="true"
+          className="live-cursor message-stream-cursor"
+        />
+      ) : null}
     </div>
   );
 });
@@ -674,7 +705,6 @@ const ThreadItemView = memo(function ThreadItemView({
   turnStatus,
   streaming = false,
   textVisible,
-  textFx,
   outputVisible,
   onCopy,
   onFork,
@@ -688,7 +718,6 @@ const ThreadItemView = memo(function ThreadItemView({
   turnStatus: Turn["status"];
   streaming?: boolean;
   textVisible?: number;
-  textFx?: TextStreamFx;
   outputVisible?: number;
   onCopy: (value: string) => void;
   onFork: () => void;
@@ -893,12 +922,11 @@ const ThreadItemView = memo(function ThreadItemView({
         <div className="mb">
           {text ? (
             streaming ? (
-              <MessageTextFlow
+              <MessageMarkdownFlow
                 onOpenFile={onOpenFile}
                 showCursor={streaming}
                 streaming={streaming}
                 text={text}
-                textFx={textFx}
               />
             ) : (
               <MessageMarkdownFlow onOpenFile={onOpenFile} text={text} />

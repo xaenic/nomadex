@@ -1258,9 +1258,6 @@ export function WorkspacePage() {
   const chatScrollStateRef = useRef<Record<string, { pinned: boolean; top: number }>>({});
   const streamVisibleRef = useRef<Record<string, number>>({});
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
-  const [streamTextFx, setStreamTextFx] = useState<
-    Record<string, { from: number; to: number }>
-  >({});
   const [queueWakeSignal, setQueueWakeSignal] = useState(0);
   const deferredComposer = useDeferredValue(composer);
   const deferredQuickQuery = useDeferredValue(quickQuery);
@@ -2140,27 +2137,16 @@ export function WorkspacePage() {
 
     if (liveMode) {
       const frame = window.requestAnimationFrame(() => {
-        const previousVisible = streamVisibleRef.current;
         const nextVisible: Record<string, number> = {};
-        const nextTextFx: Record<string, { from: number; to: number }> = {};
 
         for (const entry of streamEntries) {
           const target = getStreamTarget(entry);
-          const previous = previousVisible[entry.key] ?? 0;
-
           nextVisible[entry.key] = target;
-          if (entry.field === "text" && target > previous) {
-            nextTextFx[entry.key] = {
-              from: previous,
-              to: target,
-            };
-          }
         }
 
         streamVisibleRef.current = nextVisible;
         startTransition(() => {
           setStreamVisible(nextVisible);
-          setStreamTextFx(nextTextFx);
         });
       });
 
@@ -2189,9 +2175,6 @@ export function WorkspacePage() {
           setStreamVisible(nextVisible);
         });
       }
-      startTransition(() => {
-        setStreamTextFx({});
-      });
     };
 
     const frame = window.requestAnimationFrame(syncVisible);
@@ -2199,7 +2182,6 @@ export function WorkspacePage() {
     const timer = window.setInterval(() => {
       const currentVisible = streamVisibleRef.current;
       const nextVisible: Record<string, number> = {};
-      const nextTextFx: Record<string, { from: number; to: number }> = {};
       let changed = Object.keys(currentVisible).length !== streamEntries.length;
 
       for (const entry of streamEntries) {
@@ -2213,12 +2195,6 @@ export function WorkspacePage() {
         nextVisible[entry.key] = nextValue;
         if (nextValue !== value) {
           changed = true;
-          if (entry.field === "text") {
-            nextTextFx[entry.key] = {
-              from: value,
-              to: nextValue,
-            };
-          }
         }
       }
 
@@ -2229,7 +2205,6 @@ export function WorkspacePage() {
       streamVisibleRef.current = nextVisible;
       startTransition(() => {
         setStreamVisible(nextVisible);
-        setStreamTextFx(nextTextFx);
       });
     }, 24);
 
@@ -4357,7 +4332,6 @@ export function WorkspacePage() {
                   activeThreadLabel={activeThreadLabel}
                   activeTurns={renderedTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
-                  streamTextFx={streamTextFx}
                   onContext={openItemContextMenu}
                   onCopy={handleCopy}
                   onEdit={fillComposer}
