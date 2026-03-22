@@ -68,7 +68,7 @@ type ServerEnvelope = {
   error?: unknown;
 };
 
-const inferDefaultWsUrl = () => {
+const inferProxyWsUrl = () => {
   if (typeof window === "undefined") {
     return "ws://127.0.0.1:3901";
   }
@@ -77,7 +77,29 @@ const inferDefaultWsUrl = () => {
   return `${protocol}//${window.location.host}/codex-ws`;
 };
 
-const DEFAULT_WS_URL = import.meta.env.VITE_CODEX_WS_URL ?? inferDefaultWsUrl();
+const resolveWsUrls = () => {
+  const urls: string[] = [];
+  const addUrl = (value: string | undefined) => {
+    if (!value || urls.includes(value)) {
+      return;
+    }
+
+    urls.push(value);
+  };
+
+  if (typeof window === "undefined") {
+    addUrl(import.meta.env.VITE_CODEX_WS_URL);
+    addUrl("ws://127.0.0.1:3901");
+    return urls;
+  }
+
+  addUrl(import.meta.env.VITE_CODEX_WS_URL);
+  addUrl(inferProxyWsUrl());
+  return urls;
+};
+
+const WS_URL_CANDIDATES = resolveWsUrls();
+const DEFAULT_WS_URL = WS_URL_CANDIDATES[0] ?? "ws://127.0.0.1:3901";
 
 const DEFAULT_STEER_SUGGESTIONS = [
   "Keep the answer terse and operational.",
@@ -1010,6 +1032,64 @@ export class CodexLiveRuntime {
     this.resumedThreads.clear();
   }
 
+  private handleSocketClose(socket: WebSocket) {
+    if (this.socket !== socket) {
+      return;
+    }
+
+    this.socket = null;
+    this.connectPromise = null;
+    this.failPending(new Error("Codex app-server connection closed."));
+    this.loadingThreads.clear();
+    this.resumedThreads.clear();
+    this.mutate((snapshot) => {
+      snapshot.transport = toRuntimeStatus(snapshot.transport.mode, "offline", snapshot.transport.error);
+    });
+  }
+
+  private async openSocket(url: string) {
+    return await new Promise<WebSocket>((resolve, reject) => {
+      const socket = new WebSocket(url);
+      let settled = false;
+
+      const rejectOnce = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+
+        try {
+          socket.close();
+        } catch {
+          // Ignore cleanup errors for failed connection attempts.
+        }
+
+        reject(new Error(`Failed to connect to ${url}`));
+      };
+
+      socket.onopen = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        socket.onmessage = this.onMessage;
+        socket.onerror = () => undefined;
+        socket.onclose = () => {
+          this.handleSocketClose(socket);
+        };
+        resolve(socket);
+      };
+      socket.onerror = rejectOnce;
+      socket.onclose = rejectOnce;
+    });
+  }
+
   private failPending(error: Error) {
     this.pending.forEach((request) => {
       request.reject(error);
@@ -1126,24 +1206,28 @@ export class CodexLiveRuntime {
     }
 
     this.connectPromise = (async () => {
-      await new Promise<void>((resolve, reject) => {
-        const socket = new WebSocket(DEFAULT_WS_URL);
-        this.socket = socket;
+      let connected = false;
+      for (const candidate of WS_URL_CANDIDATES) {
+        try {
+          this.socket = await this.openSocket(candidate);
+          connected = true;
+          break;
+        } catch {
+          continue;
+        }
+      }
 
-        socket.onopen = () => resolve();
-        socket.onmessage = this.onMessage;
-        socket.onerror = () => reject(new Error(`Failed to connect to ${DEFAULT_WS_URL}`));
-        socket.onclose = () => {
-          this.socket = null;
-          this.connectPromise = null;
-          this.failPending(new Error("Codex app-server connection closed."));
-          this.loadingThreads.clear();
-          this.resumedThreads.clear();
-          this.mutate((snapshot) => {
-            snapshot.transport = toRuntimeStatus(snapshot.transport.mode, "offline", snapshot.transport.error);
-          });
-        };
-      });
+      if (!connected || !this.socket) {
+        const error =
+          WS_URL_CANDIDATES.length > 1
+            ? `Failed to connect to Codex app-server. Tried: ${WS_URL_CANDIDATES.join(", ")}`
+            : `Failed to connect to ${DEFAULT_WS_URL}`;
+
+        this.mutate((snapshot) => {
+          snapshot.transport = toRuntimeStatus("mock", "error", error);
+        });
+        throw new Error(error);
+      }
 
       try {
         await this.request("initialize", {

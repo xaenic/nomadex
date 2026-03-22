@@ -4,7 +4,6 @@ import "@fontsource/sora/400.css";
 import "@fontsource/sora/600.css";
 import "@fontsource/sora/700.css";
 
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
@@ -28,9 +27,7 @@ if (!rootElement) {
 }
 
 createRoot(rootElement).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </StrictMode>,
+  <QueryClientProvider client={queryClient}>
+    <RouterProvider router={router} />
+  </QueryClientProvider>,
 );

@@ -245,6 +245,16 @@ const authRelayMiddleware = (): Connect.NextHandleFunction => {
   };
 };
 
+const configureCodexWsProxy = (proxy: {
+  on: (event: "proxyReqWs", listener: (proxyReq: { headersSent?: boolean; removeHeader: (name: string) => void }) => void) => void;
+}) => {
+  proxy.on("proxyReqWs", (proxyReq) => {
+    if (!proxyReq.headersSent) {
+      proxyReq.removeHeader("origin");
+    }
+  });
+};
+
 const codexLocalAssetPlugin = (): Plugin => ({
   name: "codex-local-assets",
   configureServer(server) {
@@ -266,12 +276,14 @@ export default defineConfig({
         target: wsProxyTarget,
         ws: true,
         changeOrigin: true,
+        configure: configureCodexWsProxy,
         rewrite: (requestPath) => requestPath.replace(/^\/codex-ws/, ""),
       },
       "/codex-api/ws": {
         target: wsProxyTarget,
         ws: true,
         changeOrigin: true,
+        configure: configureCodexWsProxy,
         rewrite: (requestPath) => requestPath.replace(/^\/codex-api\/ws/, ""),
       },
     },

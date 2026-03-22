@@ -15,6 +15,15 @@ const children = [];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const readyzUrl = (() => {
+  const target = new URL(wsUrl);
+  target.protocol = target.protocol === "wss:" ? "https:" : "http:";
+  target.pathname = "/readyz";
+  target.search = "";
+  target.hash = "";
+  return target;
+})();
+
 const isPortOpen = (targetHost, targetPort) =>
   new Promise((resolve) => {
     const socket = new net.Socket();
@@ -36,6 +45,28 @@ const isPortOpen = (targetHost, targetPort) =>
     socket.connect(targetPort, targetHost);
   });
 
+const isCodexAppServerReady = async () => {
+  try {
+    const response = await fetch(readyzUrl, {
+      signal: AbortSignal.timeout(500),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+const ensureUiPortAvailable = async () => {
+  if (!(await isPortOpen("127.0.0.1", Number(uiPort)))) {
+    return;
+  }
+
+  throw new Error(
+    `UI port ${uiPort} is already in use. Open the existing UI at http://127.0.0.1:${uiPort} ` +
+      `or set VITE_CODEX_UI_PORT to a different port before running dev:live.`,
+  );
+};
+
 const stopChildren = () => {
   for (const child of children) {
     if (!child.killed) {
@@ -56,8 +87,15 @@ process.on("SIGTERM", () => {
 
 const ensureAppServer = async () => {
   if (await isPortOpen(host, port)) {
-    console.log(`[codex-console] Reusing Codex app-server at ${wsUrl}`);
-    return;
+    if (await isCodexAppServerReady()) {
+      console.log(`[codex-console] Reusing Codex app-server at ${wsUrl}`);
+      return;
+    }
+
+    throw new Error(
+      `Port ${port} on ${host} is already in use, but it is not responding like a Codex app-server. ` +
+        `Stop the conflicting process or set VITE_CODEX_WS_URL to a different websocket target.`,
+    );
   }
 
   console.log(`[codex-console] Starting Codex app-server at ${wsUrl}`);
@@ -70,7 +108,7 @@ const ensureAppServer = async () => {
   children.push(appServer);
 
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (await isPortOpen(host, port)) {
+    if (await isCodexAppServerReady()) {
       return;
     }
 
@@ -94,7 +132,7 @@ const startVite = () => {
 
   delete viteEnv.VITE_CODEX_WS_URL;
 
-  const vite = spawn(npmBin, ["run", "dev", "--", "--host", "0.0.0.0", "--port", uiPort], {
+  const vite = spawn(npmBin, ["run", "dev", "--", "--host", "0.0.0.0", "--port", uiPort, "--strictPort"], {
     cwd: projectRoot,
     stdio: "inherit",
     env: viteEnv,
@@ -110,6 +148,7 @@ const startVite = () => {
 
 try {
   await ensureAppServer();
+  await ensureUiPortAvailable();
   startVite();
 } catch (error) {
   stopChildren();
