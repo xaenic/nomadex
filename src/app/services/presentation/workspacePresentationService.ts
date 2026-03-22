@@ -1,8 +1,26 @@
-import type { ThreadItem, Turn, UserInput } from "../protocol/v2";
+import type { ThreadItem, Turn, UserInput } from "../../../protocol/v2";
+import {
+  activeProviderAdapter,
+  buildProviderBrowseUrl,
+  buildProviderImageUrl,
+} from "../providers";
 
 export type UiFileAttachment = {
   label: string;
   path: string;
+};
+
+export type TurnFileChangeSummaryEntry = {
+  itemId: string;
+  path: string;
+  kind: "add" | "update" | "delete";
+  status: Extract<ThreadItem, { type: "fileChange" }>["status"];
+};
+
+export type LocalFileReference = {
+  path: string;
+  line: number | null;
+  browseUrl: string;
 };
 
 export type InlineSegment =
@@ -79,6 +97,27 @@ function parseFileReference(value: string): { path: string; line: number | null 
 
   if (!isFilePath(pathValue)) return null;
   return { path: pathValue, line };
+}
+
+const looksLikeAbsolutePath = (candidate: string): boolean =>
+  candidate.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(candidate);
+
+export function resolveLocalFileReference(value: string): LocalFileReference | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = parseFileReference(normalized);
+  if (!parsed?.path || !looksLikeAbsolutePath(parsed.path)) {
+    return null;
+  }
+
+  return {
+    path: parsed.path,
+    line: parsed.line,
+    browseUrl: buildProviderBrowseUrl(activeProviderAdapter, parsed.path),
+  };
 }
 
 function formatFileReferenceLabel(pathValue: string, line: number | null): string {
@@ -178,8 +217,8 @@ function isTransientImageReference(value: string): boolean {
   return value.startsWith("blob:") || value.startsWith("data:");
 }
 
-function extractCodexUserRequestText(value: string): string {
-  const markerRegex = /(?:^|\n)\s{0,3}#{0,6}\s*my request for codex\s*:?\s*/giu;
+function extractUserRequestText(value: string): string {
+  const markerRegex = activeProviderAdapter.requestMarkerPattern;
   const matches = Array.from(value.matchAll(markerRegex));
   if (matches.length === 0) {
     return value.trim();
@@ -216,7 +255,7 @@ export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMes
   const images = [...new Set(persistedImages.length > 0 ? persistedImages : imageCandidates)];
   const fullText = textChunks.join("\n");
   return {
-    text: extractCodexUserRequestText(fullText),
+    text: extractUserRequestText(fullText),
     images,
     fileAttachments: extractFileAttachments(fullText),
   };
@@ -311,19 +350,19 @@ export function toRenderableImageUrl(value: string): string {
     normalized.startsWith("blob:") ||
     normalized.startsWith("http://") ||
     normalized.startsWith("https://") ||
-    normalized.startsWith("/codex-local-image?")
+    normalized.startsWith(`${activeProviderAdapter.localImagePath}?`)
   ) {
     return normalized;
   }
 
   if (normalized.startsWith("file://")) {
-    return `/codex-local-image?path=${encodeURIComponent(normalized)}`;
+    return buildProviderImageUrl(activeProviderAdapter, normalized);
   }
 
   const looksLikeUnixAbsolute = normalized.startsWith("/");
   const looksLikeWindowsAbsolute = /^[A-Za-z]:[\\/]/u.test(normalized);
   if (looksLikeUnixAbsolute || looksLikeWindowsAbsolute) {
-    return `/codex-local-image?path=${encodeURIComponent(normalized)}`;
+    return buildProviderImageUrl(activeProviderAdapter, normalized);
   }
 
   return normalized;
@@ -333,16 +372,13 @@ export function toBrowseUrl(pathValue: string): string {
   const normalized = pathValue.trim();
   if (!normalized) return "#";
 
-  const looksLikeAbsolutePath = (candidate: string): boolean =>
-    candidate.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(candidate);
-
-  const parsed = parseFileReference(normalized);
-  if (parsed?.path && looksLikeAbsolutePath(parsed.path)) {
-    return `/codex-local-browse${encodeURI(parsed.path)}`;
+  const resolved = resolveLocalFileReference(normalized);
+  if (resolved) {
+    return resolved.browseUrl;
   }
 
   if (looksLikeAbsolutePath(normalized)) {
-    return `/codex-local-browse${encodeURI(normalized)}`;
+    return buildProviderBrowseUrl(activeProviderAdapter, normalized);
   }
 
   return "#";
@@ -381,6 +417,40 @@ export function parseMessageBlocks(text: string): MessageBlock[] {
   return blocks.length > 0 ? blocks : [{ kind: "text", value: text }];
 }
 
+export function summarizeTurnFileChanges(turn: Turn | null): TurnFileChangeSummaryEntry[] {
+  if (!turn) {
+    return [];
+  }
+
+  const entries = new Map<string, TurnFileChangeSummaryEntry>();
+
+  for (const item of turn.items) {
+    if (item.type !== "fileChange") {
+      continue;
+    }
+
+    for (const change of item.changes) {
+      const path = change.path.trim();
+      if (!path || path === "Editing files") {
+        continue;
+      }
+
+      if (entries.has(path)) {
+        entries.delete(path);
+      }
+
+      entries.set(path, {
+        itemId: item.id,
+        path,
+        kind: change.kind.type,
+        status: item.status,
+      });
+    }
+  }
+
+  return [...entries.values()];
+}
+
 export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
   if (!turn || turn.status !== "inProgress") {
     return null;
@@ -398,7 +468,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
   let activityLabel = "Thinking";
   const activityDetails: string[] = [];
   let activityTone: UiLiveOverlay["activityTone"] = "thinking";
-  let statusText = "Codex is thinking through the next step";
+  let statusText = "The agent is thinking through the next step";
   const reasoningText = reasoning
     ? [...reasoning.summary, ...reasoning.content].filter(Boolean).join("\n\n").trim()
     : "";
@@ -408,7 +478,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "commandExecution" && item.status === "inProgress") {
       activityLabel = "Running command";
       activityTone = "command";
-      statusText = "Codex is running a command";
+      statusText = "The agent is running a command";
       if (item.command.trim()) {
         activityDetails.push(item.command.trim());
       }
@@ -418,7 +488,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "fileChange" && item.status === "inProgress") {
       activityLabel = "Editing files";
       activityTone = "editing";
-      statusText = "Codex is editing files";
+      statusText = "The agent is editing files";
       activityDetails.push(
         ...item.changes
           .map((change) => change.path)
@@ -431,7 +501,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "mcpToolCall" && item.status === "inProgress") {
       activityLabel = "Using MCP tool";
       activityTone = "tool";
-      statusText = "Codex is using an MCP tool";
+      statusText = "The agent is using an MCP tool";
       activityDetails.push([item.server, item.tool].filter(Boolean).join(" · "));
       break;
     }
@@ -439,7 +509,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "dynamicToolCall" && item.status === "inProgress") {
       activityLabel = "Using tool";
       activityTone = "tool";
-      statusText = "Codex is using a tool";
+      statusText = "The agent is using a tool";
       if (item.tool.trim()) {
         activityDetails.push(item.tool.trim());
       }
@@ -449,7 +519,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "collabAgentToolCall" && item.status === "inProgress") {
       activityLabel = "Calling subagent";
       activityTone = "agent";
-      statusText = "Codex is working with a subagent";
+      statusText = "The agent is working with a subagent";
       if (item.tool.trim()) {
         activityDetails.push(item.tool.trim());
       }
@@ -459,7 +529,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "webSearch" && item.query.trim()) {
       activityLabel = "Searching web";
       activityTone = "search";
-      statusText = "Codex is searching the web";
+      statusText = "The agent is searching the web";
       activityDetails.push(item.query.trim());
       break;
     }
@@ -467,7 +537,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "imageGeneration" && item.status !== "completed") {
       activityLabel = "Generating image";
       activityTone = "image";
-      statusText = "Codex is generating an image";
+      statusText = "The agent is generating an image";
       if (item.revisedPrompt?.trim()) {
         activityDetails.push(item.revisedPrompt.trim());
       }
@@ -477,14 +547,14 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "agentMessage") {
       activityLabel = "Writing response";
       activityTone = "writing";
-      statusText = "Codex is writing the response";
+      statusText = "The agent is writing the response";
       break;
     }
 
     if (item.type === "plan") {
       activityLabel = "Planning";
       activityTone = "thinking";
-      statusText = "Codex is planning the next steps";
+      statusText = "The agent is planning the next steps";
       if (item.text.trim()) {
         activityDetails.push(item.text.trim().split("\n")[0]);
       }
@@ -494,7 +564,7 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     if (item.type === "reasoning") {
       activityLabel = "Reasoning";
       activityTone = "thinking";
-      statusText = "Codex is reasoning about the next step";
+      statusText = "The agent is reasoning about the next step";
       if (item.summary[0]?.trim()) {
         activityDetails.push(item.summary[0].trim());
       }
@@ -508,14 +578,14 @@ export function deriveLiveOverlay(turn: Turn | null): UiLiveOverlay | null {
     plan?.text.trim()
   ) {
     activityLabel = "Planning";
-    statusText = "Codex is planning the next steps";
+    statusText = "The agent is planning the next steps";
     activityDetails.push(plan.text.trim().split("\n")[0]);
   }
 
   if (turn.error && typeof turn.error === "object" && "message" in turn.error) {
     errorText = typeof (turn.error as { message?: unknown }).message === "string" ? (turn.error as { message: string }).message : "";
     activityTone = "error";
-    statusText = "Codex hit an error";
+    statusText = "The agent hit an error";
   }
 
   return {

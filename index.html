@@ -2,12 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=nomadex-n" />
+    <link rel="shortcut icon" href="/favicon.svg?v=nomadex-n" />
+    <link rel="apple-touch-icon" href="/favicon.svg?v=nomadex-n" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#07070f" />
+    <meta name="theme-color" content="#17384b" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Nomadex</title>
+    <script>
+      (() => {
+        const storageKey = "nomadex-ui-theme";
+        const themeMap = {
+          void: { mode: "dark", themeColor: "#17384b" },
+          ember: { mode: "dark", themeColor: "#4b2616" },
+          plasma: { mode: "dark", themeColor: "#4b215e" },
+          arctic: { mode: "dark", themeColor: "#163a4f" },
+          crimson: { mode: "dark", themeColor: "#4a1d28" },
+          matrix: { mode: "dark", themeColor: "#183720" },
+          solar: { mode: "light", themeColor: "#e8d5bc" },
+          midnight: { mode: "dark", themeColor: "#2a3260" },
+        };
+
+        try {
+          const storedTheme = window.localStorage.getItem(storageKey);
+          const activeTheme = themeMap[storedTheme] ?? themeMap.void;
+          const activeThemeId = themeMap[storedTheme] ? storedTheme : "void";
+          const root = document.documentElement;
+
+          root.dataset.uiTheme = activeThemeId;
+          root.style.setProperty("color-scheme", activeTheme.mode);
+          document
+            .querySelector('meta[name="theme-color"]')
+            ?.setAttribute("content", activeTheme.themeColor);
+          document
+            .querySelector('meta[name="color-scheme"]')
+            ?.setAttribute("content", activeTheme.mode);
+          document
+            .querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+            ?.setAttribute(
+              "content",
+              activeTheme.mode === "light" ? "default" : "black-translucent",
+            );
+        } catch {
+          // Ignore storage/meta sync failures during boot.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

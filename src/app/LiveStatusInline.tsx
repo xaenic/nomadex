@@ -1,7 +1,7 @@
 import { memo } from "react";
 import clsx from "clsx";
 
-import type { UiLiveOverlay } from "./codexUiBridge";
+import type { UiLiveOverlay } from "./services/presentation/workspacePresentationService";
 
 type LiveStatusTone = UiLiveOverlay["activityTone"] | "approval";
 

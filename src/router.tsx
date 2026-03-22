@@ -1,6 +1,6 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
-import { BlankWorkspacePage } from "./app/CodexWorkspace";
+import { BlankWorkspacePage } from "./app/WorkspaceShell";
 import { RootLayout } from "./app/RootLayout";
 
 const rootRoute = createRootRoute({

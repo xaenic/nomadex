@@ -1,64 +1,54 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="64"
-  height="64"
-  viewBox="0 0 64 64"
-  fill="none"
->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
   <defs>
-    <linearGradient id="bg" x1="8" y1="6" x2="58" y2="60" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#111126" />
-      <stop offset="1" stop-color="#07070f" />
+    <linearGradient id="ndx-stroke" x1="48" y1="36" x2="206" y2="214" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6CF0FF" />
+      <stop offset="0.52" stop-color="#79A6FF" />
+      <stop offset="1" stop-color="#EE74FF" />
     </linearGradient>
-    <linearGradient id="accent" x1="18" y1="16" x2="47" y2="48" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6366f1" />
-      <stop offset="1" stop-color="#8b5cf6" />
-    </linearGradient>
-    <linearGradient id="glow" x1="22" y1="20" x2="42" y2="42" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#dfe8ff" />
-      <stop offset="1" stop-color="#8cb7ff" />
-    </linearGradient>
+    <radialGradient id="ndx-core" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(128 128) rotate(90) scale(104)">
+      <stop offset="0" stop-color="#162246" stop-opacity="0.96" />
+      <stop offset="0.68" stop-color="#0C1224" stop-opacity="0.82" />
+      <stop offset="1" stop-color="#060910" stop-opacity="0" />
+    </radialGradient>
+    <filter id="ndx-glow" x="6" y="10" width="244" height="236" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
   </defs>
 
-  <rect x="3" y="3" width="58" height="58" rx="18" fill="url(#bg)" />
-  <rect
-    x="3.75"
-    y="3.75"
-    width="56.5"
-    height="56.5"
-    rx="17.25"
-    stroke="#23233a"
-    stroke-width="1.5"
-  />
+  <circle cx="128" cy="128" r="92" fill="url(#ndx-core)" />
+  <g filter="url(#ndx-glow)" stroke="url(#ndx-stroke)" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="128" cy="128" r="76" stroke-opacity="0.9" stroke-width="3" />
+    <circle cx="128" cy="128" r="58" stroke-opacity="0.84" stroke-width="2.5" />
+    <ellipse cx="128" cy="128" rx="98" ry="44" transform="rotate(30 128 128)" stroke-opacity="0.92" stroke-width="3.2" />
+    <ellipse cx="128" cy="128" rx="98" ry="44" transform="rotate(-30 128 128)" stroke-opacity="0.92" stroke-width="3.2" />
 
-  <path
-    d="M32 14.5 46 22.5v19L32 49.5l-14-8v-19l14-8Z"
-    fill="#0f1120"
-    stroke="url(#accent)"
-    stroke-width="2.2"
-    stroke-linejoin="round"
-  />
-  <path
-    d="M32 20.5 40.5 25.5v13L32 43.5l-8.5-5v-13l8.5-5Z"
-    fill="url(#accent)"
-    fill-opacity=".12"
-    stroke="url(#accent)"
-    stroke-width="1.8"
-    stroke-linejoin="round"
-  />
+    <path d="M128 39L136 67L128 82L120 67L128 39Z" stroke-opacity="0.82" stroke-width="3" />
+    <path d="M217 128L189 136L174 128L189 120L217 128Z" stroke-opacity="0.82" stroke-width="3" />
+    <path d="M128 217L120 189L128 174L136 189L128 217Z" stroke-opacity="0.82" stroke-width="3" />
+    <path d="M39 128L67 120L82 128L67 136L39 128Z" stroke-opacity="0.82" stroke-width="3" />
 
-  <path
-    d="m28.25 28.25-4 4 4 4"
-    stroke="url(#glow)"
-    stroke-width="2.6"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <path
-    d="M35.25 36.25h4.5"
-    stroke="#35d0ff"
-    stroke-width="2.6"
-    stroke-linecap="round"
-  />
-  <circle cx="43.5" cy="20.5" r="2.25" fill="#35d0ff" />
+    <path d="M128 48L147 59V81L128 92L109 81V59L128 48Z" stroke-width="3" />
+    <path d="M128 44L152 58V86L128 100L104 86V58L128 44Z" stroke-opacity="0.7" stroke-width="2" />
+
+    <path d="M128 84L166 106V150L128 172L90 150V106L128 84Z" stroke-width="3" />
+    <path d="M128 74L174 101V155L128 182L82 155V101L128 74Z" stroke-opacity="0.82" stroke-width="2.4" />
+    <path d="M128 98L150 111V145L128 158L106 145V111L128 98Z" stroke-opacity="0.76" stroke-width="2" />
+
+    <path d="M112 151V105L144 151V105" stroke-width="6" />
+    <path d="M112 151L112 105L144 151L144 105" stroke-width="2.4" />
+
+    <circle cx="79" cy="91" r="6.5" fill="#79A6FF" stroke-width="2" />
+    <circle cx="177" cy="79" r="9" fill="#6CF0FF" stroke-width="2" />
+    <circle cx="190" cy="162" r="7" fill="#B786FF" stroke-width="2" />
+    <circle cx="74" cy="173" r="7.5" fill="#EE74FF" stroke-width="2" />
+
+    <path d="M89 55L93 59L89 63L85 59L89 55Z" fill="#6CF0FF" stroke-width="1.6" />
+    <path d="M199 104L203 108L199 112L195 108L199 104Z" fill="#79A6FF" stroke-width="1.6" />
+    <path d="M185 198L189 202L185 206L181 202L185 198Z" fill="#EE74FF" stroke-width="1.6" />
+    <path d="M56 143L60 147L56 151L52 147L56 143Z" fill="#79A6FF" stroke-width="1.6" />
+  </g>
 </svg>

@@ -18,8 +18,13 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import clsx from "clsx";
 
 import type { ThreadItem, Turn } from "../protocol/v2";
-import { CodexLiveRuntime } from "./codexLive";
-import { deriveLiveOverlay, toBrowseUrl } from "./codexUiBridge";
+import {
+  deriveLiveOverlay,
+  summarizeTurnFileChanges,
+  toBrowseUrl,
+} from "./services/presentation/workspacePresentationService";
+import { activeProviderAdapter } from "./services/providers";
+import { WorkspaceRuntimeService } from "./services/runtime/WorkspaceRuntimeService";
 import { LiveStatusInline } from "./LiveStatusInline";
 import {
   createBlankThreadRecord,
@@ -38,10 +43,12 @@ import {
   APPROVAL_CLASS,
   APPROVAL_LABELS,
   APPROVAL_ORDER,
+  DEFAULT_UI_THEME_ID,
   PANEL_TITLE,
   QUICK_HINTS,
   SLASH_COMMANDS,
   UI_THEME_OPTIONS,
+  UI_THEME_STORAGE_KEY,
   approvalModeFromSettings,
   countDiffStats,
   deriveLocalDirectoryCatalog,
@@ -50,6 +57,7 @@ import {
   formatUploadSize,
   getFileAttachmentPreview,
   getStreamTarget,
+  getUiThemeOption,
   getUserText,
   insertInlineMentionToken,
   isDesktopViewport,
@@ -89,17 +97,23 @@ import type {
   WorkspaceActions,
   WorkspaceContextValue,
 } from "./workspaceTypes";
+import { ChatTranscript } from "./components/ChatTranscript";
+import { BrandMark } from "./components/BrandMark";
+import { FileChangeSummary } from "./components/FileChangeSummary";
 import {
-  ChatTranscript,
-  ComposerTextarea,
   ConfigPanel,
+  SkillsLibraryModal,
+  ThemePickerPanel,
+} from "./components/SettingsPanels";
+import { TerminalPanel } from "./components/TerminalPanel";
+import {
+  ComposerTextarea,
   DiffReviewPage,
   DiffPatchViewer,
+  FileExplorerPanel,
   FileEditorPreview,
   ProjectFolderPickerModal,
   QueuedMessagesStrip,
-  SkillsLibraryModal,
-  ThemePickerPanel,
 } from "./WorkspaceView";
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -129,7 +143,8 @@ type CommandPaletteGroup = {
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
 const SESSION_PROJECT_ROOT = "/home/allan";
-const UI_THEME_STORAGE_KEY = "nomadex-ui-theme";
+const INITIAL_VISIBLE_TURNS = 18;
+const TURN_HISTORY_BATCH = 14;
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -184,16 +199,16 @@ const errorMessage = (error: unknown, fallback: string) => {
 const useWorkspace = () => {
   const value = useContext(WorkspaceContext);
   if (!value) {
-    throw new Error("Codex workspace context is missing.");
+    throw new Error("Workspace context is missing.");
   }
 
   return value;
 };
 
-export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
+export function WorkspaceProvider({ children }: PropsWithChildren) {
   const [snapshot, setSnapshot] = useState<DashboardData>(createFallbackDashboardData());
   const snapshotRef = useRef(snapshot);
-  const runtimeRef = useRef<CodexLiveRuntime | null>(null);
+  const runtimeRef = useRef<WorkspaceRuntimeService | null>(null);
   const timersRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -209,7 +224,7 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    const runtime = new CodexLiveRuntime(createFallbackDashboardData());
+    const runtime = new WorkspaceRuntimeService(createFallbackDashboardData());
     runtimeRef.current = runtime;
 
     const unsubscribe = runtime.subscribe((next) => {
@@ -271,7 +286,7 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
             current.transport.status === "connected"));
 
       if (!runtime && options?.preferLive) {
-        throw new Error("Codex runtime is still starting. Try again.");
+        throw new Error("The workspace runtime is still starting. Try again.");
       }
 
       if (runtime && shouldAttemptLive) {
@@ -815,7 +830,7 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
       completeChatGptLogin: async (callbackUrl) =>
         await withLiveFallback(
           async () => {
-            const response = await fetch("/codex-auth/complete", {
+            const response = await fetch(activeProviderAdapter.authCompletePath, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1052,10 +1067,10 @@ export function CodexWorkspaceProvider({ children }: PropsWithChildren) {
 }
 
 export function BlankWorkspacePage() {
-  return <CodexWorkspacePage />;
+  return <WorkspacePage />;
 }
 
-export function CodexWorkspacePage() {
+export function WorkspacePage() {
   const { snapshot, actions } = useWorkspace();
   const navigate = useNavigate();
   const location = useRouterState({
@@ -1092,6 +1107,7 @@ export function CodexWorkspacePage() {
     : null;
   const activeThreadLabel = activeThread ? threadLabelById[activeThread.thread.id] ?? threadLabel(activeThread.thread) : "New Session";
   const routePanel = sectionToPanel(route.section);
+  const [desktopViewport, setDesktopViewport] = useState(() => isDesktopViewport());
   const editorPath = route.section === "editor" ? routeSearch.get("path") : null;
   const editorLine = useMemo(() => {
     const raw = route.section === "editor" ? routeSearch.get("line") : null;
@@ -1135,7 +1151,8 @@ export function CodexWorkspacePage() {
   }, [route.section, routeSearch]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(isDesktopViewport());
+  const [panelOpen, setPanelOpen] = useState(() => isDesktopViewport());
+  const [mobilePanelClosing, setMobilePanelClosing] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelTab>(routePanel ?? "files");
   const [commandOpen, setCommandOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -1167,15 +1184,17 @@ export function CodexWorkspacePage() {
   const [explorerPath, setExplorerPath] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
+  const [visibleTurnStartByThreadId, setVisibleTurnStartByThreadId] = useState<Record<string, number>>({});
+  const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [composerSyncKey, setComposerSyncKey] = useState(0);
   const [uiTheme, setUiTheme] = useState<UiThemeId>(() => {
     if (typeof window === "undefined") {
-      return "void";
+      return DEFAULT_UI_THEME_ID;
     }
 
     const storedTheme = window.localStorage.getItem(UI_THEME_STORAGE_KEY);
-    return isUiThemeId(storedTheme) ? storedTheme : "void";
+    return isUiThemeId(storedTheme) ? storedTheme : DEFAULT_UI_THEME_ID;
   });
 
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -1188,6 +1207,14 @@ export function CodexWorkspacePage() {
   const queueProcessingRef = useRef<Record<string, boolean>>({});
   const queueAwaitingIdleRef = useRef<Record<string, boolean>>({});
   const toastTimersRef = useRef<Record<string, number>>({});
+  const composerInputFrameRef = useRef<number | null>(null);
+  const latestComposerInputRef = useRef(composer);
+  const pendingChatRestoreThreadIdRef = useRef<string | null>(null);
+  const pendingHistoryPrependRef = useRef<{
+    threadId: string;
+    previousHeight: number;
+    previousTop: number;
+  } | null>(null);
   const hydratedScrollKeyRef = useRef<string | null>(null);
   const chatPinnedToBottomRef = useRef(true);
   const chatScrollStateRef = useRef<Record<string, { pinned: boolean; top: number }>>({});
@@ -1197,7 +1224,37 @@ export function CodexWorkspacePage() {
     Record<string, { from: number; to: number }>
   >({});
   const [queueWakeSignal, setQueueWakeSignal] = useState(0);
+  const deferredComposer = useDeferredValue(composer);
   const deferredQuickQuery = useDeferredValue(quickQuery);
+
+  useEffect(() => {
+    latestComposerInputRef.current = composer;
+  }, [composer]);
+
+  useEffect(
+    () => () => {
+      if (composerInputFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerInputFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const updateViewport = () => {
+      setDesktopViewport((current) => {
+        const next = isDesktopViewport();
+        return current === next ? current : next;
+      });
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport, { passive: true });
+
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, []);
 
   const updateModelPickerPosition = useCallback(() => {
     const rect = modelButtonRef.current?.getBoundingClientRect();
@@ -1212,18 +1269,20 @@ export function CodexWorkspacePage() {
       return;
     }
 
+    const activeTheme = getUiThemeOption(uiTheme);
     const root = document.documentElement;
-    root.dataset.uiTheme = uiTheme;
-    root.style.setProperty(
-      "color-scheme",
-      UI_THEME_OPTIONS.find((theme) => theme.id === uiTheme)?.mode === "light" ? "light" : "dark",
-    );
+    root.dataset.uiTheme = activeTheme.id;
+    root.style.setProperty("color-scheme", activeTheme.mode);
     window.localStorage.setItem(UI_THEME_STORAGE_KEY, uiTheme);
-
-    return () => {
-      delete root.dataset.uiTheme;
-      root.style.removeProperty("color-scheme");
-    };
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", activeTheme.themeColor);
+    document
+      .querySelector('meta[name="color-scheme"]')
+      ?.setAttribute("content", activeTheme.mode);
+    document
+      .querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+      ?.setAttribute("content", activeTheme.mode === "light" ? "default" : "black-translucent");
   }, [uiTheme]);
 
   useLayoutEffect(() => {
@@ -1250,6 +1309,27 @@ export function CodexWorkspacePage() {
     return [...new Set(tabIds.filter((id) => availableIds.has(id)))].slice(0, 6);
   }, [tabIds, uniqueThreads]);
   const activeTurns = useMemo(() => sortTurnsById(activeThread?.thread.turns ?? []), [activeThread?.thread.turns]);
+  const activeDefaultVisibleTurnStart = useMemo(
+    () => Math.max(0, activeTurns.length - INITIAL_VISIBLE_TURNS),
+    [activeTurns.length],
+  );
+  const activeVisibleTurnStart = useMemo(() => {
+    if (!activeThreadId) {
+      return activeDefaultVisibleTurnStart;
+    }
+
+    const storedStart = visibleTurnStartByThreadId[activeThreadId];
+    if (storedStart == null) {
+      return activeDefaultVisibleTurnStart;
+    }
+
+    const maxStart = activeTurns.length === 0 ? 0 : Math.max(0, activeTurns.length - 1);
+    return Math.max(0, Math.min(storedStart, maxStart));
+  }, [activeDefaultVisibleTurnStart, activeThreadId, activeTurns.length, visibleTurnStartByThreadId]);
+  const renderedTurns = useMemo(
+    () => activeTurns.slice(activeVisibleTurnStart),
+    [activeTurns, activeVisibleTurnStart],
+  );
   const transcriptScrollKey = useMemo(
     () =>
       activeTurns
@@ -1260,6 +1340,23 @@ export function CodexWorkspacePage() {
   const activeTurn = [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ?? null;
   const activeQueuedMessages = activeThreadId ? queuedByThreadId[activeThreadId] ?? [] : [];
   const liveOverlay = useMemo(() => deriveLiveOverlay(activeTurn), [activeTurn]);
+  const activeTurnFileChanges = useMemo(() => summarizeTurnFileChanges(activeTurn), [activeTurn]);
+  const panelVisible =
+    !mobilePanelClosing &&
+    panelOpen &&
+    route.section !== "editor" &&
+    route.section !== "review";
+  const mobilePanelVisible = panelVisible && !desktopViewport;
+  const sidebarVisible = desktopViewport || sidebarOpen;
+  // Keep the workspace mounted behind mobile overlays so chat/editor state does not remount
+  // when opening or closing the session rail.
+  const mainVisible = true;
+  const mainCovered = !desktopViewport && mobilePanelVisible;
+  const fullScreenOverlayOpen =
+    commandOpen ||
+    themePickerOpen ||
+    projectPickerOpen ||
+    skillsModalOpen;
   const pendingApprovalsCount = useMemo(
     () => activeThread?.approvals.filter((approval) => approval.state === "pending").length ?? 0,
     [activeThread?.approvals],
@@ -1301,7 +1398,7 @@ export function CodexWorkspacePage() {
 
   const modelOptions = snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models;
   const activeThemeOption = useMemo(
-    () => UI_THEME_OPTIONS.find((theme) => theme.id === uiTheme) ?? UI_THEME_OPTIONS[0],
+    () => getUiThemeOption(uiTheme),
     [uiTheme],
   );
 
@@ -1522,6 +1619,30 @@ export function CodexWorkspacePage() {
     };
   }, [activeThreadId]);
 
+  useLayoutEffect(() => {
+    if (!activeThreadId) {
+      return;
+    }
+
+    if (pendingChatRestoreThreadIdRef.current === activeThreadId) {
+      return;
+    }
+
+    delete chatScrollStateRef.current[activeThreadId];
+    setVisibleTurnStartByThreadId((current) => {
+      if (!(activeThreadId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[activeThreadId];
+      return next;
+    });
+    chatPinnedToBottomRef.current = true;
+    pendingHistoryPrependRef.current = null;
+    hydratedScrollKeyRef.current = null;
+  }, [activeThreadId]);
+
   const existingThreadHistoryPending = useMemo(
     () =>
       route.threadId === activeThread?.thread.id &&
@@ -1712,33 +1833,37 @@ export function CodexWorkspacePage() {
     };
   }, [requestQueuePump]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (route.section === "editor" || route.section === "review") {
-      const frame = window.requestAnimationFrame(() => {
-        setPanelOpen(false);
-      });
-
-      return () => {
-        window.cancelAnimationFrame(frame);
-      };
+      setPanelOpen(false);
+      return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      if (!routePanel) {
-        if (!isDesktopViewport()) {
-          setPanelOpen(false);
-        }
-        return;
+    if (!desktopViewport && mobilePanelClosing) {
+      setPanelOpen(false);
+      return;
+    }
+
+    if (!routePanel) {
+      if (!desktopViewport) {
+        setPanelOpen(false);
       }
+      return;
+    }
 
-      setPanelTab(routePanel);
-      setPanelOpen(true);
-    });
+    setPanelTab((current) => (current === routePanel ? current : routePanel));
+    setPanelOpen((current) => (current ? current : true));
+  }, [desktopViewport, mobilePanelClosing, route.section, routePanel]);
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [route.section, routePanel]);
+  useEffect(() => {
+    if (!mobilePanelClosing) {
+      return;
+    }
+
+    if (desktopViewport || !routePanel) {
+      setMobilePanelClosing(false);
+    }
+  }, [desktopViewport, mobilePanelClosing, routePanel]);
 
   useEffect(() => {
     if (!activeThread || quickMode !== "mention") {
@@ -1967,11 +2092,47 @@ export function CodexWorkspacePage() {
 
     const pinned = isChatNearBottom(node);
     chatPinnedToBottomRef.current = pinned;
+    setShowScrollToBottomButton((current) => (current === !pinned ? current : !pinned));
     chatScrollStateRef.current[threadId] = {
       pinned,
       top: node.scrollTop,
     };
   }, [activeThreadId, isChatNearBottom]);
+
+  const revealOlderTurns = useCallback(() => {
+    if (!activeThreadId || activeVisibleTurnStart <= 0 || existingThreadHistoryPending) {
+      return;
+    }
+
+    const node = chatRef.current;
+    if (!node) {
+      return;
+    }
+
+    if (pendingHistoryPrependRef.current?.threadId === activeThreadId) {
+      return;
+    }
+
+    pendingHistoryPrependRef.current = {
+      threadId: activeThreadId,
+      previousHeight: node.scrollHeight,
+      previousTop: node.scrollTop,
+    };
+
+    setVisibleTurnStartByThreadId((current) => {
+      const currentStart = current[activeThreadId] ?? activeDefaultVisibleTurnStart;
+      const nextStart = Math.max(0, currentStart - TURN_HISTORY_BATCH);
+      if (nextStart === currentStart) {
+        pendingHistoryPrependRef.current = null;
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeThreadId]: nextStart,
+      };
+    });
+  }, [activeDefaultVisibleTurnStart, activeThreadId, activeVisibleTurnStart, existingThreadHistoryPending]);
 
   const flushChatToBottom = useCallback((force = false) => {
     const node = chatRef.current;
@@ -1985,6 +2146,7 @@ export function CodexWorkspacePage() {
 
     node.scrollTop = node.scrollHeight;
     chatPinnedToBottomRef.current = true;
+    setShowScrollToBottomButton(false);
     if (activeThreadId) {
       chatScrollStateRef.current[activeThreadId] = {
         pinned: true,
@@ -2002,6 +2164,7 @@ export function CodexWorkspacePage() {
     const syncPinnedState = () => {
       const pinned = isChatNearBottom(node);
       chatPinnedToBottomRef.current = pinned;
+      setShowScrollToBottomButton((current) => (current === !pinned ? current : !pinned));
       chatScrollStateRef.current[activeThreadId] = {
         pinned,
         top: node.scrollTop,
@@ -2009,24 +2172,48 @@ export function CodexWorkspacePage() {
     };
 
     syncPinnedState();
-    node.addEventListener("scroll", syncPinnedState, { passive: true });
+    const handleScroll = () => {
+      syncPinnedState();
+      if (node.scrollTop <= 48) {
+        revealOlderTurns();
+      }
+    };
+
+    node.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => {
       syncPinnedState();
-      node.removeEventListener("scroll", syncPinnedState);
+      node.removeEventListener("scroll", handleScroll);
     };
-  }, [activeThreadId, isChatNearBottom, route.section]);
+  }, [activeThreadId, isChatNearBottom, revealOlderTurns, route.section]);
 
   const scrollChatToBottom = useCallback((options?: { extraDelay?: boolean; force?: boolean }) => {
+    let frame: number | null = null;
+    let timeout: number | null = null;
+    let attempts = 0;
+
     const run = () => {
       flushChatToBottom(options?.force ?? false);
+
+      const node = chatRef.current;
+      if (!node) {
+        return;
+      }
+
+      const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
+      attempts += 1;
+      if (remaining > 2 && attempts < 8) {
+        frame = window.requestAnimationFrame(run);
+      }
     };
 
-    const frame = window.requestAnimationFrame(run);
-    const timeout = options?.extraDelay ? window.setTimeout(run, 90) : null;
+    frame = window.requestAnimationFrame(run);
+    timeout = options?.extraDelay ? window.setTimeout(run, 90) : null;
 
     return () => {
-      window.cancelAnimationFrame(frame);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
       if (timeout !== null) {
         window.clearTimeout(timeout);
       }
@@ -2046,24 +2233,51 @@ export function CodexWorkspacePage() {
       return;
     }
 
+    const saved =
+      pendingChatRestoreThreadIdRef.current === activeThreadId
+        ? chatScrollStateRef.current[activeThreadId]
+        : undefined;
+    chatPinnedToBottomRef.current = saved?.pinned ?? true;
+    setShowScrollToBottomButton(!(saved?.pinned ?? true));
+  }, [activeThreadId, route.section]);
+
+  useLayoutEffect(() => {
+    if (!activeThreadId || route.section === "editor" || route.section === "review") {
+      return;
+    }
+
     const restore = () => {
       const node = chatRef.current;
       if (!node) {
         return;
       }
 
-      const saved = chatScrollStateRef.current[activeThreadId];
+      const shouldRestoreSavedScroll =
+        pendingChatRestoreThreadIdRef.current === activeThreadId;
+      const saved = shouldRestoreSavedScroll
+        ? chatScrollStateRef.current[activeThreadId]
+        : undefined;
+
+      if (!shouldRestoreSavedScroll) {
+        flushChatToBottom(true);
+        return;
+      }
+
       if (!saved) {
+        pendingChatRestoreThreadIdRef.current = null;
+        flushChatToBottom(true);
         return;
       }
 
       if (saved.pinned) {
+        pendingChatRestoreThreadIdRef.current = null;
         flushChatToBottom(true);
         return;
       }
 
       const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
       node.scrollTop = Math.min(saved.top, maxScrollTop);
+      pendingChatRestoreThreadIdRef.current = null;
       saveChatScrollState(activeThreadId);
     };
 
@@ -2077,6 +2291,23 @@ export function CodexWorkspacePage() {
     };
   }, [activeThreadId, flushChatToBottom, route.section, saveChatScrollState]);
 
+  useLayoutEffect(() => {
+    const pending = pendingHistoryPrependRef.current;
+    if (!pending || pending.threadId !== activeThreadId) {
+      return;
+    }
+
+    const node = chatRef.current;
+    if (!node) {
+      return;
+    }
+
+    const heightDelta = node.scrollHeight - pending.previousHeight;
+    node.scrollTop = pending.previousTop + heightDelta;
+    pendingHistoryPrependRef.current = null;
+    saveChatScrollState(activeThreadId);
+  }, [activeThreadId, renderedTurns.length, saveChatScrollState]);
+
   useEffect(() => () => {
     if (route.section === "editor" || route.section === "review") {
       return;
@@ -2087,6 +2318,7 @@ export function CodexWorkspacePage() {
 
   useEffect(() => {
     if (!activeThreadId) {
+      setShowScrollToBottomButton(false);
       hydratedScrollKeyRef.current = null;
       return;
     }
@@ -2105,6 +2337,10 @@ export function CodexWorkspacePage() {
     hydratedScrollKeyRef.current = scrollKey;
     return scrollChatToBottom({ extraDelay: true, force: true });
   }, [activeThreadId, activeTurns, existingThreadHistoryPending, scrollChatToBottom]);
+
+  const jumpToLatestMessages = useCallback(() => {
+    scrollChatToBottom({ extraDelay: true, force: true });
+  }, [scrollChatToBottom]);
 
   useEffect(() => () => selectedImages.forEach((image) => image.url.startsWith("blob:") && URL.revokeObjectURL(image.url)), [selectedImages]);
 
@@ -2212,22 +2448,70 @@ export function CodexWorkspacePage() {
   }, []);
 
   const navigateToThread = useCallback(
-    (threadId: string, section: RouteSection = "chat") => {
-      if (section === "chat") {
+    (
+      threadId: string,
+      section: RouteSection = "chat",
+      options?: { immediate?: boolean },
+    ) => {
+      if (threadId !== activeThreadId) {
+        // A cross-thread open should always behave like a fresh thread load,
+        // not like "return to chat" inside the previous thread.
+        pendingChatRestoreThreadIdRef.current = null;
+        pendingHistoryPrependRef.current = null;
+        chatPinnedToBottomRef.current = true;
+      }
+
+      const runNavigation = () => {
+        if (section === "chat") {
+          void navigate({
+            to: "/threads/$threadId",
+            params: { threadId } as never,
+          });
+          return;
+        }
+
         void navigate({
-          to: "/threads/$threadId",
-          params: { threadId } as never,
+          to: "/threads/$threadId/$section",
+          params: { threadId, section } as never,
         });
+      };
+
+      // User-driven section changes inside the same thread should feel instant.
+      if (options?.immediate || activeThreadId === threadId) {
+        runNavigation();
         return;
       }
 
-      void navigate({
-        to: "/threads/$threadId/$section",
-        params: { threadId, section } as never,
-      });
+      startTransition(runNavigation);
     },
-    [navigate],
+    [activeThreadId, navigate],
   );
+
+  const openThreadFromSidebar = useCallback((threadId: string) => {
+    pendingChatRestoreThreadIdRef.current = null;
+    pendingHistoryPrependRef.current = null;
+    hydratedScrollKeyRef.current = null;
+    chatPinnedToBottomRef.current = true;
+    setShowScrollToBottomButton(false);
+    delete chatScrollStateRef.current[threadId];
+    setVisibleTurnStartByThreadId((current) => {
+      if (!(threadId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+    setSidebarOpen(false);
+    navigateToThread(threadId, "chat", { immediate: true });
+
+    if (threadId === activeThreadId) {
+      window.requestAnimationFrame(() => {
+        scrollChatToBottom({ extraDelay: true, force: true });
+      });
+    }
+  }, [activeThreadId, navigateToThread, scrollChatToBottom]);
 
   const openThreadFile = useCallback(
     (
@@ -2250,6 +2534,9 @@ export function CodexWorkspacePage() {
         path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
 
       saveChatScrollState();
+      if (source === "chat") {
+        pendingChatRestoreThreadIdRef.current = activeThreadId;
+      }
 
       setFilePreview((current) =>
         current?.path === path && !current.loading
@@ -2282,6 +2569,7 @@ export function CodexWorkspacePage() {
 
   const openPanel = useCallback(
     (tab: PanelTab) => {
+      setMobilePanelClosing(false);
       setPanelTab(tab);
       setPanelOpen(true);
       setSidebarOpen(false);
@@ -2292,6 +2580,16 @@ export function CodexWorkspacePage() {
     },
     [activeThreadId, navigateToThread],
   );
+
+  const toggleSidebar = useCallback(() => {
+    if (desktopViewport) {
+      return;
+    }
+
+    setMobilePanelClosing(false);
+    setPanelOpen(false);
+    setSidebarOpen((current) => !current);
+  }, [desktopViewport]);
 
   const reviewDiff = useCallback(
     (diffId?: string, source: RouteSection = "chat") => {
@@ -2307,6 +2605,9 @@ export function CodexWorkspacePage() {
       }
 
       saveChatScrollState();
+      if (source === "chat") {
+        pendingChatRestoreThreadIdRef.current = activeThreadId;
+      }
 
       void navigate({
         to: "/threads/$threadId/$section",
@@ -2322,10 +2623,20 @@ export function CodexWorkspacePage() {
 
   const closePanel = useCallback(() => {
     setPanelOpen(false);
-    if (activeThreadId) {
-      navigateToThread(activeThreadId, "chat");
+    if (!activeThreadId) {
+      return;
     }
-  }, [activeThreadId, navigateToThread]);
+
+    if (!desktopViewport) {
+      setMobilePanelClosing(true);
+      window.requestAnimationFrame(() => {
+        navigateToThread(activeThreadId, "chat", { immediate: true });
+      });
+      return;
+    }
+
+    navigateToThread(activeThreadId, "chat", { immediate: true });
+  }, [activeThreadId, desktopViewport, navigateToThread]);
 
   useEffect(() => {
     if (route.section === "skills") {
@@ -2379,7 +2690,7 @@ export function CodexWorkspacePage() {
         );
         navigateToThread(threadId, "chat");
         setSidebarOpen(false);
-        setPanelOpen(isDesktopViewport());
+        setPanelOpen(desktopViewport);
         resetComposer();
         pushToast(`New session — ${cwd}`, "ok");
         return threadId;
@@ -2396,6 +2707,7 @@ export function CodexWorkspacePage() {
     },
     [
       actions,
+      desktopViewport,
       effectiveComposerSettings,
       navigateToThread,
       projectPickerStarting,
@@ -2594,8 +2906,8 @@ export function CodexWorkspacePage() {
   );
 
   const activeComposerMentions = useMemo(
-    () => selectedMentions.filter((mention) => composerHasMentionToken(composer, mention)),
-    [composer, selectedMentions],
+    () => selectedMentions.filter((mention) => composerHasMentionToken(deferredComposer, mention)),
+    [deferredComposer, selectedMentions],
   );
 
   const runSlash = useCallback(
@@ -2696,7 +3008,7 @@ export function CodexWorkspacePage() {
           break;
         case "/logout":
           await actions.logoutAccount();
-          pushToast("Signed out of Codex", "ok");
+          pushToast("Signed out of account", "ok");
           break;
         default:
           if (inline && activeThreadId) {
@@ -2837,40 +3149,50 @@ export function CodexWorkspacePage() {
 
   const onComposerChange = useCallback(
     (value: string) => {
-      startTransition(() => {
-        setComposer(value);
-      });
+      latestComposerInputRef.current = value;
+      if (composerInputFrameRef.current !== null) {
+        return;
+      }
 
-      const quickMatch = value.match(/(?:^|\s)([@$/])([^\s]*)$/);
-      if (!quickMatch) {
+      composerInputFrameRef.current = window.requestAnimationFrame(() => {
+        composerInputFrameRef.current = null;
+        const nextValue = latestComposerInputRef.current;
+
+        startTransition(() => {
+          setComposer(nextValue);
+        });
+
+        const quickMatch = nextValue.match(/(?:^|\s)([@$/])([^\s]*)$/);
+        if (!quickMatch) {
+          closeQuickPicker();
+          return;
+        }
+
+        const prefix = quickMatch[1];
+        const query = quickMatch[2] ?? "";
+        if (prefix === "/") {
+          setQuickMode("slash");
+          setQuickQuery(`/${query}`);
+          setQuickIndex(0);
+          return;
+        }
+
+        if (prefix === "@") {
+          setQuickMode("mention");
+          setQuickQuery(query);
+          setQuickIndex(0);
+          return;
+        }
+
+        if (prefix === "$") {
+          setQuickMode("skill");
+          setQuickQuery(query);
+          setQuickIndex(0);
+          return;
+        }
+
         closeQuickPicker();
-        return;
-      }
-
-      const prefix = quickMatch[1];
-      const query = quickMatch[2] ?? "";
-      if (prefix === "/") {
-        setQuickMode("slash");
-        setQuickQuery(`/${query}`);
-        setQuickIndex(0);
-        return;
-      }
-
-      if (prefix === "@") {
-        setQuickMode("mention");
-        setQuickQuery(query);
-        setQuickIndex(0);
-        return;
-      }
-
-      if (prefix === "$") {
-        setQuickMode("skill");
-        setQuickQuery(query);
-        setQuickIndex(0);
-        return;
-      }
-
-      closeQuickPicker();
+      });
     },
     [closeQuickPicker],
   );
@@ -3235,11 +3557,11 @@ export function CodexWorkspacePage() {
     [activeThreadId, navigateToThread, pushToast, visibleTabIds],
   );
 
-  const currentTokenCount = Math.floor(composer.length / 3.5).toLocaleString();
+  const currentTokenCount = Math.floor(deferredComposer.length / 3.5).toLocaleString();
   const composerPlaceholder = quickMode
     ? QUICK_HINTS[quickMode]
     : activeTurn
-      ? "Queue a follow-up while Codex is still running…"
+      ? "Queue a follow-up while the agent is still running…"
       : QUICK_HINTS.slash;
   const composerActionLabel = activeTurn ? "Queue" : "↑";
   const handleCopy = useCallback(
@@ -3247,6 +3569,29 @@ export function CodexWorkspacePage() {
       void copyText(value).then(() => pushToast("Copied!", "ok"));
     },
     [pushToast],
+  );
+  const handleTranscriptOpenFile = useCallback(
+    (path: string, line?: number | null) => {
+      openThreadFile(path, {
+        line,
+        source: "chat",
+      });
+    },
+    [openThreadFile],
+  );
+  const handleTranscriptReview = useCallback(
+    (diffId?: string) => {
+      reviewDiff(diffId);
+    },
+    [reviewDiff],
+  );
+  const handleLiveFileChangeOpen = useCallback(
+    (path: string) => {
+      openThreadFile(path, {
+        source: "chat",
+      });
+    },
+    [openThreadFile],
   );
   const triggerPlan = useCallback(() => {
     void runSlash("/plan");
@@ -3370,61 +3715,22 @@ export function CodexWorkspacePage() {
       });
 
       return (
-        <div>
-          <div className="panel-head-row">
-            {parentPath ? (
-              <button className="mini-action" type="button" onClick={() => setExplorerPath(parentPath)}>
-                ← Back
-              </button>
-            ) : null}
-            <div className="panel-hint">📁 {currentPath} · {changedPaths.size} modified</div>
-          </div>
-          <div className="file-breadcrumbs">
-            {breadcrumbs.map((crumb) => (
-              <button
-                className={clsx("file-crumb", crumb.path === currentPath && "active")}
-                key={crumb.path}
-                type="button"
-                onClick={() => {
-                  setExplorerPath(crumb.path);
-                  setFilePreview((current) => (current && isPathWithinRoot(crumb.path, current.path) ? current : null));
-                }}
-              >
-                {crumb.label}
-              </button>
-            ))}
-          </div>
-          {snapshot.directoryCatalogRoot !== currentPath ? <div className="empty-panel">Loading files for this directory…</div> : null}
-          {snapshot.directoryCatalogRoot === currentPath && directoryEntries.length === 0 ? (
-            <div className="empty-panel">No direct files or folders found in this directory.</div>
-          ) : null}
-          {directoryEntries.map((entry) => {
-            const badge = changedPaths.get(entry.name) ?? changedPaths.get(entry.path.replace(`${activeThread.thread.cwd}/`, ""));
-            return (
-              <button
-                className={clsx(
-                  "fi",
-                  entry.kind === "directory" && "dir",
-                  badge === "mod" && "active",
-                  mentionedPaths.has(entry.path) && "mentioned",
-                  route.section === "editor" && editorPath === entry.path && "open",
-                )}
-                key={entry.id}
-                type="button"
-                onClick={() => void openExplorerEntry(entry)}
-              >
-                <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
-                <span className="fi-n">{entry.name}</span>
-                {mentionedPaths.has(entry.path) ? <span className="fbdg mention">@</span> : null}
-                {badge ? <span className={clsx("fbdg", badge)}>{badge}</span> : null}
-              </button>
-            );
-          })}
-          <div className="panel-meta">
-            <div>Tap a file to open the full editor. Tap folders to drill in.</div>
-            <div>Use <code>/mention filename</code> or type <code>@filename</code> in the composer.</div>
-          </div>
-        </div>
+        <FileExplorerPanel
+          breadcrumbs={breadcrumbs}
+          currentPath={currentPath}
+          directoryEntries={directoryEntries}
+          editorPath={route.section === "editor" ? editorPath : null}
+          loading={snapshot.directoryCatalogRoot !== currentPath}
+          mentionedPaths={mentionedPaths}
+          modifiedByPath={changedPaths}
+          onNavigate={(path) => {
+            setExplorerPath(path);
+            setFilePreview((current) => (current && isPathWithinRoot(path, current.path) ? current : null));
+          }}
+          onOpenEntry={openExplorerEntry}
+          parentPath={parentPath}
+          rootPath={rootPath}
+        />
       );
     }
 
@@ -3528,48 +3834,7 @@ export function CodexWorkspacePage() {
     }
 
     if (panelTab === "terminal") {
-      return (
-        <div>
-          <div className="panel-head-row">
-            <div className="panel-hint">Background terminals and PTY snapshots</div>
-            <button className="mini-action" type="button" onClick={() => void actions.cleanTerminals(activeThread.thread.id)}>
-              Clean
-            </button>
-          </div>
-          {activeThread.terminals.length === 0 ? <div className="empty-panel">No terminal sessions yet.</div> : null}
-          {activeThread.terminals.map((terminal) => (
-            <div className="terminal-card" key={terminal.id}>
-              <div className="terminal-window-bar">
-                <div className="terminal-traffic" aria-hidden="true">
-                  <span className="terminal-dot close" />
-                  <span className="terminal-dot minimize" />
-                  <span className="terminal-dot zoom" />
-                </div>
-                <div className="terminal-window-title">{terminal.title}</div>
-                <span className={clsx("status-chip", "terminal-status-chip", terminal.status)}>{terminal.status}</span>
-              </div>
-              <div className="terminal-title-row">
-                <div className="terminal-command-strip">
-                  <span className="terminal-command-prefix">$</span>
-                  <span>{terminal.command}</span>
-                </div>
-              </div>
-              <div className="term">
-                {terminal.log.map((line, index) => (
-                  <div className={clsx(index === 0 && "t-p")} key={`${terminal.id}-${index}`}>
-                    {line}
-                  </div>
-                ))}
-                {terminal.status === "running" ? (
-                  <div className="t-p">
-                    $ <span className="cur" />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
+      return <TerminalPanel onClean={() => actions.cleanTerminals(activeThread.thread.id)} terminals={activeThread.terminals} />;
     }
 
     if (panelTab === "agents") {
@@ -3684,13 +3949,13 @@ export function CodexWorkspacePage() {
   };
 
   return (
-    <main className="codex-ui-shell">
+    <main className={clsx("workspace-shell", fullScreenOverlayOpen && "overlay-open")}>
       <header id="hdr">
-        <button className="hb mbtn" type="button" onClick={() => setSidebarOpen((current) => !current)} title="Menu">
+        <button className="hb mbtn" type="button" onClick={toggleSidebar} title="Menu">
           ☰
         </button>
         <div className="logo">
-          <div className="logo-ico">⬡</div>
+          <BrandMark alt="" className="logo-ico" />
           <span>Nomadex</span>
         </div>
         <div className="hsep" />
@@ -3749,15 +4014,18 @@ export function CodexWorkspacePage() {
       </header>
 
       <div id="layout">
-        <button
-          id="sbo"
-          className={clsx(sidebarOpen && "show")}
-          type="button"
-          aria-label="Close sidebar"
-          onClick={() => setSidebarOpen(false)}
-        />
+        {!desktopViewport && sidebarOpen ? (
+          <button
+            id="sbo"
+            className="show"
+            type="button"
+            aria-label="Close sidebar"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
 
-        <aside id="sb" className={clsx(sidebarOpen && "open")}>
+        {sidebarVisible ? (
+          <aside id="sb" className={clsx(!desktopViewport && sidebarOpen && "open")}>
           <button className="snew" type="button" onClick={() => void createSession()}>
             ＋ New Session
           </button>
@@ -3771,10 +4039,7 @@ export function CodexWorkspacePage() {
                       className={clsx("si", entry.thread.id === activeThreadId && "active")}
                       key={entry.thread.id}
                       type="button"
-                      onClick={() => {
-                        navigateToThread(entry.thread.id, "chat");
-                        setSidebarOpen(false);
-                      }}
+                      onClick={() => openThreadFromSidebar(entry.thread.id)}
                     >
                       <span>{entry.thread.agentNickname ? "⑂" : "💬"}</span>
                       <span className="si-t">{threadLabelById[entry.thread.id] ?? threadLabel(entry.thread)}</span>
@@ -3820,8 +4085,10 @@ export function CodexWorkspacePage() {
             </button>
           </div>
         </aside>
+        ) : null}
 
-        <section id="main">
+        {mainVisible ? (
+        <section id="main" className={clsx(mainCovered && "covered")}>
           <div id="tabs">
             {visibleTabIds.map((threadId) => {
               const threadRecord = uniqueThreads.find((entry) => entry.thread.id === threadId);
@@ -3885,7 +4152,7 @@ export function CodexWorkspacePage() {
                 <ChatTranscript
                   activeThread={activeThread}
                   activeThreadLabel={activeThreadLabel}
-                  activeTurns={activeTurns}
+                  activeTurns={renderedTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
                   streamTextFx={streamTextFx}
                   onContext={openItemContextMenu}
@@ -3893,14 +4160,9 @@ export function CodexWorkspacePage() {
                   onEdit={fillComposer}
                   onFill={fillComposer}
                   onFork={forkSession}
-                  onOpenFile={(path, line) =>
-                    openThreadFile(path, {
-                      line,
-                      source: "chat",
-                    })
-                  }
+                  onOpenFile={handleTranscriptOpenFile}
                   onPlan={triggerPlan}
-                  onReview={(diffId) => reviewDiff(diffId)}
+                  onReview={handleTranscriptReview}
                   onSlash={triggerSlash}
                   streamVisible={streamVisible}
                 />
@@ -3913,6 +4175,17 @@ export function CodexWorkspacePage() {
               </div>
 
               <div id="ia">
+                {showScrollToBottomButton ? (
+                  <div className="chat-jump-row">
+                    <button
+                      className="chat-jump-button"
+                      type="button"
+                      onClick={jumpToLatestMessages}
+                    >
+                      ↓ Latest
+                    </button>
+                  </div>
+                ) : null}
                 {selectedSkills.length > 0 || selectedFiles.length > 0 || selectedImages.length > 0 ? (
                   <div id="ctx-row">
                     {selectedSkills.map((skill) => (
@@ -3970,6 +4243,15 @@ export function CodexWorkspacePage() {
                     messages={activeQueuedMessages}
                     onDelete={(messageId) => activeThreadId && removeQueuedMessage(activeThreadId, messageId)}
                     onSteer={steerQueuedMessage}
+                  />
+                ) : null}
+
+                {activeTurnFileChanges.length > 0 ? (
+                  <FileChangeSummary
+                    entries={activeTurnFileChanges}
+                    onOpenFile={handleLiveFileChangeOpen}
+                    title="Files changing"
+                    variant="live"
                   />
                 ) : null}
 
@@ -4083,8 +4365,10 @@ export function CodexWorkspacePage() {
             </>
           )}
         </section>
+        ) : null}
 
-        <aside id="rp" className={clsx(panelOpen && route.section !== "editor" && route.section !== "review" && "open")}>
+        {desktopViewport || panelVisible ? (
+        <aside id="rp" className={clsx(panelVisible && "open")}>
           <div className="rph">
             <span className="rpt" id="rp-title">
               {PANEL_TITLE[panelTab]}
@@ -4116,9 +4400,10 @@ export function CodexWorkspacePage() {
             ))}
           </div>
           <div className="rpbody" id="rpbody">
-            {renderPanelBody()}
+            {panelVisible ? renderPanelBody() : null}
           </div>
         </aside>
+        ) : null}
       </div>
 
       <div id="statusbar">

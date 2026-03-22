@@ -1,6 +1,6 @@
-import type { Personality } from "../protocol/Personality";
-import type { FuzzyFileSearchResult } from "../protocol/FuzzyFileSearchResult";
-import type { CollaborationMode } from "../protocol/CollaborationMode";
+import type { Personality } from "../../../protocol/Personality";
+import type { FuzzyFileSearchResult } from "../../../protocol/FuzzyFileSearchResult";
+import type { CollaborationMode } from "../../../protocol/CollaborationMode";
 import type {
   CollaborationModeListResponse,
   CommandExecutionRequestApprovalParams,
@@ -34,7 +34,7 @@ import type {
   TurnInterruptResponse,
   TurnStartResponse,
   UserInput,
-} from "../protocol/v2";
+} from "../../../protocol/v2";
 import {
   createFallbackDashboardData,
   type ApprovalRequest,
@@ -51,7 +51,13 @@ import {
   type ThreadPlan,
   type ThreadRecord,
   type WorkspaceMode,
-} from "./mockData";
+} from "../../mockData";
+import {
+  activeProviderAdapter,
+  buildProviderFilesUploadRoot,
+  buildProviderOptimisticFileUploadPath,
+  buildProviderUploadRoot,
+} from "../providers";
 
 type EventListener = (snapshot: DashboardData) => void;
 
@@ -74,7 +80,7 @@ const inferProxyWsUrl = () => {
   }
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/codex-ws`;
+  return `${protocol}//${window.location.host}${activeProviderAdapter.wsProxyPath}`;
 };
 
 const resolveWsUrls = () => {
@@ -88,12 +94,12 @@ const resolveWsUrls = () => {
   };
 
   if (typeof window === "undefined") {
-    addUrl(import.meta.env.VITE_CODEX_WS_URL);
+    addUrl(import.meta.env.VITE_WORKSPACE_WS_URL || import.meta.env.VITE_CODEX_WS_URL);
     addUrl("ws://127.0.0.1:3901");
     return urls;
   }
 
-  addUrl(import.meta.env.VITE_CODEX_WS_URL);
+  addUrl(import.meta.env.VITE_WORKSPACE_WS_URL || import.meta.env.VITE_CODEX_WS_URL);
   addUrl(inferProxyWsUrl());
   return urls;
 };
@@ -704,7 +710,7 @@ const buildPromptText = (text: string, mentions: Array<MentionAttachment>) => {
   }
 
   if (sections.length > 0 || normalizedText) {
-    sections.push("# My request for Codex:");
+    sections.push("# My request:");
     if (normalizedText) {
       sections.push(normalizedText);
     }
@@ -759,7 +765,7 @@ const toOptimisticFileMentions = (
   files.map((file) => ({
     id: `optimistic-file:${file.id}`,
     name: file.name,
-    path: `${cwd}/.codex-web/uploads/files/${file.name}`,
+    path: buildProviderOptimisticFileUploadPath(activeProviderAdapter, cwd, file.name),
     kind: "file",
   }));
 
@@ -1104,7 +1110,7 @@ const mergeIncomingItem = (incoming: ThreadItem, existing?: ThreadItem): ThreadI
   return incoming;
 };
 
-export class CodexLiveRuntime {
+export class WorkspaceRuntimeService {
   private snapshot: DashboardData;
   private listeners = new Set<EventListener>();
   private socket: WebSocket | null = null;
@@ -1137,7 +1143,7 @@ export class CodexLiveRuntime {
     this.clearScheduledEmit();
     this.socket?.close();
     this.socket = null;
-    this.failPending(new Error("Codex app-server connection closed."));
+    this.failPending(new Error("Local agent bridge connection closed."));
     this.connectPromise = null;
     this.loadingThreads.clear();
     this.resumedThreads.clear();
@@ -1150,7 +1156,7 @@ export class CodexLiveRuntime {
 
     this.socket = null;
     this.connectPromise = null;
-    this.failPending(new Error("Codex app-server connection closed."));
+    this.failPending(new Error("Local agent bridge connection closed."));
     this.loadingThreads.clear();
     this.resumedThreads.clear();
     this.mutate((snapshot) => {
@@ -1288,7 +1294,7 @@ export class CodexLiveRuntime {
 
   private async request<TResult>(method: string, params: unknown): Promise<TResult> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("Codex app-server is not connected.");
+      throw new Error("Local agent bridge is not connected.");
     }
 
     const id = String(++this.requestId);
@@ -1331,7 +1337,7 @@ export class CodexLiveRuntime {
       if (!connected || !this.socket) {
         const error =
           WS_URL_CANDIDATES.length > 1
-            ? `Failed to connect to Codex app-server. Tried: ${WS_URL_CANDIDATES.join(", ")}`
+            ? `Failed to connect to the local agent bridge. Tried: ${WS_URL_CANDIDATES.join(", ")}`
             : `Failed to connect to ${DEFAULT_WS_URL}`;
 
         this.mutate((snapshot) => {
@@ -1560,7 +1566,7 @@ export class CodexLiveRuntime {
       return [];
     }
 
-    const uploadDir = `${cwd}/.codex-web/uploads`;
+    const uploadDir = buildProviderUploadRoot(activeProviderAdapter, cwd);
     await this.request("fs/createDirectory", {
       path: uploadDir,
       recursive: true,
@@ -1590,7 +1596,7 @@ export class CodexLiveRuntime {
       return [];
     }
 
-    const uploadDir = `${cwd}/.codex-web/uploads/files`;
+    const uploadDir = buildProviderFilesUploadRoot(activeProviderAdapter, cwd);
     await this.request("fs/createDirectory", {
       path: uploadDir,
       recursive: true,
@@ -2226,7 +2232,7 @@ export class CodexLiveRuntime {
         id: requestId,
         kind: "command",
         title: "Approve command execution",
-        detail: commandParams.reason ?? "Codex is requesting permission to run a command.",
+        detail: commandParams.reason ?? "The agent is requesting permission to run a command.",
         risk: "medium",
         state: "pending",
         threadId: commandParams.threadId,
@@ -2246,7 +2252,7 @@ export class CodexLiveRuntime {
         id: requestId,
         kind: "patch",
         title: "Approve file changes",
-        detail: fileParams.reason ?? "Codex is requesting write access for file updates.",
+        detail: fileParams.reason ?? "The agent is requesting write access for file updates.",
         risk: fileParams.grantRoot ? "high" : "medium",
         state: "pending",
         threadId: fileParams.threadId,
@@ -2314,7 +2320,7 @@ export class CodexLiveRuntime {
         id: requestId,
         kind: "permissions",
         title: "Approve additional permissions",
-        detail: safeString(params.reason, "Codex requested additional permissions."),
+        detail: safeString(params.reason, "The agent requested additional permissions."),
         risk: "high",
         state: "pending",
         threadId: safeString(params.threadId),

@@ -284,7 +284,7 @@ const models: Array<Model> = [
   makeModel({
     id: "gpt-5.4-mini",
     displayName: "GPT-5.4-Mini",
-    description: "Fast Codex model for low-latency editing and subagent work.",
+    description: "Fast coding model for low-latency editing and subagent work.",
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     inputModalities: modelModalities("text", "image"),
@@ -292,7 +292,7 @@ const models: Array<Model> = [
   makeModel({
     id: "gpt-5.3-codex",
     displayName: "gpt-5.3-codex",
-    description: "Frontier Codex-optimized model for deep coding passes.",
+    description: "Frontier code-optimized model for deep coding passes.",
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     inputModalities: modelModalities("text", "image"),
@@ -308,7 +308,7 @@ const models: Array<Model> = [
   makeModel({
     id: "gpt-5.1-codex-mini",
     displayName: "gpt-5.1-codex-mini",
-    description: "Cheap and responsive codex mini for fanout and tight loops.",
+    description: "Cheap and responsive coding mini for fanout and tight loops.",
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["medium", "high"],
     inputModalities: modelModalities("text"),
@@ -318,8 +318,8 @@ const models: Array<Model> = [
 const mentionCatalog: Array<MentionAttachment> = [
   {
     id: "mention-shell",
-    name: "src/app/CodexWorkspace.tsx",
-    path: `${WORKSPACE_CWD}/src/app/CodexWorkspace.tsx`,
+    name: "src/app/WorkspaceShell.tsx",
+    path: `${WORKSPACE_CWD}/src/app/WorkspaceShell.tsx`,
     kind: "file",
   },
   {
@@ -342,13 +342,13 @@ const mentionCatalog: Array<MentionAttachment> = [
   },
   {
     id: "mention-config",
-    name: "~/.codex/config.toml",
+    name: "backend-config.toml",
     path: "/home/allan/.codex/config.toml",
     kind: "file",
   },
   {
     id: "mention-skills",
-    name: "~/.codex/skills",
+    name: "backend-skills",
     path: "/home/allan/.codex/skills",
     kind: "directory",
   },
@@ -393,7 +393,7 @@ const remoteSkills: Array<RemoteSkillCard> = [
   {
     id: "remote-skill-installer",
     name: "skill-installer",
-    description: "Install curated or repository-backed Codex skills.",
+    description: "Install curated or repository-backed workspace skills.",
     path: "plugin://codex-market/skill-installer",
     scope: "system",
     enabled: false,
@@ -405,7 +405,7 @@ const remoteSkills: Array<RemoteSkillCard> = [
   {
     id: "remote-skill-creator",
     name: "skill-creator",
-    description: "Generate and refine reusable Codex skills from a workflow.",
+    description: "Generate and refine reusable workspace skills from a workflow.",
     path: "plugin://codex-market/skill-creator",
     scope: "system",
     enabled: false,
@@ -438,7 +438,7 @@ const mcpServers: Array<McpServerStatus> = [
       {
         name: "openai/codex issues",
         title: "Issue Tracker",
-        description: "Latest issues for the Codex repository.",
+        description: "Latest issues for the upstream repository.",
         uri: "repo://openai/codex/issues",
       },
     ],
@@ -623,18 +623,18 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
     type: "reasoning",
     id: "item-reason-1",
     summary: [
-      "Use the Codex app-server protocol as the UI contract.",
+      "Use the local app-server protocol as the UI contract.",
       "Keep the shell dense, keyboard-forward, and session-centric.",
     ],
     content: [
       "Map the extension into a three-column layout: thread rail, conversation stack, inspector rail.",
-      "Represent Codex items directly so terminals, diffs, approvals, and subagent actions do not collapse into generic chat bubbles.",
+      "Represent thread items directly so terminals, diffs, approvals, and subagent actions do not collapse into generic chat bubbles.",
     ],
   },
   {
     type: "plan",
     id: "item-plan-1",
-    text: "Scaffold the app shell, mirror Codex thread items, then layer live streaming and the right-side operational panels.",
+    text: "Scaffold the app shell, mirror real thread items, then layer live streaming and the right-side operational panels.",
   },
   {
     type: "commandExecution",
@@ -663,9 +663,9 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
     status: "completed",
     changes: [
       {
-        path: "src/app/CodexWorkspace.tsx",
+        path: "src/app/WorkspaceShell.tsx",
         kind: { type: "update", move_path: null },
-        diff: "@@ -1,4 +1,88 @@\n-import App from './App'\n+export function CodexWorkspaceProvider() {\n+  // protocol-shaped UI state\n+}",
+        diff: "@@ -1,4 +1,88 @@\n-import App from './App'\n+export function WorkspaceProvider() {\n+  // protocol-shaped UI state\n+}",
       },
       {
         path: "src/router.tsx",
@@ -691,7 +691,7 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
     contentItems: [
       {
         type: "inputText",
-        text: "Matched src/app/CodexWorkspace.tsx, src/app/mockData.ts, and src/router.tsx",
+        text: "Matched src/app/WorkspaceShell.tsx, src/app/mockData.ts, and src/router.tsx",
       },
     ],
     success: true,
@@ -725,11 +725,11 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
   {
     type: "webSearch",
     id: "item-search-1",
-    query: "OpenAI Codex VS Code extension layout cues",
+    query: "OpenAI coding extension layout cues",
     action: {
       type: "search",
-      query: "OpenAI Codex VS Code extension layout cues",
-      queries: ["OpenAI Codex VS Code extension", "Codex app-server thread items"],
+      query: "OpenAI coding extension layout cues",
+      queries: ["OpenAI coding extension", "app-server thread items"],
     },
   },
   {
@@ -759,7 +759,7 @@ const threadUiShellTurnOneItems: Array<ThreadItem> = [
     id: "item-agent-1",
     phase: "final_answer",
     text: [
-      "The workspace is structured around real Codex concepts instead of generic chat UI.",
+      "The workspace is structured around real thread and tool concepts instead of generic chat UI.",
       "",
       "This pass locks in the shell, stream-safe item renderers, and the operating surfaces for approvals, subagents, skills, MCP, and settings.",
       "",
@@ -891,7 +891,7 @@ const threadReviewItems: Array<ThreadItem> = [
   {
     type: "enteredReviewMode",
     id: "item-review-enter",
-    review: "src/app/CodexWorkspace.tsx against previous workspace shell",
+    review: "src/app/WorkspaceShell.tsx against previous workspace shell",
   },
   {
     type: "reasoning",
@@ -1008,11 +1008,11 @@ const threads: Array<ThreadRecord> = [
         id: "approval-write",
         kind: "patch",
         title: "Approve file writes",
-        detail: "Allow Codex to update the new web UI source tree.",
+        detail: "Allow the agent to update the new web UI source tree.",
         risk: "medium",
         state: "pending",
         files: [
-          `${WORKSPACE_CWD}/src/app/CodexWorkspace.tsx`,
+          `${WORKSPACE_CWD}/src/app/WorkspaceShell.tsx`,
           `${WORKSPACE_CWD}/src/router.tsx`,
           `${WORKSPACE_CWD}/src/index.css`,
         ],
@@ -1038,7 +1038,7 @@ const threads: Array<ThreadRecord> = [
       },
       {
         id: "terminal-app-server",
-        title: "Codex app-server bridge",
+        title: "Local app-server bridge",
         command: "codex app-server --listen ws://127.0.0.1:3900",
         cwd: WORKSPACE_CWD,
         processId: "pty-22014",
@@ -1077,7 +1077,7 @@ const threads: Array<ThreadRecord> = [
         id: "finding-1",
         severity: "high",
         title: "Streaming turn can stay visually active",
-        file: `${WORKSPACE_CWD}/src/app/CodexWorkspace.tsx`,
+        file: `${WORKSPACE_CWD}/src/app/WorkspaceShell.tsx`,
         line: 742,
         summary: "Turn completion depends on stream finalization and can miss the no-terminal path.",
         status: "open",
@@ -1110,7 +1110,7 @@ const threads: Array<ThreadRecord> = [
   {
     thread: {
       id: "thread-review",
-      preview: "Review the Codex workspace shell for bugs and regressions.",
+      preview: "Review the workspace shell for bugs and regressions.",
       ephemeral: false,
       modelProvider: "openai",
       createdAt: now - 9800,
@@ -1298,14 +1298,14 @@ const initialDashboardData: DashboardData = {
     mode: "mock",
     status: "offline",
     endpoint: "ws://127.0.0.1:3901",
-    error: "Codex app-server is not connected.",
+    error: "Local agent bridge is not connected.",
   },
 };
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export const dashboardQueryOptions = queryOptions({
-  queryKey: ["codex-dashboard"],
+  queryKey: ["workspace-dashboard"],
   queryFn: async () => {
     await delay(180);
     return structuredClone(initialDashboardData);
@@ -1404,14 +1404,14 @@ export const createSimulatedTurn = ({
   const reviewEnterId = nextId("item-review-enter");
   const reviewExitId = nextId("item-review-exit");
   const collabId = nextId("item-collab");
-  const promptLine = sentenceFromPrompt(prompt || "Refine the active Codex thread.");
+  const promptLine = sentenceFromPrompt(prompt || "Refine the active thread.");
 
   const userContent: Array<ThreadItem> = [
     {
       type: "userMessage",
       id: userMessageId,
       content: [
-        textInput(prompt || "Continue the active Codex task."),
+        textInput(prompt || "Continue the active task."),
         ...mentions.map(mentionInput),
         ...skills.map(skillInput),
         ...images.map((image) => imageInput(image.url)),
@@ -1430,7 +1430,7 @@ export const createSimulatedTurn = ({
     ],
     content: [
       `Drive the next turn around: ${promptLine}`,
-      "Preserve the Codex surfaces for terminals, approvals, subagents, and config mutations.",
+      "Preserve the workspace surfaces for terminals, approvals, subagents, and config mutations.",
     ],
   };
 
@@ -1461,9 +1461,9 @@ export const createSimulatedTurn = ({
 
   const commandText =
     mode === "review"
-      ? "codex review --json"
+      ? "agent review --json"
       : currentSettings.webSearch
-        ? "npm run build && codex --search"
+        ? "npm run build && agent --search"
         : "npm run build";
 
   const commandOutput =
@@ -1539,7 +1539,7 @@ export const createSimulatedTurn = ({
           "- approvals and subagent state stay visible in the inspector",
           "- model, effort, skills, MCP, and settings continue to mutate from the same shell",
           "",
-          "If you want, the next iteration can replace the mock transport with a real Codex app-server websocket bridge.",
+          "If you want, the next iteration can replace the mock transport with a real local app-server websocket bridge.",
         ].join("\n");
 
   const agentItem: ThreadItem = {
@@ -1557,7 +1557,7 @@ export const createSimulatedTurn = ({
             id: nextId("finding"),
             severity: "high",
             title: "Turn completion depends on stream bookkeeping",
-            file: `${WORKSPACE_CWD}/src/app/CodexWorkspace.tsx`,
+            file: `${WORKSPACE_CWD}/src/app/WorkspaceShell.tsx`,
             line: 782,
             summary: `The review request "${reviewFindingSeed}" exposed a path where the latest turn can remain active after the last delta renders.`,
             status: "open",
@@ -1566,7 +1566,7 @@ export const createSimulatedTurn = ({
             id: nextId("finding"),
             severity: "medium",
             title: "Skill attachments are visible but not persisted",
-            file: `${WORKSPACE_CWD}/src/app/CodexWorkspace.tsx`,
+            file: `${WORKSPACE_CWD}/src/app/WorkspaceShell.tsx`,
             line: 635,
             summary: "Installed skills are rendered as composer chips, but the simulated next turn does not yet use them as execution context.",
             status: "open",
@@ -1625,7 +1625,7 @@ export const createSimulatedTurn = ({
             status: "running",
             background: false,
             lastEvent: "just now",
-            log: ["$ codex review --json", "reviewing changed files...", "assembling findings..."],
+            log: ["$ agent review --json", "reviewing changed files...", "assembling findings..."],
           },
         ]
       : [

@@ -1,5 +1,9 @@
 import type { Thread, ThreadItem, Turn, TurnError } from "../protocol/v2";
-import { getUserMessageDisplay } from "./codexUiBridge";
+import { getUserMessageDisplay } from "./services/presentation/workspacePresentationService";
+import {
+  activeProviderAdapter,
+  buildProviderOptimisticUploadPath,
+} from "./services/providers";
 import {
   createFallbackDashboardData,
   type ComposerFile,
@@ -23,6 +27,8 @@ import type {
 
 const FALLBACK_MENTIONS = createFallbackDashboardData().mentionCatalog;
 const OMIT_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
+export const DEFAULT_UI_THEME_ID: UiThemeId = "void";
+export const UI_THEME_STORAGE_KEY = "nomadex-ui-theme";
 
 export const APPROVAL_ORDER: Array<UiApprovalMode> = ["auto", "ro", "fa"];
 
@@ -48,7 +54,7 @@ export const PANEL_TITLE: Record<PanelTab, string> = {
 
 export const QUICK_HINTS = {
   slash:
-    "Ask Codex… / for slash commands · @ mention · $ skills · ! shell · Ctrl+G editor",
+    "Ask Nomadex… / for slash commands · @ mention · $ skills · ! shell · Ctrl+G editor",
   mention: "Attach a file or folder to the conversation",
   skill: "Attach an installed or marketplace skill",
 } as const;
@@ -62,7 +68,7 @@ export const SLASH_COMMANDS: Array<{ cmd: string; dsc: string }> = [
   { cmd: "/feedback", dsc: "Send logs and feedback to maintainers" },
   { cmd: "/fork", dsc: "Fork the current session into a new thread" },
   { cmd: "/init", dsc: "Generate AGENTS.md in the workspace" },
-  { cmd: "/logout", dsc: "Sign out of Codex" },
+  { cmd: "/logout", dsc: "Sign out of the active account" },
   { cmd: "/mcp", dsc: "Open Model Context Protocol server controls" },
   { cmd: "/mention", dsc: "Attach a file or folder to the current message" },
   { cmd: "/model", dsc: "Choose the active model and effort" },
@@ -74,7 +80,7 @@ export const SLASH_COMMANDS: Array<{ cmd: string; dsc: string }> = [
   { cmd: "/resume", dsc: "Resume a saved session" },
   { cmd: "/review", dsc: "Run a review pass against the working tree" },
   { cmd: "/clear", dsc: "Clear the current conversation view" },
-  { cmd: "/copy", dsc: "Copy the latest Codex response" },
+  { cmd: "/copy", dsc: "Copy the latest assistant response" },
   { cmd: "/skills", dsc: "Open installed and marketplace skills" },
   { cmd: "/status", dsc: "Show model, tokens, approvals, git, and MCP state" },
   { cmd: "/theme", dsc: "Preview and save UI theme variants" },
@@ -87,6 +93,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Void",
     description: "Teal-black glass with a cold terminal edge.",
     mode: "dark",
+    themeColor: "#17384b",
     swatches: ["#081019", "#3de8c8", "#4a9eff"],
   },
   {
@@ -94,6 +101,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Ember",
     description: "Burnt amber surfaces with warm relay highlights.",
     mode: "dark",
+    themeColor: "#4b2616",
     swatches: ["#140c08", "#ff8c42", "#ffcc44"],
   },
   {
@@ -101,6 +109,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Plasma",
     description: "Electric magenta-violet glow without neon overload.",
     mode: "dark",
+    themeColor: "#4b215e",
     swatches: ["#110b18", "#c060ff", "#ff60c0"],
   },
   {
@@ -108,6 +117,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Arctic",
     description: "Icy cyan layers with cleaner blue signal tones.",
     mode: "dark",
+    themeColor: "#163a4f",
     swatches: ["#071523", "#40c8ff", "#40ffcc"],
   },
   {
@@ -115,6 +125,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Crimson",
     description: "Red-black control room with warmer alert contrast.",
     mode: "dark",
+    themeColor: "#4a1d28",
     swatches: ["#140707", "#ff4466", "#ff8844"],
   },
   {
@@ -122,6 +133,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Matrix",
     description: "Green phosphor palette for a sharper terminal feel.",
     mode: "dark",
+    themeColor: "#183720",
     swatches: ["#041007", "#00ff46", "#80ff40"],
   },
   {
@@ -129,6 +141,7 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Solar",
     description: "Warm light mode with paper-like translucent panes.",
     mode: "light",
+    themeColor: "#e8d5bc",
     swatches: ["#f8f4ec", "#e05820", "#d4980a"],
   },
   {
@@ -136,12 +149,16 @@ export const UI_THEME_OPTIONS: Array<UiThemeOption> = [
     name: "Midnight",
     description: "Muted indigo glass for a calmer late-night shell.",
     mode: "dark",
+    themeColor: "#2a3260",
     swatches: ["#0d1020", "#8888ff", "#ff88cc"],
   },
 ];
 
 export const isUiThemeId = (value: string | null | undefined): value is UiThemeId =>
   UI_THEME_OPTIONS.some((theme) => theme.id === value);
+
+export const getUiThemeOption = (value: string | null | undefined): UiThemeOption =>
+  UI_THEME_OPTIONS.find((theme) => theme.id === value) ?? UI_THEME_OPTIONS[0];
 
 export const nextId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -318,7 +335,7 @@ export const localUploadedFilesToMentions = (
   files.map((file) => ({
     id: `upload-${file.id}`,
     name: file.name,
-    path: `${cwd}/.codex-web/uploads/${file.name}`,
+    path: buildProviderOptimisticUploadPath(activeProviderAdapter, cwd, file.name),
     kind: "file",
   }));
 

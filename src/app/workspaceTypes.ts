@@ -25,6 +25,7 @@ export type UiThemeOption = {
   name: string;
   description: string;
   mode: "dark" | "light";
+  themeColor: string;
   swatches: [string, string, string];
 };
 

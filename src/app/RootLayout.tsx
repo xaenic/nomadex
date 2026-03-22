@@ -1,11 +1,11 @@
 import { Outlet } from "@tanstack/react-router";
 
-import { CodexWorkspaceProvider } from "./CodexWorkspace";
+import { WorkspaceProvider } from "./WorkspaceShell";
 
 export function RootLayout() {
   return (
-    <CodexWorkspaceProvider>
+    <WorkspaceProvider>
       <Outlet />
-    </CodexWorkspaceProvider>
+    </WorkspaceProvider>
   );
 }
