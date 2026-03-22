@@ -1240,6 +1240,14 @@ code {
   animation-delay: 0.09s;
 }
 
+.meta-glint {
+  display: inline-block;
+  animation: metaGlintFade 3.8s ease-in-out infinite;
+  text-shadow:
+    0 0 0 color-mix(in srgb, currentColor 0%, transparent),
+    0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+}
+
 .msg:last-child {
   border-bottom: none;
 }
@@ -1891,6 +1899,26 @@ code {
   font-family: var(--mono);
   font-size: 10px;
   color: rgb(var(--live-accent-rgb) / 78%);
+}
+
+.live-status-signal {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.live-status-signal-glyph {
+  display: inline-block;
+  min-width: 0.22ch;
+  opacity: 0.38;
+  animation: liveStatusGlyphFade 1.45s linear infinite;
+  will-change: opacity, text-shadow;
+}
+
+.live-status-signal-glyph.gap {
+  opacity: 0.58;
+  animation: none;
 }
 
 .live-status-inline-meta {
@@ -6746,6 +6774,48 @@ pre::-webkit-scrollbar-thumb {
 }
 
 /* ANIMATIONS */
+@keyframes metaGlintFade {
+  0%,
+  100% {
+    opacity: 0.82;
+    text-shadow:
+      0 0 0 color-mix(in srgb, currentColor 0%, transparent),
+      0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
+
+  48% {
+    opacity: 1;
+    text-shadow:
+      0 0 6px color-mix(in srgb, currentColor 18%, transparent),
+      0 0 14px color-mix(in srgb, currentColor 8%, transparent);
+  }
+}
+
+@keyframes liveStatusGlyphFade {
+  0%,
+  18%,
+  100% {
+    opacity: 0.38;
+    text-shadow:
+      0 0 0 color-mix(in srgb, currentColor 0%, transparent),
+      0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
+
+  30% {
+    opacity: 0.98;
+    text-shadow:
+      0 0 6px color-mix(in srgb, currentColor 10%, transparent),
+      0 0 12px color-mix(in srgb, currentColor 5%, transparent);
+  }
+
+  42% {
+    opacity: 0.58;
+    text-shadow:
+      0 0 2px color-mix(in srgb, currentColor 5%, transparent),
+      0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -6793,7 +6863,9 @@ pre::-webkit-scrollbar-thumb {
   .compact-bar,
   .image-card,
   .message-text-tail,
+  .meta-glint,
   .live-status-inline,
+  .live-status-signal-glyph,
   .live-cursor,
   .live-status-icon-frame,
   .live-status-icon-mark,

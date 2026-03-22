@@ -956,7 +956,7 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className="compact-bar">
         <span className="compact-ico">📋</span>
-        <span>{item.text}</span>
+        <span className="meta-glint">{item.text}</span>
       </div>
     );
   }
@@ -982,8 +982,8 @@ const ThreadItemView = memo(function ThreadItemView({
               <span className="cmd-inline-dot minimize" />
               <span className="cmd-inline-dot zoom" />
             </div>
-            <span className="cmd-inline-shell">{commandDisplay.shellLabel}</span>
-            <span className={clsx("cmd-inline-status-chip", badge)}>
+            <span className="cmd-inline-shell meta-glint">{commandDisplay.shellLabel}</span>
+            <span className={clsx("cmd-inline-status-chip", "meta-glint", badge)}>
               {commandStatusLabel(item)}
             </span>
           </div>
@@ -1026,8 +1026,10 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className={clsx("tool", item.error ? "err" : "ok")}>
         <div className="tool-h">
-          {item.error ? "✗" : "✓"} MCP · {item.server}/{item.tool}
-          <span className="tbadge">{item.status}</span>
+          <span className="meta-glint">
+            {item.error ? "✗" : "✓"} MCP · {item.server}/{item.tool}
+          </span>
+          <span className="tbadge meta-glint">{item.status}</span>
         </div>
         <div className="tool-b">
           <pre className="tool-pre">{body}</pre>
@@ -1040,8 +1042,10 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className={clsx("tool", item.success ? "ok" : "run")}>
         <div className="tool-h">
-          {item.success ? "✓" : "↻"} Tool · {item.tool}
-          <span className="tbadge">{item.status}</span>
+          <span className="meta-glint">
+            {item.success ? "✓" : "↻"} Tool · {item.tool}
+          </span>
+          <span className="tbadge meta-glint">{item.status}</span>
         </div>
         <div className="tool-b">
           {item.contentItems?.map((entry, index) => (
@@ -1057,8 +1061,8 @@ const ThreadItemView = memo(function ThreadItemView({
       <div className="agc">
         <div className="agh">
           <div className="agdot" />
-          <span className="agn">⑂ {item.tool}</span>
-          <span className="ags">{item.status}</span>
+          <span className="agn meta-glint">⑂ {item.tool}</span>
+          <span className="ags meta-glint">{item.status}</span>
         </div>
         <div className="agt">{item.prompt ?? "Subagent activity"}</div>
         <div className="agprog">
@@ -1075,8 +1079,8 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className="tool ok">
         <div className="tool-h">
-          ✓ Web search
-          <span className="tbadge">search</span>
+          <span className="meta-glint">✓ Web search</span>
+          <span className="tbadge meta-glint">search</span>
         </div>
         <div className="tool-b">{item.query}</div>
       </div>
@@ -1087,8 +1091,8 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className="image-card">
         <div className="tool-h">
-          🖼 Image
-          <span className="tbadge">view</span>
+          <span className="meta-glint">🖼 Image</span>
+          <span className="tbadge meta-glint">view</span>
         </div>
         <div className="tool-b">{item.path}</div>
       </div>
@@ -1099,8 +1103,8 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className="tool ok">
         <div className="tool-h">
-          ✓ Image generation
-          <span className="tbadge">{item.status}</span>
+          <span className="meta-glint">✓ Image generation</span>
+          <span className="tbadge meta-glint">{item.status}</span>
         </div>
         <div className="tool-b">
           <div>{item.revisedPrompt}</div>
@@ -1116,7 +1120,7 @@ const ThreadItemView = memo(function ThreadItemView({
         <span className="compact-ico">
           {item.type === "enteredReviewMode" ? "🔍" : "✓"}
         </span>
-        <span>{item.review}</span>
+        <span className="meta-glint">{item.review}</span>
       </div>
     );
   }
@@ -1125,7 +1129,7 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div className="compact-bar">
         <span className="compact-ico">🗜</span>
-        <span>Conversation compacted to free context tokens.</span>
+        <span className="meta-glint">Conversation compacted to free context tokens.</span>
       </div>
     );
   }
@@ -1167,7 +1171,7 @@ function DiffCard({
           key={`${item.id}-${change.path}-${index}`}
         >
           <div className="dh">
-            📄 {change.path}
+            <span className="meta-glint">📄 {change.path}</span>
             <div className="diff-head-actions">
               <button
                 className="diff-review"

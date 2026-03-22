@@ -1,9 +1,55 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import clsx from "clsx";
 
 import type { UiLiveOverlay } from "./services/presentation/workspacePresentationService";
 
 type LiveStatusTone = UiLiveOverlay["activityTone"] | "approval";
+
+const AnimatedStatusText = memo(function AnimatedStatusText({
+  className,
+  text,
+}: {
+  className?: string;
+  text: string;
+}) {
+  const characters = Array.from(text);
+  const animatedCount =
+    characters.reduce(
+      (count, character) => count + (character.trim().length > 0 ? 1 : 0),
+      0,
+    ) || 1;
+  const durationMs = Math.min(2200, Math.max(1100, 900 + animatedCount * 70));
+  let animatedIndex = 0;
+
+  return (
+    <span aria-label={text} className={clsx(className, "live-status-signal")} role="text">
+      {characters.map((character, index) => {
+        const animated = character.trim().length > 0;
+        const signalIndex = animated ? animatedIndex++ : -1;
+        const offsetMs = animated
+          ? (((animatedCount - 1 - signalIndex) * durationMs) / animatedCount)
+          : 0;
+        const style = animated
+          ? ({
+              animationDelay: `-${offsetMs}ms`,
+              animationDuration: `${durationMs}ms`,
+            } satisfies CSSProperties)
+          : undefined;
+
+        return (
+          <span
+            aria-hidden="true"
+            className={clsx("live-status-signal-glyph", !animated && "gap")}
+            key={`${character}-${index}`}
+            style={style}
+          >
+            {character === " " ? "\u00A0" : character}
+          </span>
+        );
+      })}
+    </span>
+  );
+});
 
 const LiveStatusIcon = memo(function LiveStatusIcon({
   tone,
@@ -221,9 +267,15 @@ export const LiveStatusInline = memo(function LiveStatusInline({
     >
       <div className="live-status-inline-main">
         <LiveStatusIcon tone={tone} />
-        <span className="live-status-inline-label">{label}</span>
+        <AnimatedStatusText
+          className="live-status-inline-label"
+          text={label}
+        />
         {detail ? (
-          <span className="live-status-inline-detail">{detail}</span>
+          <AnimatedStatusText
+            className="live-status-inline-detail"
+            text={detail}
+          />
         ) : null}
       </div>
       {pendingApprovalsCount > 0 || queuedCount > 0 ? (
