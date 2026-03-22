@@ -1,8 +1,10 @@
-# ⚡ Nomadex
+# Nomadex
 
-A standalone **React + TanStack** workspace for **Codex CLI**, built for desktop and mobile use with a live local Codex app-server bridge.
+Nomadex is a browser workspace for local coding agents. It is built for the workflow where the agent runs on your machine and you want a responsive UI from desktop or mobile to follow the session, send prompts, inspect files, review diffs, and manage the run without living in one terminal tab.
 
-## 🖼️ Sample UI
+Today the shipped provider is Codex through the local app-server bridge. The UI and service layer are being refactored toward multi-provider support, but Codex is the live adapter that currently works end to end.
+
+## Sample UI
 
 ### Desktop
 
@@ -12,102 +14,115 @@ A standalone **React + TanStack** workspace for **Codex CLI**, built for desktop
 
 ![Mobile UI sample](docs/ui-mobile.svg)
 
-## 🎯 Why This Exists
+## Highlights
 
-Codex CLI is powerful in the terminal, but there are workflows where a web shell is more practical:
+- Live threaded chat over the local websocket bridge
+- Mobile-friendly shell for checking and steering sessions away from your workstation
+- Tail-first transcript loading for long conversations
+- File explorer, editor preview, diff review, and terminal surfaces
+- File and image attachments, image paste, and local file browsing
+- Theme picker, skills library, settings, MCP state, and account controls
+- Queueing and in-progress turn visibility
+- Provider abstraction in the app layer, with Codex wired today
 
-- 📱 running Codex from a phone while the real agent keeps working on your machine
-- 👀 monitoring live responses, approvals, terminals, and file changes without staying in one terminal tab
-- 🧵 browsing thread history, reopening sessions, and following multi-turn work visually
-- 🛠️ reviewing diffs, uploads, mentions, MCP state, and skills from one place
-- 🌐 exposing the UI over LAN so the same Codex session is reachable from other devices
+## Requirements
 
-## ✨ What It Includes
+- Node.js 20 or newer recommended
+- `npm`
+- `codex` CLI available on `PATH`
+- A working Codex account/session if you want the live bridge instead of mock mode
 
-- 💬 threaded Codex conversations
-- ⚡ live streaming responses
-- 🧠 steer / queue flows during active turns
-- 📎 inline file mentions plus file/image upload
-- 🗂️ file explorer and inline code preview
-- 🔍 diff review and code review surfaces
-- ⛓️ MCP server state and auth flows
-- 🧰 skills, feature flags, and settings panels
-- 🖥️ background terminals and command output
-- 🤖 subagent visibility and thread switching
-- 📲 mobile-first layout with desktop shell parity
-
-## 🧪 Main Use Cases
-
-### 1. Mobile companion for Codex
-
-Keep Codex running on your workstation and use the browser UI on your phone to:
-
-- send prompts
-- watch streams live
-- approve actions
-- inspect diffs
-
-### 2. Persistent thread workspace
-
-Open saved sessions again, continue them, and keep operational context visible:
-
-- current model
-- approval mode
-- terminal activity
-- review state
-
-### 3. Review and supervision layer
-
-Use the UI as a control plane while Codex edits code:
-
-- watch file changes
-- inspect patches
-- reopen older threads
-- steer the current turn
-
-## 🚀 Run Locally
-
-From the project root:
+## Quick Start
 
 ```bash
 npm install
 npm run dev:live
 ```
 
-That launcher will:
+Open:
 
-1. reuse a Codex app-server already listening on `ws://127.0.0.1:3901`, or start one if needed
-2. start the UI on `http://127.0.0.1:3784`
-3. proxy the browser websocket bridge through the same origin
+- Local machine: `http://127.0.0.1:3784`
+- Another device on the same network: `http://<your-lan-ip>:3784`
 
-## 🌐 LAN Access
+`dev:live` is the recommended launcher. It:
 
-By default the dev launcher is configured for LAN/mobile access through the Vite host, so the UI can be opened from another device on the same network.
+1. checks whether a Codex app-server is already healthy on `ws://127.0.0.1:3901`
+2. starts one if needed
+3. starts Vite on `3784` with `--strictPort`
+4. proxies the browser websocket through `/codex-ws`
 
-If you need custom ports or a custom websocket target:
+If port `3784` is already taken, the script fails on purpose instead of silently jumping to another port.
+
+## Common Commands
 
 ```bash
-VITE_CODEX_WS_URL=ws://127.0.0.1:3902 VITE_CODEX_UI_PORT=4173 npm run dev:live
+npm run dev:live
+npm run app-server
+npm run build
+npm run preview
 ```
 
-## 🧱 Stack
+Use `npm run app-server` only if you want to manage the Codex bridge yourself. For day-to-day development, `npm run dev:live` is the correct entrypoint.
+
+## Remote And Mobile Use
+
+Nomadex was built for phone access to a machine that is already running the agent locally.
+
+- For LAN use, `dev:live` already binds Vite to `0.0.0.0`.
+- For access from outside your LAN, do not expose the raw dev server directly.
+- Prefer Tailscale, an SSH tunnel, or a reverse proxy with real auth in front of Nomadex.
+
+More detail: [docs/SETUP.md](docs/SETUP.md)
+
+## Documentation
+
+- Setup and launch: [docs/SETUP.md](docs/SETUP.md)
+- Architecture and extension points: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+## Current Stack
 
 - React 19
 - TanStack Router
 - TanStack Query
 - Vite
-- local Codex app-server websocket bridge
+- `react-markdown` + GFM rendering
+- Local Codex app-server websocket bridge
 
-## 🛠️ Other Commands
+## Project Shape
 
-```bash
-npm run build
-npm run preview
-npm run app-server
+```text
+src/app/
+  WorkspaceShell.tsx
+  WorkspaceView.tsx
+  components/
+  services/
+    runtime/
+    presentation/
+    providers/
 ```
 
-## 📌 Notes
+The current shell is split between:
 
-- If the Codex app-server is unavailable, the UI can fall back to a local mock shell so the interface still opens.
-- The sample images in this README are representative artwork of the shipped UI shell.
-- Remote skill marketplace behavior depends on the connected Codex account and server access.
+- `WorkspaceShell.tsx`: composition root, routing glue, shell state
+- `WorkspaceView.tsx`: reusable workspace UI sections
+- `src/app/components/*`: transcript, settings, terminal, brand mark, summaries
+- `src/app/services/runtime/*`: live bridge and runtime mutations
+- `src/app/services/presentation/*`: UI display shaping, file/image resolution
+- `src/app/services/providers/*`: provider-specific transport and path conventions
+
+## Notes
+
+- Uploaded assets currently land under the workspace in `.codex-web/uploads` and `.codex-web/uploads/files`.
+- The provider registry exists, but the active runtime adapter is still Codex-only.
+- `npm run preview` is useful for checking the built shell, but the live Codex bridge workflow is centered on `npm run dev:live`.
+
+## Troubleshooting
+
+- `UI port 3784 is already in use`
+  Stop the old Nomadex/Vite process or set `VITE_CODEX_UI_PORT`.
+- `Port 3901 ... is already in use, but it is not responding like a Codex app-server`
+  Another process is on the websocket port. Stop it or point Nomadex to a different Codex bridge.
+- Browser still shows the old theme color or favicon
+  Hard refresh, then fully close and reopen the tab once. Mobile browsers cache these aggressively.
+
+For the full setup and troubleshooting guide, see [docs/SETUP.md](docs/SETUP.md).
