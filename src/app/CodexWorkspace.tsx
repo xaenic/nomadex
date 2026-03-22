@@ -2030,6 +2030,7 @@ export function CodexWorkspacePage() {
       saveChatScrollState(activeThreadId);
     };
 
+    restore();
     const frame = window.requestAnimationFrame(restore);
     const timeout = window.setTimeout(restore, 90);
 
