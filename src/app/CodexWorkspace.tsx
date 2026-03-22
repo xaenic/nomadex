@@ -95,6 +95,7 @@ import {
   FileEditorPreview,
   ProjectFolderPickerModal,
   QueuedMessagesStrip,
+  SkillsLibraryModal,
 } from "./WorkspaceView";
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -103,6 +104,7 @@ type CommandPaletteAction =
   | { type: "createSession" }
   | { type: "forkSession" }
   | { type: "compactSession" }
+  | { type: "openSkills" }
   | { type: "resetComposer" }
   | { type: "openPanel"; tab: PanelTab }
   | { type: "runSlash"; slash: string }
@@ -1133,6 +1135,7 @@ export function CodexWorkspacePage() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [projectPickerStarting, setProjectPickerStarting] = useState(false);
   const [projectPickerPath, setProjectPickerPath] =
     useState(SESSION_PROJECT_ROOT);
@@ -2286,6 +2289,24 @@ export function CodexWorkspacePage() {
     }
   }, [activeThreadId, navigateToThread]);
 
+  useEffect(() => {
+    if (route.section === "skills") {
+      setSkillsModalOpen(true);
+    }
+  }, [route.section]);
+
+  const openSkillsLibrary = useCallback(() => {
+    setSkillsModalOpen(true);
+    setSidebarOpen(false);
+  }, []);
+
+  const closeSkillsLibrary = useCallback(() => {
+    setSkillsModalOpen(false);
+    if (route.section === "skills" && activeThreadId) {
+      navigateToThread(activeThreadId, "chat");
+    }
+  }, [activeThreadId, navigateToThread, route.section]);
+
   const createSessionInCwd = useCallback(
     async (cwd: string) => {
       if (projectPickerStarting) {
@@ -2572,10 +2593,7 @@ export function CodexWorkspacePage() {
           openPanel("diff");
           break;
         case "/skills":
-          openPanel("config");
-          if (activeThreadId) {
-            navigateToThread(activeThreadId, "skills");
-          }
+          openSkillsLibrary();
           break;
         case "/mcp":
           openPanel("config");
@@ -2644,6 +2662,7 @@ export function CodexWorkspacePage() {
       latestAgentMessage,
       navigateToThread,
       openPanel,
+      openSkillsLibrary,
       pushToast,
       resetComposer,
       focusComposerEnd,
@@ -2673,6 +2692,7 @@ export function CodexWorkspacePage() {
           { icon: "📁", name: "Files Panel", key: "", command: { type: "openPanel", tab: "files" } },
           { icon: "⬛", name: "Terminal Output (/ps)", key: "", command: { type: "openPanel", tab: "terminal" } },
           { icon: "⑂", name: "Multi-agent Panel", key: "", command: { type: "openPanel", tab: "agents" } },
+          { icon: "📋", name: "Skills Library (/skills)", key: "", command: { type: "openSkills" } },
           { icon: "⚙", name: "Config & Feature Flags", key: "⌘,", command: { type: "openPanel", tab: "config" } },
         ],
       },
@@ -2721,6 +2741,9 @@ export function CodexWorkspacePage() {
         case "compactSession":
           void compactSession();
           break;
+        case "openSkills":
+          openSkillsLibrary();
+          break;
         case "resetComposer":
           resetComposer();
           break;
@@ -2735,7 +2758,7 @@ export function CodexWorkspacePage() {
           break;
       }
     },
-    [compactSession, createSession, forkSession, openPanel, resetComposer, runSlash, selectModel],
+    [compactSession, createSession, forkSession, openPanel, openSkillsLibrary, resetComposer, runSlash, selectModel],
   );
 
   const removeImage = useCallback((imageId: string) => {
@@ -3536,6 +3559,7 @@ export function CodexWorkspacePage() {
           snapshot={snapshot}
           activeThreadLabel={activeThreadLabel}
           actions={actions}
+          onOpenSkills={() => setSkillsModalOpen(true)}
           pushToast={pushToast}
           selectModel={selectModel}
         />
@@ -3614,6 +3638,9 @@ export function CodexWorkspacePage() {
         <button className="hb" type="button" onClick={() => openPanel("files")} title="Files and diff">
           📁
         </button>
+        <button className="hb" type="button" onClick={openSkillsLibrary} title="Skills library">
+          📋
+        </button>
         <button className="hb" type="button" onClick={() => openPanel("config")} title="Config and settings">
           ⚙
         </button>
@@ -3683,6 +3710,10 @@ export function CodexWorkspacePage() {
             <button className="slink" type="button" onClick={() => void runSlash("/compact")}>
               <span>🗜</span>
               <span>/compact transcript</span>
+            </button>
+            <button className="slink" type="button" onClick={openSkillsLibrary}>
+              <span>📋</span>
+              <span>Skills library</span>
             </button>
             <button className="slink" type="button" onClick={() => fillComposer("/init Generate AGENTS.md scaffold")}>
               <span>📋</span>
@@ -4053,6 +4084,15 @@ export function CodexWorkspacePage() {
             void confirmProjectPicker(path);
           }}
           parentPath={projectPickerParentPath}
+        />
+      ) : null}
+
+      {skillsModalOpen ? (
+        <SkillsLibraryModal
+          actions={actions}
+          onClose={closeSkillsLibrary}
+          pushToast={pushToast}
+          snapshot={snapshot}
         />
       ) : null}
 

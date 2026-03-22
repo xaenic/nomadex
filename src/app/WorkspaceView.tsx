@@ -1609,18 +1609,298 @@ const formatRateReset = (resetsAt: number | null) => {
   })}`;
 };
 
+const skillMatchesQuery = (
+  skill: {
+    name: string;
+    description: string;
+    tags?: string[];
+    repo?: string;
+    downloads?: string;
+    scope?: string;
+  },
+  query: string,
+) => {
+  if (!query) {
+    return true;
+  }
+
+  const haystack = [
+    skill.name,
+    skill.description,
+    skill.scope ?? "",
+    skill.repo ?? "",
+    skill.downloads ?? "",
+    ...(skill.tags ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(query);
+};
+
+export function SkillsLibraryModal({
+  snapshot,
+  actions,
+  onClose,
+  pushToast,
+}: {
+  snapshot: DashboardData;
+  actions: WorkspaceActions;
+  onClose: () => void;
+  pushToast: (message: string, tone: ToastTone) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const enabledCount = useMemo(
+    () => snapshot.installedSkills.filter((skill) => skill.enabled).length,
+    [snapshot.installedSkills],
+  );
+  const filteredInstalledSkills = useMemo(
+    () =>
+      snapshot.installedSkills.filter((skill) =>
+        skillMatchesQuery(skill, normalizedQuery),
+      ),
+    [normalizedQuery, snapshot.installedSkills],
+  );
+  const filteredRemoteSkills = useMemo(
+    () =>
+      snapshot.remoteSkills.filter((skill) =>
+        skillMatchesQuery(skill, normalizedQuery),
+      ),
+    [normalizedQuery, snapshot.remoteSkills],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="skills-library-overlay"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="skills-library-modal">
+        <div className="skills-library-hero">
+          <div className="skills-library-copy">
+            <div className="skills-library-kicker">Nomadex Skill Library</div>
+            <div className="skills-library-title">
+              Manage installed and remote skills in one place
+            </div>
+            <div className="skills-library-subtitle">
+              Toggle what stays active globally, browse marketplace packs, and
+              keep the composer focused on actual prompts instead of setup.
+            </div>
+          </div>
+          <button
+            aria-label="Close skill library"
+            className="skills-library-close"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="skills-library-toolbar">
+          <div className="skills-library-stats">
+            <div className="skills-library-stat">
+              <strong>{snapshot.installedSkills.length}</strong>
+              <span>Installed</span>
+            </div>
+            <div className="skills-library-stat">
+              <strong>{enabledCount}</strong>
+              <span>Enabled</span>
+            </div>
+            <div className="skills-library-stat">
+              <strong>{snapshot.remoteSkills.length}</strong>
+              <span>Marketplace</span>
+            </div>
+          </div>
+          <input
+            autoFocus
+            className="skills-library-search"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search skills, tags, repo, or description…"
+            value={query}
+          />
+        </div>
+
+        <div className="skills-library-grid">
+          <section className="skills-library-pane">
+            <div className="skills-library-pane-head">
+              <div>
+                <div className="skills-library-pane-title">Installed</div>
+                <div className="skills-library-pane-copy">
+                  Toggle globally available skills and inspect their local path.
+                </div>
+              </div>
+              <span className="skills-library-pane-count">
+                {filteredInstalledSkills.length}
+              </span>
+            </div>
+
+            <div className="skills-library-list">
+              {filteredInstalledSkills.length === 0 ? (
+                <div className="skills-library-empty">
+                  No installed skills matched this search.
+                </div>
+              ) : (
+                filteredInstalledSkills.map((skill) => (
+                  <article
+                    className={clsx(
+                      "skills-library-card installed",
+                      skill.enabled && "enabled",
+                    )}
+                    key={skill.id}
+                  >
+                    <div className="skills-library-card-head">
+                      <div>
+                        <div className="skills-library-card-title">
+                          {skill.name}
+                        </div>
+                        <div className="skills-library-card-meta">
+                          <span className="skills-library-chip">
+                            {skill.scope}
+                          </span>
+                          <span
+                            className={clsx(
+                              "skills-library-chip",
+                              skill.enabled && "live",
+                            )}
+                          >
+                            {skill.enabled ? "Enabled" : "Disabled"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        className={clsx(
+                          "skills-library-action",
+                          skill.enabled && "active",
+                        )}
+                        onClick={() => void actions.toggleInstalledSkill(skill.id)}
+                        type="button"
+                      >
+                        {skill.enabled ? "Disable" : "Enable"}
+                      </button>
+                    </div>
+                    <div className="skills-library-card-description">
+                      {skill.description}
+                    </div>
+                    {skill.tags.length > 0 ? (
+                      <div className="skills-library-tag-row">
+                        {skill.tags.map((tag) => (
+                          <span className="skills-library-tag" key={tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <code className="skills-library-path">{skill.path}</code>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="skills-library-pane marketplace">
+            <div className="skills-library-pane-head">
+              <div>
+                <div className="skills-library-pane-title">Marketplace</div>
+                <div className="skills-library-pane-copy">
+                  Install remote skills into your local Codex skill catalog.
+                </div>
+              </div>
+              <span className="skills-library-pane-count">
+                {filteredRemoteSkills.length}
+              </span>
+            </div>
+
+            <div className="skills-library-list">
+              {filteredRemoteSkills.length === 0 ? (
+                <div className="skills-library-empty">
+                  No marketplace skills matched this search.
+                </div>
+              ) : (
+                filteredRemoteSkills.map((skill) => (
+                  <article
+                    className="skills-library-card remote"
+                    key={skill.id}
+                  >
+                    <div className="skills-library-card-head">
+                      <div>
+                        <div className="skills-library-card-title">
+                          {skill.name}
+                        </div>
+                        <div className="skills-library-card-meta">
+                          <span className="skills-library-chip">
+                            {skill.downloads} downloads
+                          </span>
+                          <span className="skills-library-chip">
+                            {skill.repo}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        className="skills-library-action install"
+                        onClick={() => {
+                          void actions.installSkill(skill.id);
+                          pushToast(`Installing ${skill.name}`, "ok");
+                        }}
+                        type="button"
+                      >
+                        Install
+                      </button>
+                    </div>
+                    <div className="skills-library-card-description">
+                      {skill.description}
+                    </div>
+                    {skill.tags.length > 0 ? (
+                      <div className="skills-library-tag-row">
+                        {skill.tags.map((tag) => (
+                          <span className="skills-library-tag" key={tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConfigPanel({
   snapshot,
   activeThreadLabel,
   actions,
   pushToast,
   selectModel,
+  onOpenSkills,
 }: {
   snapshot: DashboardData;
   activeThreadLabel: string;
   actions: WorkspaceActions;
   pushToast: (message: string, tone: ToastTone) => void;
   selectModel: (modelId: string) => Promise<void>;
+  onOpenSkills: () => void;
 }) {
   const [mobileCallbackUrl, setMobileCallbackUrl] = useState("");
 
@@ -1857,37 +2137,19 @@ export function ConfigPanel({
 
       <div className="sg">
         <div className="sg-t">Skills</div>
-        {snapshot.installedSkills.map((skill) => (
-          <div className="sr" key={skill.id}>
-            <span className="sl">{skill.name}</span>
-            <div
-              className={clsx("tog", skill.enabled && "on")}
-              onClick={() => void actions.toggleInstalledSkill(skill.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={() => undefined}
-            />
+        <div className="config-shortcut-card skill-shortcut-card">
+          <div className="config-shortcut-copy">
+            <strong>Skills moved into a dedicated library</strong>
+            <span>
+              {snapshot.installedSkills.length} installed ·{" "}
+              {snapshot.installedSkills.filter((skill) => skill.enabled).length} enabled
+              · {snapshot.remoteSkills.length} available to install
+            </span>
           </div>
-        ))}
-        {snapshot.remoteSkills.length > 0 ? (
-          <div className="remote-skill-list">
-            {snapshot.remoteSkills.map((skill) => (
-              <button
-                className="remote-skill-card"
-                key={skill.id}
-                type="button"
-                onClick={() => {
-                  void actions.installSkill(skill.id);
-                  pushToast(`Installing ${skill.name}`, "ok");
-                }}
-              >
-                <strong>{skill.name}</strong>
-                <span>{skill.description}</span>
-                <small>{skill.downloads} downloads</small>
-              </button>
-            ))}
-          </div>
-        ) : null}
+          <button className="mini-action" onClick={onOpenSkills} type="button">
+            Open Skills Library
+          </button>
+        </div>
       </div>
 
       <div className="sg">

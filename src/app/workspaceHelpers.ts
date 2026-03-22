@@ -146,7 +146,6 @@ export const sectionToPanel = (section: RouteSection): PanelTab | null => {
       return "agents";
     case "review":
       return "diff";
-    case "skills":
     case "mcp":
     case "settings":
       return "config";
