@@ -223,7 +223,7 @@ export const ChatTranscript = memo(function ChatTranscript({
               <FileChangeSummary
                 entries={turnFileChanges}
                 onOpenFile={onOpenFile}
-                title="Changed files"
+                title="Changed"
                 variant="turn"
               />
             ) : null}

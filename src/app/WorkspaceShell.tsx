@@ -95,7 +95,6 @@ import type {
   RouteSection,
   ToastItem,
   ToastTone,
-  UiApprovalMode,
   UiThemeId,
   WorkspaceActions,
   WorkspaceContextValue,
@@ -162,6 +161,241 @@ const STARTUP_CONVERSATION_MESSAGES = [
   "Loading recent history",
   "Syncing transcript",
 ];
+
+type ChromeIconName =
+  | "auto"
+  | "plan"
+  | "mention"
+  | "attach"
+  | "image"
+  | "terminal"
+  | "web"
+  | "review"
+  | "agents"
+  | "compact"
+  | "editor"
+  | "send"
+  | "stop"
+  | "branch"
+  | "model"
+  | "shield";
+
+function ChromeIcon({
+  name,
+  className,
+}: {
+  name: ChromeIconName;
+  className?: string;
+}) {
+  const iconClassName = clsx("chrome-icon", className);
+
+  switch (name) {
+    case "auto":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m8.1 1.4-1.7 4 2.3.3-1 4.9 3.9-6-2.4-.3 1.5-3Z" />
+        </svg>
+      );
+    case "plan":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 3.5v9" />
+          <path d="M4 5h5" />
+          <path d="M4 8h7" />
+          <path d="M4 11h4" />
+          <circle cx="11.5" cy="8" r="1.5" />
+        </svg>
+      );
+    case "mention":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.3" />
+          <path d="M10.8 10.1a2.3 2.3 0 1 1 .4-4.6v3.6c0 .7.4 1 1 1 .9 0 1.4-.8 1.4-2.1A5.4 5.4 0 1 0 8 13.4" />
+        </svg>
+      );
+    case "attach":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m6 8.5 3.8-3.8a2 2 0 1 1 2.8 2.8L7.9 12.2A3 3 0 0 1 3.6 8l4.3-4.3" />
+        </svg>
+      );
+    case "image":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="2.5" y="3" width="11" height="10" rx="2" />
+          <circle cx="6" cy="6.5" r="1" />
+          <path d="m4.5 11 2.4-2.4 1.9 1.9 1.4-1.4 1.3 1.9" />
+        </svg>
+      );
+    case "terminal":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="2.5" y="3" width="11" height="10" rx="2" />
+          <path d="m5.3 6 1.8 1.8-1.8 1.8" />
+          <path d="M8.7 9.8h2.2" />
+        </svg>
+      );
+    case "web":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.2" />
+          <path d="m10.2 10.2 2.6 2.6" />
+        </svg>
+      );
+    case "review":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4.5 2.8h5l2 2v7.4a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" />
+          <path d="M9.5 2.8v2h2" />
+          <path d="M5.7 8h4.6" />
+          <path d="M5.7 10.3h3.2" />
+        </svg>
+      );
+    case "agents":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="4.2" cy="8" r="1.5" />
+          <circle cx="11.8" cy="5.2" r="1.5" />
+          <circle cx="11.8" cy="10.8" r="1.5" />
+          <path d="M5.5 7.3 10.4 5.8" />
+          <path d="M5.5 8.7 10.4 10.2" />
+        </svg>
+      );
+    case "compact":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.5 5h9" />
+          <path d="M3.5 8h6" />
+          <path d="M3.5 11h9" />
+          <path d="m11 6.3 1.8 1.7L11 9.7" />
+        </svg>
+      );
+    case "editor":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4.4 11.6 11.6 4.4" />
+          <path d="m10.4 3.6 2 2" />
+          <path d="M4 12.2 3.6 13l.8-.4 1.4-.3-.8-.8Z" />
+          <path d="M3.5 3.4h5.2" />
+        </svg>
+      );
+    case "send":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m8 12.7-.1-8.8" />
+          <path d="m5.3 6.1 2.6-2.8 2.8 2.8" />
+        </svg>
+      );
+    case "stop":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" />
+        </svg>
+      );
+    case "branch":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="5" cy="4" r="1.4" />
+          <circle cx="11" cy="12" r="1.4" />
+          <circle cx="11" cy="4" r="1.4" />
+          <path d="M5 5.4v4.1c0 1.4 1.1 2.5 2.5 2.5H9.6" />
+          <path d="M5 5.4c0 1.4 1.1 2.5 2.5 2.5H9.6" />
+        </svg>
+      );
+    case "model":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m8 2.6 4.4 2.5v5L8 12.6l-4.4-2.5v-5Z" />
+          <path d="m8 2.6 4.4 2.5L8 7.6 3.6 5.1Z" />
+          <path d="M8 7.6v5" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg className={iconClassName} viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2.5 12 4v3.6c0 2.4-1.4 4.2-4 5.9-2.6-1.7-4-3.5-4-5.9V4Z" />
+        </svg>
+      );
+  }
+}
+
+const compactNumber = (value: number) =>
+  new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: value >= 100_000 ? 0 : 1,
+  }).format(value);
+
+const pathBaseName = (value: string | null | undefined) => {
+  if (!value) {
+    return "workspace";
+  }
+
+  const normalized = value.replace(/\/+$/u, "");
+  if (!normalized) {
+    return "workspace";
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) ?? normalized;
+};
+
+const formatUsageWindowShortLabel = (
+  label: string,
+  windowDurationMins: number | null,
+) => {
+  if (windowDurationMins !== null) {
+    if (windowDurationMins <= 60 * 5) {
+      return "5h";
+    }
+
+    if (windowDurationMins >= 60 * 24 * 7) {
+      return "Week";
+    }
+  }
+
+  const normalized = label.trim().toLowerCase();
+  if (normalized.includes("week")) {
+    return "Week";
+  }
+
+  if (normalized.includes("5")) {
+    return "5h";
+  }
+
+  return label;
+};
+
+const estimateConversationTokens = (turns: Array<Turn>) => {
+  let characters = 0;
+
+  for (const turn of turns) {
+    for (const item of turn.items) {
+      switch (item.type) {
+        case "userMessage":
+          characters += getUserText(item).length;
+          break;
+        case "agentMessage":
+        case "plan":
+          characters += item.text.length;
+          break;
+        case "reasoning":
+          characters += item.summary.join("\n").length;
+          characters += item.content.join("\n").length;
+          break;
+        case "webSearch":
+          characters += item.query.length;
+          break;
+        case "collabAgentToolCall":
+          characters += (item.prompt ?? "").length;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  return Math.max(0, Math.round(characters / 3.7));
+};
 
 const copyText = async (value: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -3693,13 +3927,33 @@ export function WorkspacePage() {
     [activeThreadId, navigateToThread, pushToast, visibleTabIds],
   );
 
-  const currentTokenCount = Math.floor(deferredComposer.length / 3.5).toLocaleString();
   const composerPlaceholder = quickMode
     ? QUICK_HINTS[quickMode]
     : activeTurn
       ? "Queue a follow-up while the agent is still running…"
       : QUICK_HINTS.slash;
-  const composerActionLabel = activeTurn ? "Queue" : "↑";
+  const conversationTokenEstimate = useMemo(
+    () => estimateConversationTokens(activeTurns),
+    [activeTurns],
+  );
+  const contextUsageLabel = `${compactNumber(conversationTokenEstimate)} / 200k`;
+  const footerUsageWindows = useMemo(
+    () =>
+      [...snapshot.account.usageWindows]
+        .sort(
+          (left, right) =>
+            (left.windowDurationMins ?? Number.MAX_SAFE_INTEGER) -
+            (right.windowDurationMins ?? Number.MAX_SAFE_INTEGER),
+        )
+        .slice(0, 2),
+    [snapshot.account.usageWindows],
+  );
+  const connectionLabel =
+    snapshot.transport.status === "connected" ? "Connected" : snapshot.transport.status;
+  const projectStatusLabel = pathBaseName(activeThread?.thread.cwd);
+  const branchStatusLabel = activeThread?.thread.gitInfo?.branch ?? "workspace";
+  const accessStatusLabel = APPROVAL_LABELS[activeUiApproval].toLowerCase();
+  const activityStatusLabel = activeTurn ? "Streaming" : "Idle";
   const handleCopy = useCallback(
     (value: string) => {
       void copyText(value).then(() => pushToast("Copied!", "ok"));
@@ -4427,7 +4681,7 @@ export function WorkspacePage() {
                   <FileChangeSummary
                     entries={activeTurnFileChanges}
                     onOpenFile={handleLiveFileChangeOpen}
-                    title="Files changing"
+                    title="Changing"
                     variant="live"
                   />
                 ) : null}
@@ -4435,7 +4689,8 @@ export function WorkspacePage() {
                 <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
                   <div id="toolbar">
                 <button className={clsx("tbtn", toolbarAuto && "on")} type="button" onClick={() => setToolbarAuto((current) => !current)}>
-                  ⚡ Auto
+                  <ChromeIcon name="auto" />
+                  <span className="tbtn-label">Auto</span>
                 </button>
                 <button
                   className={clsx("tbtn", toolbarPlan && "on")}
@@ -4445,7 +4700,8 @@ export function WorkspacePage() {
                     setToolbarPlan(next);
                   }}
                 >
-                  /plan
+                  <ChromeIcon name="plan" />
+                  <span className="tbtn-label">Plan</span>
                 </button>
                 <div className="tsep2" />
                 <button className="tbtn" type="button" onClick={() => {
@@ -4454,23 +4710,28 @@ export function WorkspacePage() {
                   setQuickIndex(0);
                   textareaRef.current?.focus();
                 }}>
-                  📎 /mention
+                  <ChromeIcon name="mention" />
+                  <span className="tbtn-label">Mention</span>
                 </button>
                 <button className="tbtn" type="button" onClick={() => uploadFileInputRef.current?.click()}>
-                  📎 Attach
+                  <ChromeIcon name="attach" />
+                  <span className="tbtn-label">Files</span>
                 </button>
                 <button className="tbtn" type="button" onClick={() => imageInputRef.current?.click()}>
-                  🖼 Image
+                  <ChromeIcon name="image" />
+                  <span className="tbtn-label">Image</span>
                 </button>
                 <button className={clsx("tbtn", toolbarShell && "on")} type="button" onClick={() => setToolbarShell((current) => !current)}>
-                  $ Shell
+                  <ChromeIcon name="terminal" />
+                  <span className="tbtn-label">Shell</span>
                 </button>
                 <button
                   className={clsx("tbtn", snapshot.settings.webSearch && "on")}
                   type="button"
                   onClick={() => void actions.updateSettings({ webSearch: !snapshot.settings.webSearch })}
                 >
-                  🔍 Web
+                  <ChromeIcon name="web" />
+                  <span className="tbtn-label">Web</span>
                 </button>
                 <div className="tsep2" />
                 <button
@@ -4478,16 +4739,20 @@ export function WorkspacePage() {
                   type="button"
                   onClick={() => setComposerMode((current) => (current === "review" ? "chat" : "review"))}
                 >
-                  🔎 Review
+                  <ChromeIcon name="review" />
+                  <span className="tbtn-label">Review</span>
                 </button>
                 <button className="tbtn" type="button" onClick={() => openPanel("agents")}>
-                  ⑂ Agents
+                  <ChromeIcon name="agents" />
+                  <span className="tbtn-label">Agents</span>
                 </button>
                 <button className="tbtn" type="button" onClick={() => void compactSession()}>
-                  🗜 Compact
+                  <ChromeIcon name="compact" />
+                  <span className="tbtn-label">Trim</span>
                 </button>
                 <button className="tbtn" type="button" onClick={() => pushToast("Ctrl+G — opening editor bridge", "")}>
-                  ✏ Editor
+                  <ChromeIcon name="editor" />
+                  <span className="tbtn-label">Editor</span>
                 </button>
                 </div>
 
@@ -4505,37 +4770,50 @@ export function WorkspacePage() {
                   />
                 <button
                   id="sendbtn"
-                  className={clsx(activeTurn && "queue")}
                   type="button"
+                  aria-label={activeTurn ? "Queue message" : "Send message"}
                   onClick={() => void submitComposer(textareaRef.current?.value)}
                 >
-                  {composerActionLabel}
+                  <ChromeIcon name="send" />
                 </button>
                 <button
                   id="stopbtn"
                   style={{ display: activeTurn ? "flex" : "none" }}
                   type="button"
+                  aria-label="Stop current turn"
                   onClick={() => void onStopTurn()}
                 >
-                  ◼
+                  <ChromeIcon name="stop" />
                 </button>
               </div>
 
               {renderQuickPicker()}
 
               <div id="ifooter">
-                <select
-                  id="msel"
-                  value={activeUiApproval}
-                  onChange={(event) => void actions.updateSettings(settingsPatchFromApprovalMode(event.target.value as UiApprovalMode))}
-                >
-                  <option value="auto">auto (default)</option>
-                  <option value="ro">read-only</option>
-                  <option value="fa">full-access (--yolo)</option>
-                </select>
-                <span>⏎ send · ⇧⏎ newline</span>
-                <span>/cmds · $skills · !shell</span>
-                <span id="tokcount">{currentTokenCount} / 200k ctx</span>
+                <div className="composer-footer-meta">
+                  <div className="composer-shortcuts">
+                    <span className="composer-hint">Shift+Enter</span>
+                  </div>
+                  <div className="composer-usage-metric">
+                    <span className="composer-usage-label">Context</span>
+                    <span id="tokcount">{contextUsageLabel}</span>
+                  </div>
+                  <div className="composer-limit-list">
+                    {footerUsageWindows.map((windowEntry) => (
+                      <div className="composer-limit-chip" key={windowEntry.id}>
+                        <span className="composer-limit-name">
+                          {formatUsageWindowShortLabel(
+                            windowEntry.label,
+                            windowEntry.windowDurationMins,
+                          )}
+                        </span>
+                        <span className="composer-limit-value">
+                          {Math.round(windowEntry.usedPercent)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
               </div>
@@ -4584,19 +4862,27 @@ export function WorkspacePage() {
       </div>
 
       <div id="statusbar">
-        <div className="sbi">
+        <div className="sbi sbi-transport">
           <div className={clsx("sbd", statusTone(snapshot.transport.status))} />
-          {snapshot.transport.status === "connected" ? "Connected" : snapshot.transport.status}
+          <span>{connectionLabel}</span>
         </div>
-        <div className="sbi">📁 {activeThread?.thread.cwd ?? "/home/allan"}</div>
-        <div className="sbi">⑂ {activeThread?.thread.gitInfo?.branch ?? "workspace"}</div>
+        <div className="sbi sbi-branch">
+          <ChromeIcon name="branch" />
+          <span className="sb-project sb-fulltext">{projectStatusLabel}</span>
+          <span className="sb-divider">/</span>
+          <span className="sb-fulltext">{branchStatusLabel}</span>
+        </div>
+        <div className="sbi sbi-model" id="sb-model">
+          <ChromeIcon name="model" />
+          <span>{snapshot.settings.model}</span>
+        </div>
+        <div className="sbi sbi-access">
+          <ChromeIcon name="shield" />
+          <span>{accessStatusLabel}</span>
+        </div>
         <div className="sbi" id="sb-st">
-          {activeTurn ? "Streaming…" : snapshot.transport.status === "connected" ? "Ready" : "Mock mode"}
+          {activityStatusLabel}
         </div>
-        <div className="sbi" id="sb-model">
-          ⬡ {snapshot.settings.model}
-        </div>
-        <div className="sbi">{APPROVAL_LABELS[activeUiApproval].toLowerCase()} · {snapshot.settings.sandboxMode}</div>
       </div>
 
       {modelPickerOpen ? (

@@ -377,6 +377,11 @@ code {
     drop-shadow(0 0 16px color-mix(in srgb, var(--ac2) 14%, transparent));
 }
 
+.connection-loading-screen:not(.inline) .connection-loading-mark {
+  width: 40px;
+  height: 40px;
+}
+
 .connection-loading-row {
   display: inline-flex;
   align-items: center;
@@ -977,11 +982,11 @@ code {
 .file-change-summary {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid var(--bdr);
   background: var(--bg2);
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 7px 8px;
 }
 
 .file-change-summary-turn {
@@ -991,7 +996,7 @@ code {
 }
 
 .file-change-summary-live {
-  margin: 0 0 2px;
+  margin: 0 10px 2px;
   border-color: color-mix(in srgb, var(--ac) 18%, var(--bdr));
   background: color-mix(in srgb, var(--bg2) 90%, var(--ac) 10%);
 }
@@ -1006,7 +1011,7 @@ code {
 
 .file-change-summary-title {
   min-width: 0;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--tx2);
 }
@@ -1014,27 +1019,34 @@ code {
 .file-change-summary-count {
   flex-shrink: 0;
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
   color: var(--tx3);
 }
 
 .file-change-summary-list {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .file-change-summary-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  width: 100%;
-  padding: 6px 8px;
+  width: auto;
+  max-width: 100%;
+  padding: 5px 8px;
   border: 1px solid var(--bdr);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--bg3);
   color: var(--tx);
   cursor: pointer;
   transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.file-change-summary-live .file-change-summary-item {
+  background: color-mix(in srgb, var(--bg3) 84%, var(--ac) 16%);
 }
 
 .file-change-summary-item:hover,
@@ -1046,20 +1058,25 @@ code {
 
 .file-change-summary-kind {
   flex-shrink: 0;
-  min-width: 28px;
-  font-size: 10px;
+  min-width: 0;
+  padding-right: 6px;
+  border-right: 1px solid var(--bdr);
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
   color: var(--tx2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .file-change-summary-path {
   min-width: 0;
+  max-width: min(44vw, 260px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--tx);
 }
 
@@ -3214,7 +3231,7 @@ pre::-webkit-scrollbar-thumb {
 #ia {
   background: var(--shell-solid-2);
   border-top: 1px solid var(--bdr);
-  padding: 8px 10px;
+  padding: 8px 0;
   flex-shrink: 0;
   position: relative;
   contain: layout;
@@ -3224,6 +3241,7 @@ pre::-webkit-scrollbar-thumb {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 6px;
+  padding: 0 10px;
 }
 
 .chat-jump-button {
@@ -3255,6 +3273,7 @@ pre::-webkit-scrollbar-thumb {
   gap: 5px;
   flex-wrap: wrap;
   margin-bottom: 6px;
+  padding: 0 10px;
 }
 
 .ctag {
@@ -3344,7 +3363,7 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .queued-messages {
-  padding: 0 0 2px;
+  padding: 0 10px 2px;
 }
 
 .queued-messages-inner {
@@ -3429,8 +3448,8 @@ pre::-webkit-scrollbar-thumb {
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 7px;
+  gap: 3px;
+  padding: 5px 6px;
   border-bottom: 1px solid var(--bdr);
   overflow-x: auto;
   scrollbar-width: none;
@@ -3441,19 +3460,35 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .tbtn {
-  padding: 3px 7px;
+  padding: 4px 7px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--tx3);
   font-size: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   transition: 0.1s;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.chrome-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.tbtn-label {
+  display: inline-flex;
+  align-items: center;
 }
 
 .tbtn:hover,
@@ -3481,7 +3516,7 @@ pre::-webkit-scrollbar-thumb {
 #irow {
   display: flex;
   align-items: flex-end;
-  padding: 6px 8px;
+  padding: 7px 8px 5px;
   gap: 6px;
 }
 
@@ -3489,11 +3524,23 @@ pre::-webkit-scrollbar-thumb {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 76px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--bdr) 88%, white 12%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-solid) 72%, var(--bg4) 28%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.composer-text-shell:focus-within {
+  border-color: color-mix(in srgb, var(--ac) 34%, var(--bdr) 66%);
+  background: color-mix(in srgb, var(--panel-solid) 64%, var(--bg4) 36%);
 }
 
 .composer-mirror {
   position: absolute;
-  inset: 0;
+  inset: 8px 10px;
   overflow: auto;
   pointer-events: none;
   white-space: pre-wrap;
@@ -3523,7 +3570,7 @@ pre::-webkit-scrollbar-thumb {
 
 .composer-placeholder {
   position: absolute;
-  inset: 0;
+  inset: 8px 10px;
   pointer-events: none;
   color: var(--tx3);
   font-size: 12.5px;
@@ -3544,12 +3591,14 @@ pre::-webkit-scrollbar-thumb {
   caret-color: var(--tx);
   font-size: 12.5px;
   resize: none;
-  min-height: 24px;
+  min-height: 60px;
   max-height: 140px;
   line-height: 1.6;
   position: relative;
   z-index: 1;
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 #ta::placeholder {
@@ -3563,12 +3612,13 @@ pre::-webkit-scrollbar-thumb {
 
 #sendbtn,
 #stopbtn {
-  min-width: 28px;
-  height: 28px;
-  border-radius: 7px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   transition: 0.14s;
   flex-shrink: 0;
   cursor: pointer;
@@ -3578,34 +3628,15 @@ pre::-webkit-scrollbar-thumb {
   background: rgb(255 255 255 / 0.06);
   border: 1px solid color-mix(in srgb, var(--ac) 24%, white 10%);
   color: var(--tx);
-  font-size: 14px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 #sendbtn:hover,
 #sendbtn:focus-visible {
   background: rgb(255 255 255 / 0.08);
   border-color: color-mix(in srgb, var(--ac) 40%, white 10%);
-  transform: scale(1.02);
   outline: none;
-}
-
-#sendbtn.queue {
-  width: auto;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgb(99 102 241 / 14%);
-  color: var(--ac2);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  border: 1px solid rgb(99 102 241 / 28%);
-}
-
-#sendbtn.queue:hover,
-#sendbtn.queue:focus-visible {
-  opacity: 1;
-  transform: none;
-  background: rgb(99 102 241 / 19%);
 }
 
 #stopbtn {
@@ -3622,30 +3653,96 @@ pre::-webkit-scrollbar-thumb {
 }
 
 #ifooter {
+  display: block;
+  padding: 0 8px 7px;
+  font-size: 9.5px;
+  color: var(--tx3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#ifooter::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-footer-meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  padding: 2px 8px 5px;
-  gap: 8px;
-  font-size: 10px;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.composer-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.composer-hint {
+  color: var(--tx3);
+  white-space: nowrap;
+}
+
+.composer-usage-label {
   color: var(--tx3);
 }
 
-#msel {
-  background: var(--bg4);
+.composer-usage-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.composer-limit-list {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.composer-limit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 18px;
+  padding: 0 6px;
   border: 1px solid var(--bdr);
-  border-radius: 4px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.03);
   color: var(--tx2);
-  font-size: 10px;
-  padding: 2px 5px;
-  cursor: pointer;
-  outline: none;
+}
+
+.composer-limit-name,
+.composer-limit-value {
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composer-limit-name {
+  color: var(--tx3);
+}
+
+.composer-limit-value {
+  font-variant-numeric: tabular-nums;
 }
 
 #tokcount {
-  margin-left: auto;
-  font-size: 10px;
+  margin-left: 0;
+  font-size: 9.5px;
   color: var(--tx3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* QUICK PICKER */
@@ -6460,25 +6557,39 @@ pre::-webkit-scrollbar-thumb {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 20px;
+  height: 22px;
   background: var(--shell-solid-3);
   border-top: 1px solid var(--bdr);
   backdrop-filter: blur(18px) saturate(150%);
   display: flex;
   align-items: center;
   padding: 0 9px;
-  gap: 8px;
-  font-size: 10px;
+  gap: 10px;
+  font-size: 9.5px;
   color: var(--tx3);
   z-index: 200;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+#statusbar::-webkit-scrollbar {
+  display: none;
 }
 
 .sbi {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.sbi span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sbd {
@@ -6502,6 +6613,35 @@ pre::-webkit-scrollbar-thumb {
 
 #sb-st {
   margin-left: auto;
+}
+
+.sbi-branch {
+  max-width: none;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.sbi-branch::-webkit-scrollbar {
+  display: none;
+}
+
+.sb-project {
+  color: var(--tx2);
+}
+
+.sb-fulltext {
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+.sb-divider {
+  color: var(--tx3);
+}
+
+#sb-model {
+  max-width: 18ch;
 }
 
 /* TOASTS */
@@ -6718,13 +6858,34 @@ pre::-webkit-scrollbar-thumb {
   }
 
   #statusbar {
-    gap: 6px;
+    gap: 7px;
     padding: 0 7px;
     font-size: 9px;
   }
 
-  #statusbar .sbi:nth-child(2),
-  #statusbar .sbi:nth-child(3) {
+  .sbi-branch {
+    max-width: none;
+  }
+
+  .file-change-summary-path {
+    max-width: min(52vw, 180px);
+  }
+
+  .composer-meta-main {
+    flex-wrap: wrap;
+  }
+
+  .composer-shortcuts {
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .composer-limit-list {
+    justify-content: flex-end;
+  }
+
+  #sb-model,
+  .sbi-access {
     display: none;
   }
 

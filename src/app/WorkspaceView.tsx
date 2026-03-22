@@ -363,6 +363,7 @@ export const ComposerTextarea = memo(function ComposerTextarea({
     event: ReactKeyboardEvent<HTMLTextAreaElement>,
   ) => void | Promise<void>;
 }) {
+  const defaultComposerHeight = 60;
   const [draft, setDraft] = useState(value);
 
   const activeMentions = useMemo(
@@ -399,15 +400,11 @@ export const ComposerTextarea = memo(function ComposerTextarea({
       return;
     }
 
-    if (!draft) {
-      node.style.height = "24px";
-    } else {
-      node.style.height = "auto";
-      node.style.height = `${Math.min(node.scrollHeight, 140)}px`;
-    }
+    node.style.height = "auto";
+    node.style.height = `${Math.max(defaultComposerHeight, Math.min(node.scrollHeight, 140))}px`;
 
     syncMirrorScroll();
-  }, [draft, syncMirrorScroll, textareaRef]);
+  }, [defaultComposerHeight, draft, syncMirrorScroll, textareaRef]);
 
   const handleChange = useCallback(
     (event: ReactChangeEvent<HTMLTextAreaElement>) => {
@@ -441,7 +438,7 @@ export const ComposerTextarea = memo(function ComposerTextarea({
       <textarea
         id="ta"
         ref={textareaRef}
-        rows={1}
+        rows={3}
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"
