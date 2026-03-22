@@ -1218,7 +1218,49 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                     }
                   : record,
               );
-            });
+                });
+          },
+        ),
+      startProjectTerminal: async (threadId, cwd) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.startProjectTerminal(threadId, cwd);
+          },
+          async () => {
+            throw new Error("Interactive terminals require a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
+      sendTerminalInput: async (_threadId, terminalId, input) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.sendTerminalInput(terminalId, input);
+          },
+          async () => {
+            throw new Error("Interactive terminals require a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
+      terminateTerminal: async (_threadId, terminalId) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.terminateTerminal(terminalId);
+          },
+          async () => {
+            throw new Error("Interactive terminals require a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       resolveApproval: async (requestId, approved) =>
@@ -1452,6 +1494,8 @@ export function WorkspacePage() {
   const [toolbarAuto, setToolbarAuto] = useState(false);
   const [toolbarPlan, setToolbarPlan] = useState(false);
   const [toolbarShell, setToolbarShell] = useState(false);
+  const [terminalDockPrimed, setTerminalDockPrimed] = useState(false);
+  const [terminalDockReady, setTerminalDockReady] = useState(false);
   const [selectedMentions, setSelectedMentions] = useState<Array<MentionAttachment>>([]);
   const [selectedSkills, setSelectedSkills] = useState<Array<SkillCard>>([]);
   const [selectedImages, setSelectedImages] = useState<Array<ComposerImage>>([]);
@@ -1470,6 +1514,8 @@ export function WorkspacePage() {
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [visibleTurnStartByThreadId, setVisibleTurnStartByThreadId] = useState<Record<string, number>>({});
+  const terminalDockPaintFrameRef = useRef<number | null>(null);
+  const terminalDockLaunchFrameRef = useRef<number | null>(null);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [gitActivityGraph, setGitActivityGraph] = useState<GitActivityGraphModel | null>(null);
   const [gitActivityGraphLoading, setGitActivityGraphLoading] = useState(false);
@@ -2956,6 +3002,12 @@ export function WorkspacePage() {
 
   const openPanel = useCallback(
     (tab: PanelTab) => {
+      if (tab === "terminal") {
+        setTerminalDockPrimed(true);
+        setToolbarShell(true);
+        return;
+      }
+
       setMobilePanelClosing(false);
       setPanelTab(tab);
       setPanelOpen(true);
@@ -3454,7 +3506,7 @@ export function WorkspacePage() {
         items: [
           { icon: "📁", name: "Files Panel", key: "", command: { type: "openPanel", tab: "files" } },
           { icon: "⎇", name: "Branches Panel", key: "", command: { type: "openPanel", tab: "graph" } },
-          { icon: "⬛", name: "Terminal Output (/ps)", key: "", command: { type: "openPanel", tab: "terminal" } },
+          { icon: "⬛", name: "Terminal Dock (/ps)", key: "", command: { type: "openPanel", tab: "terminal" } },
           { icon: "⑂", name: "Multi-agent Panel", key: "", command: { type: "openPanel", tab: "agents" } },
           { icon: "📋", name: "Skills Library (/skills)", key: "", command: { type: "openSkills" } },
           { icon: "⚙", name: "Config & Feature Flags", key: "⌘,", command: { type: "openPanel", tab: "config" } },
@@ -3655,7 +3707,7 @@ export function WorkspacePage() {
         composerMode === "review" || route.section === "review"
           ? "review"
           : "chat";
-      const nextPrompt = toolbarShell && prompt ? `! ${prompt}` : prompt;
+      const nextPrompt = prompt;
       const canClearImmediately = selectedImages.length === 0;
 
       if (activeTurn) {
@@ -3972,6 +4024,111 @@ export function WorkspacePage() {
   const branchStatusLabel = activeThread?.thread.gitInfo?.branch ?? "workspace";
   const accessStatusLabel = APPROVAL_LABELS[activeUiApproval].toLowerCase();
   const activityStatusLabel = activeTurn ? "Streaming" : "Idle";
+  const shellTerminals = useMemo(
+    () =>
+      activeThread?.terminals.filter((terminal) => terminal.source === "shell") ?? [],
+    [activeThread?.terminals],
+  );
+  const hasStandaloneTerminal = shellTerminals.length > 0;
+  const startBottomShell = useCallback(() => {
+    if (!activeThreadId || !activeThread?.thread.cwd || hasStandaloneTerminal) {
+      return;
+    }
+
+    void actions
+      .startProjectTerminal(activeThreadId, activeThread.thread.cwd)
+      .catch((error) => {
+        pushToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to start the project shell.",
+          "err",
+        );
+      });
+  }, [
+    actions,
+    activeThread?.thread.cwd,
+    activeThreadId,
+    hasStandaloneTerminal,
+    pushToast,
+  ]);
+
+  useEffect(() => {
+    if (!toolbarShell || !terminalDockPrimed || terminalDockReady) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      setTerminalDockReady(true);
+      return;
+    }
+
+    terminalDockPaintFrameRef.current = window.requestAnimationFrame(() => {
+      terminalDockPaintFrameRef.current = null;
+      setTerminalDockReady(true);
+    });
+
+    return () => {
+      if (terminalDockPaintFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalDockPaintFrameRef.current);
+        terminalDockPaintFrameRef.current = null;
+      }
+    };
+  }, [terminalDockPrimed, terminalDockReady, toolbarShell]);
+
+  useEffect(() => {
+    if (!toolbarShell || !terminalDockReady || !activeThreadId || !activeThread?.thread.cwd || hasStandaloneTerminal) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      startBottomShell();
+      return;
+    }
+
+    terminalDockLaunchFrameRef.current = window.requestAnimationFrame(() => {
+      terminalDockLaunchFrameRef.current = null;
+      startBottomShell();
+    });
+
+    return () => {
+      if (terminalDockLaunchFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalDockLaunchFrameRef.current);
+        terminalDockLaunchFrameRef.current = null;
+      }
+    };
+  }, [
+    activeThread?.thread.cwd,
+    activeThreadId,
+    hasStandaloneTerminal,
+    startBottomShell,
+    terminalDockReady,
+    toolbarShell,
+  ]);
+
+  const openBottomTerminal = useCallback(() => {
+    if (toolbarShell) {
+      return;
+    }
+
+    setTerminalDockPrimed(true);
+    setToolbarShell(true);
+  }, [toolbarShell]);
+  const closeBottomTerminal = useCallback(() => {
+    if (typeof window !== "undefined") {
+      if (terminalDockPaintFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalDockPaintFrameRef.current);
+        terminalDockPaintFrameRef.current = null;
+      }
+
+      if (terminalDockLaunchFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalDockLaunchFrameRef.current);
+        terminalDockLaunchFrameRef.current = null;
+      }
+    }
+
+    setToolbarShell(false);
+  }, []);
   const handleCopy = useCallback(
     (value: string) => {
       void copyText(value).then(() => pushToast("Copied!", "ok"));
@@ -4280,7 +4437,7 @@ export function WorkspacePage() {
     }
 
     if (panelTab === "terminal") {
-      return <TerminalPanel onClean={() => actions.cleanTerminals(activeThread.thread.id)} terminals={activeThread.terminals} />;
+      return <div className="empty-panel">Terminal moved to the bottom dock. Use the Shell toggle above the prompt.</div>;
     }
 
     if (panelTab === "agents") {
@@ -4728,6 +4885,39 @@ export function WorkspacePage() {
                   />
                 ) : null}
 
+                {(terminalDockPrimed || toolbarShell) && activeThread ? (
+                  <div className={clsx("workspace-terminal-dock", !toolbarShell && "hidden")}>
+                    <div className="workspace-terminal-dock-bar">
+                      <button
+                        className="workspace-terminal-dock-tab active"
+                        type="button"
+                      >
+                        Terminal
+                      </button>
+                      <button
+                        className="workspace-terminal-dock-close"
+                        onClick={closeBottomTerminal}
+                        type="button"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <div className="workspace-terminal-dock-body">
+                      {terminalDockReady ? (
+                        <TerminalPanel
+                          cwd={activeThread.thread.cwd}
+                          onSendInput={(terminalId, input) => actions.sendTerminalInput(activeThread.thread.id, terminalId, input)}
+                          onStartShell={() => actions.startProjectTerminal(activeThread.thread.id, activeThread.thread.cwd)}
+                          onTerminate={(terminalId) => actions.terminateTerminal(activeThread.thread.id, terminalId)}
+                          terminals={shellTerminals}
+                        />
+                      ) : (
+                        <div className="workspace-terminal-dock-loading">Opening terminal</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div id="ib" className={clsx(activeQueuedMessages.length > 0 && "queue-open")}>
                   <div id="toolbar">
                 <button className={clsx("tbtn", toolbarAuto && "on")} type="button" onClick={() => setToolbarAuto((current) => !current)}>
@@ -4763,7 +4953,11 @@ export function WorkspacePage() {
                   <ChromeIcon name="image" />
                   <span className="tbtn-label">Image</span>
                 </button>
-                <button className={clsx("tbtn", toolbarShell && "on")} type="button" onClick={() => setToolbarShell((current) => !current)}>
+                <button
+                  className={clsx("tbtn", toolbarShell && "on")}
+                  type="button"
+                  onClick={() => void (toolbarShell ? closeBottomTerminal() : openBottomTerminal())}
+                >
                   <ChromeIcon name="terminal" />
                   <span className="tbtn-label">Shell</span>
                 </button>
@@ -4875,7 +5069,7 @@ export function WorkspacePage() {
             </button>
           </div>
           <div className="rptabs" id="rptabs">
-            {(["files", "graph", "diff", "terminal", "agents", "config"] as const).map((tab) => (
+            {(["files", "graph", "diff", "agents", "config"] as const).map((tab) => (
               <button
                 className={clsx("rptab", panelTab === tab && "active")}
                 key={tab}

@@ -76,7 +76,7 @@ export const SLASH_COMMANDS: Array<{ cmd: string; dsc: string }> = [
   { cmd: "/new", dsc: "Start a fresh conversation" },
   { cmd: "/plan", dsc: "Switch to plan-first collaboration mode" },
   { cmd: "/personality", dsc: "Choose the assistant communication style" },
-  { cmd: "/ps", dsc: "Open background terminal sessions" },
+  { cmd: "/ps", dsc: "Open the terminal dock" },
   { cmd: "/quit", dsc: "End the current session" },
   { cmd: "/resume", dsc: "Resume a saved session" },
   { cmd: "/review", dsc: "Run a review pass against the working tree" },

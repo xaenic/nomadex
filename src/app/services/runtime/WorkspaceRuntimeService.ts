@@ -389,6 +389,71 @@ const splitOutput = (value: string | null) => {
   return value.split("\n");
 };
 
+const TERMINAL_ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+
+const normalizeTerminalText = (value: string) =>
+  value
+    .replace(TERMINAL_ANSI_PATTERN, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+const appendTerminalLog = (log: Array<string>, delta: string) => {
+  const normalized = normalizeTerminalText(delta);
+  if (!normalized) {
+    return log;
+  }
+
+  const next = log.length > 0 ? [...log] : [""];
+  const parts = normalized.split("\n");
+  next[next.length - 1] = `${next[next.length - 1] ?? ""}${parts[0] ?? ""}`;
+
+  for (let index = 1; index < parts.length; index += 1) {
+    next.push(parts[index] ?? "");
+  }
+
+  return next;
+};
+
+const randomTerminalProcessId = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `terminal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const buildStandaloneTerminalSession = ({
+  processId,
+  cwd,
+  command,
+  title,
+}: {
+  processId: string;
+  cwd: string;
+  command: string;
+  title: string;
+}): TerminalSession => ({
+  id: processId,
+  title,
+  command,
+  cwd,
+  processId,
+  status: "running",
+  background: false,
+  lastEvent: relativeNow(),
+  log: [`$ ${command}`],
+  source: "shell",
+  writable: true,
+});
+
+const mergeTerminalsForThread = (thread: Thread, existing: Array<TerminalSession> = []) => {
+  const standalone = existing.filter((terminal) => terminal.source === "shell");
+  const history = buildTerminalsFromTurns(thread);
+  return [...standalone, ...history.filter((terminal) => !standalone.some((entry) => entry.processId === terminal.processId))];
+};
+
+const updateTerminalSession = (
+  terminals: Array<TerminalSession>,
+  processId: string,
+  updater: (terminal: TerminalSession) => TerminalSession,
+) => terminals.map((terminal) => (terminal.processId === processId ? updater(terminal) : terminal));
+
 const toTerminalStatus = (item: Extract<ThreadItem, { type: "commandExecution" }>): TerminalSession["status"] => {
   if (item.status === "inProgress") {
     return "running";
@@ -417,6 +482,8 @@ const buildTerminalsFromTurns = (thread: Thread): Array<TerminalSession> => {
       background: true,
       lastEvent: relativeNow(),
       log: item.aggregatedOutput ? [`$ ${item.command}`, ...splitOutput(item.aggregatedOutput)] : [`$ ${item.command}`],
+      source: "thread",
+      writable: false,
     }));
 };
 
@@ -581,7 +648,7 @@ const mergeThread = (thread: Thread, current?: ThreadRecord): ThreadRecord => {
     plan: current?.plan ?? createDefaultPlan(mergedThread),
     steerSuggestions: current?.steerSuggestions ?? DEFAULT_STEER_SUGGESTIONS,
     approvals: current?.approvals ?? [],
-    terminals: buildTerminalsFromTurns(mergedThread),
+    terminals: mergeTerminalsForThread(mergedThread, current?.terminals),
     reroutes: current?.reroutes ?? [],
     review: parseReviewFindings(mergedThread),
     tokenUsage: current?.tokenUsage ?? {
@@ -1123,6 +1190,14 @@ export class WorkspaceRuntimeService {
   private loadingThreads = new Set<string>();
   private resumedThreads = new Set<string>();
   private approvalMap = new Map<string, { requestId: string; method: string; params: Record<string, unknown> }>();
+  private standaloneTerminalMeta = new Map<
+    string,
+    { threadId: string; cwd: string; command: string; title: string }
+  >();
+  private standaloneTerminalDecoders = new Map<
+    string,
+    { stdout: TextDecoder; stderr: TextDecoder }
+  >();
   private emitQueued = false;
   private emitFrame: number | null = null;
   private emitTimer: number | null = null;
@@ -1144,6 +1219,7 @@ export class WorkspaceRuntimeService {
 
   disconnect() {
     this.clearScheduledEmit();
+    this.markStandaloneTerminalsDisconnected("Connection closed.");
     this.socket?.close();
     this.socket = null;
     this.failPending(new Error("Local agent bridge connection closed."));
@@ -1157,6 +1233,7 @@ export class WorkspaceRuntimeService {
       return;
     }
 
+    this.markStandaloneTerminalsDisconnected("Connection closed.");
     this.socket = null;
     this.connectPromise = null;
     this.failPending(new Error("Local agent bridge connection closed."));
@@ -1215,6 +1292,116 @@ export class WorkspaceRuntimeService {
       request.reject(error);
     });
     this.pending.clear();
+  }
+
+  private ensureStandaloneTerminalDecoders(processId: string) {
+    const existing = this.standaloneTerminalDecoders.get(processId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = {
+      stdout: new TextDecoder(),
+      stderr: new TextDecoder(),
+    };
+    this.standaloneTerminalDecoders.set(processId, created);
+    return created;
+  }
+
+  private decodeStandaloneTerminalChunk(processId: string, stream: "stdout" | "stderr", deltaBase64: string, flush = false) {
+    const binary = atob(deltaBase64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const decoders = this.ensureStandaloneTerminalDecoders(processId);
+    return decoders[stream].decode(bytes, { stream: !flush });
+  }
+
+  private flushStandaloneTerminalDecoders(processId: string) {
+    const decoders = this.standaloneTerminalDecoders.get(processId);
+    if (!decoders) {
+      return "";
+    }
+
+    const tail = `${decoders.stdout.decode()}${decoders.stderr.decode()}`;
+    this.standaloneTerminalDecoders.delete(processId);
+    return tail;
+  }
+
+  private updateStandaloneTerminalLog(processId: string, text: string) {
+    const meta = this.standaloneTerminalMeta.get(processId);
+    if (!meta || !text) {
+      return;
+    }
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, meta.threadId, (record) => ({
+        ...record,
+        terminals: updateTerminalSession(record.terminals, processId, (terminal) => ({
+          ...terminal,
+          log: appendTerminalLog(terminal.log, text),
+          lastEvent: relativeNow(),
+        })),
+      }));
+    });
+  }
+
+  private finalizeStandaloneTerminal(
+    processId: string,
+    result:
+      | { type: "response"; response: CommandExecResponse }
+      | { type: "error"; error: unknown }
+      | { type: "disconnected"; detail: string },
+  ) {
+    const meta = this.standaloneTerminalMeta.get(processId);
+    const decoderTail = this.flushStandaloneTerminalDecoders(processId);
+    if (!meta) {
+      return;
+    }
+
+    let status: TerminalSession["status"] = "idle";
+    let lastEvent = "Shell exited";
+    let combinedOutput = decoderTail;
+
+    if (result.type === "response") {
+      const { response } = result;
+      combinedOutput = `${combinedOutput}${response.stdout}${response.stderr}`;
+      if (response.exitCode !== 0) {
+        status = "failed";
+        lastEvent = `Exit ${response.exitCode}`;
+      }
+    } else if (result.type === "disconnected") {
+      status = "failed";
+      lastEvent = result.detail;
+      combinedOutput = `${combinedOutput}\n${result.detail}`;
+    } else {
+      status = "failed";
+      lastEvent = "Shell failed";
+      combinedOutput = `${combinedOutput}\n${getErrorMessage(result.error) || "Unable to start the project shell."}`;
+    }
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, meta.threadId, (record) => ({
+        ...record,
+        terminals: updateTerminalSession(record.terminals, processId, (terminal) => ({
+          ...terminal,
+          status,
+          writable: false,
+          lastEvent,
+          log: combinedOutput ? appendTerminalLog(terminal.log, combinedOutput) : terminal.log,
+        })),
+      }));
+    });
+
+    this.standaloneTerminalMeta.delete(processId);
+  }
+
+  private markStandaloneTerminalsDisconnected(detail: string) {
+    const processIds = [...this.standaloneTerminalMeta.keys()];
+    for (const processId of processIds) {
+      this.finalizeStandaloneTerminal(processId, {
+        type: "disconnected",
+        detail,
+      });
+    }
   }
 
   private clearScheduledEmit() {
@@ -2009,6 +2196,75 @@ export class WorkspaceRuntimeService {
     return response.stdout;
   }
 
+  async startProjectTerminal(threadId: string, cwd: string) {
+    const processId = randomTerminalProcessId();
+    const command = "/bin/bash -l";
+    const title = "Project shell";
+
+    this.standaloneTerminalMeta.set(processId, {
+      threadId,
+      cwd,
+      command,
+      title,
+    });
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, threadId, (record) => ({
+        ...record,
+        terminals: [
+          buildStandaloneTerminalSession({
+            processId,
+            cwd,
+            command,
+            title,
+          }),
+          ...record.terminals.filter((terminal) => terminal.processId !== processId),
+        ],
+      }));
+    });
+
+    void this.request<CommandExecResponse>("command/exec", {
+      command: ["/bin/bash", "-l"],
+      processId,
+      tty: true,
+      streamStdin: true,
+      streamStdoutStderr: true,
+      disableTimeout: true,
+      cwd,
+      size: {
+        cols: 120,
+        rows: 32,
+      },
+    })
+      .then((response) => {
+        this.finalizeStandaloneTerminal(processId, {
+          type: "response",
+          response,
+        });
+      })
+      .catch((error) => {
+        this.finalizeStandaloneTerminal(processId, {
+          type: "error",
+          error,
+        });
+      });
+
+    return processId;
+  }
+
+  async sendTerminalInput(processId: string, input: string) {
+    await this.request("command/exec/write", {
+      processId,
+      deltaBase64: textToBase64(input),
+    });
+  }
+
+  async terminateTerminal(processId: string) {
+    await this.request("command/exec/terminate", {
+      processId,
+    });
+  }
+
   async updateSettings(patch: Partial<SettingsState>) {
     this.mutate((snapshot) => {
       snapshot.settings = {
@@ -2695,10 +2951,13 @@ export class WorkspaceRuntimeService {
                 turns,
                 updatedAt: Math.floor(Date.now() / 1000),
               },
-              terminals: buildTerminalsFromTurns({
-                ...record.thread,
-                turns,
-              }),
+              terminals: mergeTerminalsForThread(
+                {
+                  ...record.thread,
+                  turns,
+                },
+                record.terminals,
+              ),
               review: parseReviewFindings({
                 ...record.thread,
                 turns,
@@ -2846,10 +3105,24 @@ export class WorkspaceRuntimeService {
             return {
               ...record,
               thread: nextThread,
-              terminals: buildTerminalsFromTurns(nextThread),
+              terminals: mergeTerminalsForThread(nextThread, record.terminals),
             };
           });
         });
+        return;
+      }
+
+      case "command/exec/outputDelta": {
+        const processId = safeString(params.processId);
+        const stream = params.stream === "stderr" ? "stderr" : "stdout";
+        const deltaBase64 = safeString(params.deltaBase64);
+
+        if (!processId || !deltaBase64) {
+          return;
+        }
+
+        const decoded = this.decodeStandaloneTerminalChunk(processId, stream, deltaBase64);
+        this.updateStandaloneTerminalLog(processId, decoded);
         return;
       }
 

@@ -96,6 +96,9 @@ export type WorkspaceActions = {
   logoutAccount: () => Promise<void>;
   refreshAccount: () => Promise<void>;
   cleanTerminals: (threadId: string) => Promise<void>;
+  startProjectTerminal: (threadId: string, cwd: string) => Promise<string>;
+  sendTerminalInput: (threadId: string, terminalId: string, input: string) => Promise<void>;
+  terminateTerminal: (threadId: string, terminalId: string) => Promise<void>;
   resolveApproval: (requestId: string, approved: boolean) => Promise<void>;
   submitQuestion: (requestId: string, answers: string[]) => Promise<void>;
   submitMcp: (

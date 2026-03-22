@@ -70,6 +70,8 @@ export type TerminalSession = {
   background: boolean;
   lastEvent: string;
   log: string[];
+  source?: "thread" | "shell";
+  writable?: boolean;
 };
 
 export type ModelReroute = {
