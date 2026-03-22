@@ -151,6 +151,7 @@ function extractFileAttachments(value: string): UiFileAttachment[] {
   if (markerIdx < 0) return [];
   const lines = value.split("\n").slice(markerIdx + 1);
   const attachments: UiFileAttachment[] = [];
+  const seen = new Set<string>();
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -160,11 +161,21 @@ function extractFileAttachments(value: string): UiFileAttachment[] {
     const label = match[1]?.trim();
     const path = match[2]?.trim().replace(/\s+\((?:lines?\s+\d+(?:-\d+)?)\)\s*$/, "");
     if (label && path) {
+      const key = `${label.toLowerCase()}:${path}`;
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
       attachments.push({ label, path });
     }
   }
 
   return attachments;
+}
+
+function isTransientImageReference(value: string): boolean {
+  return value.startsWith("blob:") || value.startsWith("data:");
 }
 
 function extractCodexUserRequestText(value: string): string {
@@ -185,7 +196,7 @@ function extractCodexUserRequestText(value: string): string {
 
 export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMessage" }>): UserMessageDisplay {
   const textChunks: string[] = [];
-  const images: string[] = [];
+  const imageCandidates: string[] = [];
 
   for (const block of item.content as UserInput[]) {
     if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
@@ -193,14 +204,16 @@ export function getUserMessageDisplay(item: Extract<ThreadItem, { type: "userMes
     }
 
     if (block.type === "image" && typeof block.url === "string" && block.url.trim().length > 0) {
-      images.push(block.url.trim());
+      imageCandidates.push(block.url.trim());
     }
 
     if (block.type === "localImage" && typeof block.path === "string" && block.path.trim().length > 0) {
-      images.push(block.path.trim());
+      imageCandidates.push(block.path.trim());
     }
   }
 
+  const persistedImages = imageCandidates.filter((image) => !isTransientImageReference(image));
+  const images = [...new Set(persistedImages.length > 0 ? persistedImages : imageCandidates)];
   const fullText = textChunks.join("\n");
   return {
     text: extractCodexUserRequestText(fullText),

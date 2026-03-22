@@ -709,6 +709,11 @@ code {
   border-color: rgb(255 255 255 / 10%);
 }
 
+.msg.user .attachment-chip-file {
+  background: rgb(18 19 46 / 32%);
+  border-color: rgb(255 255 255 / 12%);
+}
+
 .msg.user .attachment-chip-link,
 .msg.user .message-file-link:hover,
 .msg.user .message-file-link:focus-visible {
@@ -758,11 +763,129 @@ code {
   background: var(--bg3);
 }
 
+.attachment-chip-file {
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  max-width: min(62vw, 360px);
+  padding: 4px 10px 4px 4px;
+  border-radius: 16px;
+  text-align: left;
+  transition: border-color 0.12s ease, transform 0.12s ease, background 0.12s ease;
+}
+
+.attachment-chip-file:hover,
+.attachment-chip-file:focus-visible {
+  border-color: var(--bdr2);
+  transform: translateY(-1px);
+  outline: none;
+}
+
 .attachment-chip-link {
   max-width: min(48vw, 360px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-chip-preview {
+  position: relative;
+  display: grid;
+  place-items: end center;
+  width: 32px;
+  height: 36px;
+  border-radius: 11px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: linear-gradient(180deg, #6b7280, #374151);
+  box-shadow: 0 10px 18px rgb(6 8 18 / 22%);
+}
+
+.file-chip-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / 20%), transparent 45%);
+  pointer-events: none;
+}
+
+.file-chip-preview::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  background: rgb(255 255 255 / 24%);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+
+.file-chip-ext {
+  position: relative;
+  z-index: 1;
+  padding-bottom: 6px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: #f8fafc;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 28%);
+}
+
+.file-chip-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-chip-title {
+  display: block;
+  max-width: min(40vw, 240px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.file-chip-meta {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tx3);
+}
+
+.msg.user .file-chip-meta {
+  color: rgb(226 232 255 / 72%);
+}
+
+.file-tone-sheet .file-chip-preview {
+  background: linear-gradient(180deg, #23b07a, #116149);
+}
+
+.file-tone-document .file-chip-preview {
+  background: linear-gradient(180deg, #ff8158, #9f3c2f);
+}
+
+.file-tone-code .file-chip-preview {
+  background: linear-gradient(180deg, #55b8ff, #2352b8);
+}
+
+.file-tone-media .file-chip-preview {
+  background: linear-gradient(180deg, #ffb347, #b84e2f);
+}
+
+.file-tone-archive .file-chip-preview {
+  background: linear-gradient(180deg, #f6d365, #a86722);
+}
+
+.file-tone-generic .file-chip-preview {
+  background: linear-gradient(180deg, #8f9bb3, #4d5768);
 }
 
 .message-image-list {
@@ -2244,6 +2367,49 @@ pre::-webkit-scrollbar-thumb {
   padding: 2px 8px;
   font-size: 10px;
   color: var(--tx2);
+}
+
+.ctag-file {
+  gap: 8px;
+  padding: 3px 7px 3px 3px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgb(20 22 39 / 96%), rgb(15 16 29 / 96%));
+}
+
+.ctag-label {
+  max-width: min(22vw, 180px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctag-file .file-chip-title {
+  max-width: min(22vw, 170px);
+}
+
+.ctag-file .file-chip-meta {
+  color: var(--tx3);
+}
+
+.ctag-image {
+  gap: 6px;
+  padding: 2px 6px 2px 2px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(22 24 43 / 96%), rgb(17 18 33 / 96%));
+}
+
+.ctag-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgb(255 255 255 / 8%);
+  box-shadow: 0 8px 18px rgb(0 0 0 / 20%);
+  background: rgb(255 255 255 / 4%);
+  flex-shrink: 0;
 }
 
 .ctx-x {

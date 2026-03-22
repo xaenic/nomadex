@@ -435,6 +435,147 @@ export const buildComposerHighlightSegments = (
   return segments;
 };
 
+export type FileAttachmentPreview = {
+  badge: string;
+  kindLabel: string;
+  title: string;
+  tone: "archive" | "code" | "document" | "generic" | "media" | "sheet";
+};
+
+const basenameFromPath = (value: string) =>
+  value.replace(/\\/gu, "/").split("/").filter(Boolean).pop() ?? value;
+
+const fileTitleFromInput = (label: string, path?: string) => {
+  const trimmedLabel = label.trim();
+  if (trimmedLabel && !trimmedLabel.startsWith("/") && !trimmedLabel.includes("\\")) {
+    return trimmedLabel;
+  }
+
+  return path ? basenameFromPath(path) : basenameFromPath(trimmedLabel);
+};
+
+const extensionFromName = (value: string) => {
+  const basename = basenameFromPath(value).trim();
+  if (!basename || !basename.includes(".")) {
+    return "";
+  }
+
+  const extension = basename.split(".").pop()?.toLowerCase() ?? "";
+  if (!extension || extension === basename.toLowerCase()) {
+    return "";
+  }
+
+  return extension;
+};
+
+const SHEET_EXTENSIONS = new Set(["csv", "numbers", "ods", "tsv", "xls", "xlsx"]);
+const DOCUMENT_EXTENSIONS = new Set(["doc", "docx", "md", "mdx", "odt", "pages", "pdf", "ppt", "pptx", "rtf", "txt"]);
+const CODE_EXTENSIONS = new Set(["bash", "c", "cpp", "css", "go", "html", "java", "js", "json", "jsx", "kt", "py", "rb", "rs", "scss", "sh", "sql", "toml", "ts", "tsx", "xml", "yaml", "yml", "zsh"]);
+const MEDIA_EXTENSIONS = new Set(["ai", "avif", "gif", "heic", "jpeg", "jpg", "m4a", "mkv", "mov", "mp3", "mp4", "png", "psd", "svg", "wav", "webm", "webp"]);
+const ARCHIVE_EXTENSIONS = new Set(["7z", "bz2", "gz", "rar", "tar", "tgz", "xz", "zip"]);
+
+const fileToneFromExtension = (extension: string): FileAttachmentPreview["tone"] => {
+  if (SHEET_EXTENSIONS.has(extension)) {
+    return "sheet";
+  }
+
+  if (DOCUMENT_EXTENSIONS.has(extension)) {
+    return "document";
+  }
+
+  if (CODE_EXTENSIONS.has(extension)) {
+    return "code";
+  }
+
+  if (MEDIA_EXTENSIONS.has(extension)) {
+    return "media";
+  }
+
+  if (ARCHIVE_EXTENSIONS.has(extension)) {
+    return "archive";
+  }
+
+  return "generic";
+};
+
+const fileKindLabel = (tone: FileAttachmentPreview["tone"]) => {
+  switch (tone) {
+    case "sheet":
+      return "Spreadsheet";
+    case "document":
+      return "Document";
+    case "code":
+      return "Code file";
+    case "media":
+      return "Media file";
+    case "archive":
+      return "Archive";
+    default:
+      return "Attachment";
+  }
+};
+
+const fileBadgeFromExtension = (extension: string, tone: FileAttachmentPreview["tone"]) => {
+  if (tone === "sheet") {
+    if (extension === "csv" || extension === "tsv") {
+      return extension.toUpperCase();
+    }
+    return "XLS";
+  }
+
+  if (tone === "document") {
+    if (extension === "pdf") {
+      return "PDF";
+    }
+    if (extension === "ppt" || extension === "pptx") {
+      return "PPT";
+    }
+    return extension ? extension.slice(0, 3).toUpperCase() : "DOC";
+  }
+
+  if (tone === "code") {
+    if (extension === "json") {
+      return "JSON";
+    }
+    if (extension === "yaml" || extension === "yml") {
+      return "YAML";
+    }
+    return extension ? extension.slice(0, 4).toUpperCase() : "CODE";
+  }
+
+  if (tone === "media") {
+    if (["mp4", "mov", "webm", "mkv"].includes(extension)) {
+      return "VID";
+    }
+    if (["mp3", "wav", "m4a"].includes(extension)) {
+      return "AUD";
+    }
+    return extension ? extension.slice(0, 3).toUpperCase() : "IMG";
+  }
+
+  if (tone === "archive") {
+    return extension ? extension.slice(0, 3).toUpperCase() : "ZIP";
+  }
+
+  return extension ? extension.slice(0, 4).toUpperCase() : "FILE";
+};
+
+export const getFileAttachmentPreview = (
+  label: string,
+  path?: string,
+): FileAttachmentPreview => {
+  const title = fileTitleFromInput(label, path);
+  const extension = extensionFromName(title || path || "");
+  const tone = fileToneFromExtension(extension);
+
+  return {
+    badge: fileBadgeFromExtension(extension, tone),
+    kindLabel: fileKindLabel(tone),
+    title,
+    tone,
+  };
+};
+
 export const attachmentDisplayLabel = (label: string, path: string) => {
   const trimmedLabel = label.trim();
   if (trimmedLabel && !trimmedLabel.startsWith("/") && !trimmedLabel.includes("\\")) {

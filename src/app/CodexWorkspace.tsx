@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PropsWithChildren,
@@ -46,6 +47,7 @@ import {
   diffEntryId,
   diffKindLabel,
   formatUploadSize,
+  getFileAttachmentPreview,
   getStreamTarget,
   getUserText,
   insertInlineMentionToken,
@@ -1167,14 +1169,17 @@ export function CodexWorkspacePage() {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const uploadFileInputRef = useRef<HTMLInputElement | null>(null);
   const queueProcessingRef = useRef<Record<string, boolean>>({});
+  const queueAwaitingIdleRef = useRef<Record<string, boolean>>({});
   const toastTimersRef = useRef<Record<string, number>>({});
   const hydratedScrollKeyRef = useRef<string | null>(null);
   const chatPinnedToBottomRef = useRef(true);
+  const chatScrollStateRef = useRef<Record<string, { pinned: boolean; top: number }>>({});
   const streamVisibleRef = useRef<Record<string, number>>({});
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
   const [streamTextFx, setStreamTextFx] = useState<
     Record<string, { from: number; to: number }>
   >({});
+  const [queueWakeSignal, setQueueWakeSignal] = useState(0);
   const deferredQuickQuery = useDeferredValue(quickQuery);
 
   const updateModelPickerPosition = useCallback(() => {
@@ -1486,6 +1491,10 @@ export function CodexWorkspacePage() {
     [activeThread, activeTurns, route.threadId, snapshot.transport.mode, snapshot.transport.status],
   );
 
+  const requestQueuePump = useCallback(() => {
+    setQueueWakeSignal((current) => current + 1);
+  }, []);
+
   useEffect(() => {
     if (!route.threadId || snapshot.transport.mode !== "live" || snapshot.transport.status !== "connected") {
       return;
@@ -1553,6 +1562,10 @@ export function CodexWorkspacePage() {
   }, [diffEntries, selectedDiffEntryId]);
 
   useEffect(() => {
+    if (snapshot.transport.mode === "live" && snapshot.transport.status !== "connected") {
+      return;
+    }
+
     Object.entries(queuedByThreadId).forEach(([threadId, queue]) => {
       if (queue.length === 0 || queueProcessingRef.current[threadId]) {
         return;
@@ -1560,6 +1573,15 @@ export function CodexWorkspacePage() {
 
       const threadRecord = snapshot.threads.find((entry) => entry.thread.id === threadId);
       const hasInProgressTurn = threadRecord?.thread.turns.some((turn) => turn.status === "inProgress") ?? false;
+
+      if (queueAwaitingIdleRef.current[threadId]) {
+        if (hasInProgressTurn) {
+          return;
+        }
+
+        delete queueAwaitingIdleRef.current[threadId];
+      }
+
       if (hasInProgressTurn) {
         return;
       }
@@ -1601,17 +1623,54 @@ export function CodexWorkspacePage() {
           files: nextMessage.files,
           settings: effectiveComposerSettings,
         })
+        .then(() => {
+          queueAwaitingIdleRef.current[threadId] = true;
+        })
         .catch(() => {
           setQueuedByThreadId((current) => ({
             ...current,
             [threadId]: [nextMessage, ...(current[threadId] ?? [])],
           }));
+          requestQueuePump();
         })
         .finally(() => {
           delete queueProcessingRef.current[threadId];
         });
     });
-  }, [actions, effectiveComposerSettings, queuedByThreadId, snapshot.threads]);
+  }, [
+    actions,
+    effectiveComposerSettings,
+    queuedByThreadId,
+    queueWakeSignal,
+    requestQueuePump,
+    snapshot.threads,
+    snapshot.transport.mode,
+    snapshot.transport.status,
+  ]);
+
+  useEffect(() => {
+    const wakeIfVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+
+      requestQueuePump();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        requestQueuePump();
+      }
+    };
+
+    window.addEventListener("focus", wakeIfVisible);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", wakeIfVisible);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [requestQueuePump]);
 
   useEffect(() => {
     if (route.section === "editor" || route.section === "review") {
@@ -1860,6 +1919,20 @@ export function CodexWorkspacePage() {
     return remaining <= 72;
   }, []);
 
+  const saveChatScrollState = useCallback((threadId = activeThreadId) => {
+    const node = chatRef.current;
+    if (!node || !threadId) {
+      return;
+    }
+
+    const pinned = isChatNearBottom(node);
+    chatPinnedToBottomRef.current = pinned;
+    chatScrollStateRef.current[threadId] = {
+      pinned,
+      top: node.scrollTop,
+    };
+  }, [activeThreadId, isChatNearBottom]);
+
   const flushChatToBottom = useCallback((force = false) => {
     const node = chatRef.current;
     if (!node) {
@@ -1872,25 +1945,37 @@ export function CodexWorkspacePage() {
 
     node.scrollTop = node.scrollHeight;
     chatPinnedToBottomRef.current = true;
-  }, []);
+    if (activeThreadId) {
+      chatScrollStateRef.current[activeThreadId] = {
+        pinned: true,
+        top: node.scrollTop,
+      };
+    }
+  }, [activeThreadId]);
 
   useEffect(() => {
     const node = chatRef.current;
-    if (!node) {
+    if (!node || !activeThreadId || route.section === "editor" || route.section === "review") {
       return;
     }
 
     const syncPinnedState = () => {
-      chatPinnedToBottomRef.current = isChatNearBottom(node);
+      const pinned = isChatNearBottom(node);
+      chatPinnedToBottomRef.current = pinned;
+      chatScrollStateRef.current[activeThreadId] = {
+        pinned,
+        top: node.scrollTop,
+      };
     };
 
     syncPinnedState();
     node.addEventListener("scroll", syncPinnedState, { passive: true });
 
     return () => {
+      syncPinnedState();
       node.removeEventListener("scroll", syncPinnedState);
     };
-  }, [activeThreadId, isChatNearBottom]);
+  }, [activeThreadId, isChatNearBottom, route.section]);
 
   const scrollChatToBottom = useCallback((options?: { extraDelay?: boolean; force?: boolean }) => {
     const run = () => {
@@ -1915,6 +2000,49 @@ export function CodexWorkspacePage() {
 
     flushChatToBottom();
   }, [flushChatToBottom, streamVisible, transcriptScrollKey]);
+
+  useLayoutEffect(() => {
+    if (!activeThreadId || route.section === "editor" || route.section === "review") {
+      return;
+    }
+
+    const restore = () => {
+      const node = chatRef.current;
+      if (!node) {
+        return;
+      }
+
+      const saved = chatScrollStateRef.current[activeThreadId];
+      if (!saved) {
+        return;
+      }
+
+      if (saved.pinned) {
+        flushChatToBottom(true);
+        return;
+      }
+
+      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+      node.scrollTop = Math.min(saved.top, maxScrollTop);
+      saveChatScrollState(activeThreadId);
+    };
+
+    const frame = window.requestAnimationFrame(restore);
+    const timeout = window.setTimeout(restore, 90);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
+  }, [activeThreadId, flushChatToBottom, route.section, saveChatScrollState]);
+
+  useEffect(() => () => {
+    if (route.section === "editor" || route.section === "review") {
+      return;
+    }
+
+    saveChatScrollState(activeThreadId);
+  }, [activeThreadId, route.section, saveChatScrollState]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -2080,6 +2208,8 @@ export function CodexWorkspacePage() {
       const normalizedName =
         path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
 
+      saveChatScrollState();
+
       setFilePreview((current) =>
         current?.path === path && !current.loading
           ? {
@@ -2106,7 +2236,7 @@ export function CodexWorkspacePage() {
         } as never,
       });
     },
-    [activeThreadId, navigate],
+    [activeThreadId, navigate, saveChatScrollState],
   );
 
   const openPanel = useCallback(
@@ -2135,6 +2265,8 @@ export function CodexWorkspacePage() {
         setSelectedDiffEntryId(nextDiffId);
       }
 
+      saveChatScrollState();
+
       void navigate({
         to: "/threads/$threadId/$section",
         params: { threadId: activeThreadId, section: "review" } as never,
@@ -2144,7 +2276,7 @@ export function CodexWorkspacePage() {
         } as never,
       });
     },
-    [activeThreadId, diffEntries, navigate, selectedDiffEntry],
+    [activeThreadId, diffEntries, navigate, saveChatScrollState, selectedDiffEntry],
   );
 
   const closePanel = useCallback(() => {
@@ -2844,25 +2976,72 @@ export function CodexWorkspacePage() {
     [closeQuickPicker, filteredQuickEntries, onQuickPick, pushToast, quickIndex, quickMode, submitComposer],
   );
 
+  const attachImages = useCallback(
+    (files: Array<File>, source: "attach" | "paste") => {
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      if (imageFiles.length === 0) {
+        return 0;
+      }
+
+      const timestamp = Date.now();
+      setSelectedImages((current) => [
+        ...current,
+        ...imageFiles.map((file, index) => {
+          const mimeExtension = file.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+          return {
+            id: nextId("image"),
+            name: file.name || `pasted-image-${timestamp}-${index + 1}.${mimeExtension}`,
+            url: URL.createObjectURL(file),
+            size: formatUploadSize(file.size),
+          };
+        }),
+      ]);
+
+      pushToast(
+        imageFiles.length === 1
+          ? source === "paste"
+            ? "Image pasted"
+            : "Image attached"
+          : source === "paste"
+            ? `${imageFiles.length} images pasted`
+            : `${imageFiles.length} images attached`,
+        "ok",
+      );
+
+      return imageFiles.length;
+    },
+    [pushToast],
+  );
+
+  const onComposerPaste = useCallback(
+    (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      const clipboardFiles = Array.from(event.clipboardData.files ?? []);
+      const itemFiles =
+        clipboardFiles.length > 0
+          ? clipboardFiles
+          : Array.from(event.clipboardData.items ?? [])
+              .filter((item) => item.kind === "file")
+              .map((item) => item.getAsFile())
+              .filter((file): file is File => Boolean(file));
+
+      if (attachImages(itemFiles, "paste") === 0) {
+        return;
+      }
+
+      event.preventDefault();
+    },
+    [attachImages],
+  );
+
   const onImagesChosen = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) {
       return;
     }
 
-    setSelectedImages((current) => [
-      ...current,
-        ...files.map((file) => ({
-          id: nextId("image"),
-          name: file.name,
-          url: URL.createObjectURL(file),
-          size: formatUploadSize(file.size),
-        })),
-    ]);
-
+    attachImages(files, "attach");
     event.target.value = "";
-    pushToast("Image attached", "ok");
-  }, [pushToast]);
+  }, [attachImages]);
 
   const onUploadFilesChosen = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -3619,19 +3798,39 @@ export function CodexWorkspacePage() {
                         </button>
                       </div>
                     ))}
-                    {selectedFiles.map((file) => (
-                      <div className="ctag" key={file.id}>
-                        <span>📄</span>
-                        <span>{file.name}</span>
-                        <button className="ctx-x" type="button" onClick={() => removeUploadedFile(file.id)}>
-                          ×
-                        </button>
-                      </div>
-                    ))}
+                    {selectedFiles.map((file) => {
+                      const preview = getFileAttachmentPreview(file.name);
+
+                      return (
+                        <div
+                          className={clsx(
+                            "ctag ctag-file",
+                            `file-tone-${preview.tone}`,
+                          )}
+                          key={file.id}
+                        >
+                          <span aria-hidden="true" className="file-chip-preview">
+                            <span className="file-chip-ext">{preview.badge}</span>
+                          </span>
+                          <span className="file-chip-copy">
+                            <span className="file-chip-title">{preview.title}</span>
+                            <span className="file-chip-meta">{file.size}</span>
+                          </span>
+                          <button className="ctx-x" type="button" onClick={() => removeUploadedFile(file.id)}>
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
                     {selectedImages.map((image) => (
-                      <div className="ctag" key={image.id}>
-                        <span>🖼</span>
-                        <span>{image.name}</span>
+                      <div className="ctag ctag-image" key={image.id}>
+                        <img
+                          alt={image.name}
+                          className="ctag-thumb"
+                          loading="lazy"
+                          src={image.url}
+                        />
+                        <span className="ctag-label">{image.name}</span>
                         <button className="ctx-x" type="button" onClick={() => removeImage(image.id)}>
                           ×
                         </button>
@@ -3673,7 +3872,7 @@ export function CodexWorkspacePage() {
                   📎 /mention
                 </button>
                 <button className="tbtn" type="button" onClick={() => uploadFileInputRef.current?.click()}>
-                  📄 File
+                  📎 Attach
                 </button>
                 <button className="tbtn" type="button" onClick={() => imageInputRef.current?.click()}>
                   🖼 Image
@@ -3713,6 +3912,7 @@ export function CodexWorkspacePage() {
                     composerMirrorRef={composerMirrorRef}
                     mentions={selectedMentions}
                     onKeyDown={onComposerKeyDown}
+                    onPaste={onComposerPaste}
                     onValueChange={onComposerChange}
                     placeholder={composerPlaceholder}
                     textareaRef={textareaRef}

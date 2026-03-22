@@ -680,13 +680,48 @@ const settingEditsFromPatch = (patch: Partial<SettingsState>): Array<{ keyPath: 
   return edits;
 };
 
+const buildPromptText = (text: string, mentions: Array<MentionAttachment>) => {
+  const sections: string[] = [];
+  const normalizedText = text.trim();
+  const fileMentions = mentions.filter((mention) => mention.kind === "file");
+
+  if (fileMentions.length > 0) {
+    const seen = new Set<string>();
+    const attachmentLines = fileMentions.flatMap((mention) => {
+      const key = `${mention.name.toLowerCase()}:${mention.path}`;
+      if (seen.has(key)) {
+        return [];
+      }
+
+      seen.add(key);
+      return [`## ${mention.name}: ${mention.path}`];
+    });
+
+    if (attachmentLines.length > 0) {
+      sections.push("# Files mentioned by the user:");
+      sections.push(...attachmentLines);
+    }
+  }
+
+  if (sections.length > 0 || normalizedText) {
+    sections.push("# My request for Codex:");
+    if (normalizedText) {
+      sections.push(normalizedText);
+    }
+    return sections.join("\n");
+  }
+
+  return "";
+};
+
 const toTurnInputs = (text: string, mentions: Array<MentionAttachment>, skills: Array<SkillCard>, images: Array<string>): Array<UserInput> => {
   const inputs: Array<UserInput> = [];
+  const promptText = buildPromptText(text, mentions);
 
-  if (text.trim()) {
+  if (promptText) {
     inputs.push({
       type: "text",
-      text,
+      text: promptText,
       text_elements: [],
     });
   }
@@ -947,9 +982,85 @@ const mergeIncomingTurn = (incoming: Turn, existing?: Turn): Turn => ({
   items: incoming.items.length > 0 ? incoming.items : existing?.items ?? [],
 });
 
+const inputIdentity = (input: UserInput) => {
+  switch (input.type) {
+    case "text":
+      return `text:${input.text}`;
+    case "image":
+      return `image:${input.url}`;
+    case "localImage":
+      return `localImage:${input.path}`;
+    case "skill":
+      return `skill:${input.path}:${input.name}`;
+    case "mention":
+      return `mention:${input.path}:${input.name}`;
+    default:
+      return JSON.stringify(input);
+  }
+};
+
+const mergeUserMessageContent = (incoming: Array<UserInput>, existing: Array<UserInput>) => {
+  if (incoming.length === 0) {
+    return existing;
+  }
+
+  if (existing.length === 0) {
+    return incoming;
+  }
+
+  const merged = [...incoming];
+  const seen = new Set(incoming.map((input) => inputIdentity(input)));
+
+  for (const input of existing) {
+    const key = inputIdentity(input);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    merged.push(input);
+  }
+
+  return merged;
+};
+
+const updateTurnUserMessageContent = (
+  turns: Array<Turn>,
+  turnId: string,
+  messageId: string,
+  content: Array<UserInput>,
+) =>
+  turns.map((turn) => {
+    if (turn.id !== turnId) {
+      return turn;
+    }
+
+    return {
+      ...turn,
+      items: turn.items.map((item) =>
+        item.id === messageId && item.type === "userMessage"
+          ? {
+              ...item,
+              content,
+            }
+          : item,
+      ),
+    };
+  });
+
 const mergeIncomingItem = (incoming: ThreadItem, existing?: ThreadItem): ThreadItem => {
   if (!existing || existing.type !== incoming.type) {
     return incoming;
+  }
+
+  if (incoming.type === "userMessage") {
+    const current = existing as Extract<ThreadItem, { type: "userMessage" }>;
+
+    return {
+      ...current,
+      ...incoming,
+      content: mergeUserMessageContent(incoming.content as Array<UserInput>, current.content as Array<UserInput>),
+    };
   }
 
   if (incoming.type === "agentMessage") {
@@ -1601,6 +1712,27 @@ export class CodexLiveRuntime {
         args.skills,
         uploadedImages,
       );
+      const submittedUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
+        ...optimisticUserMessage,
+        content: inputs,
+      };
+
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, args.threadId, (record) => ({
+          ...record,
+          thread: {
+            ...record.thread,
+            turns: updateTurnUserMessageContent(
+              record.thread.turns,
+              optimisticTurnId,
+              optimisticUserMessage.id,
+              inputs,
+            ),
+            updatedAt: Math.floor(Date.now() / 1000),
+          },
+        }));
+      });
+
       const response = await this.request<TurnStartResponse>("turn/start", {
         threadId: args.threadId,
         input: inputs,
@@ -1641,9 +1773,15 @@ export class CodexLiveRuntime {
           const baseTurns = stripOptimisticTurns(record.thread.turns);
           const existingTurn = baseTurns.find((turn) => turn.id === response.turn.id);
           const mergedTurn = mergeIncomingTurn(response.turn, existingTurn);
-          const nextTurnItems = mergedTurn.items.some((item) => item.type === "userMessage")
-            ? mergedTurn.items
-            : [optimisticUserMessage, ...mergedTurn.items];
+          const userMessageIndex = mergedTurn.items.findIndex((item) => item.type === "userMessage");
+          const nextTurnItems =
+            userMessageIndex === -1
+              ? [submittedUserMessage, ...mergedTurn.items]
+              : mergedTurn.items.map((item, index) =>
+                  index === userMessageIndex
+                    ? mergeIncomingItem(item, submittedUserMessage)
+                    : item,
+                );
           const nextTurn = {
             ...mergedTurn,
             items: nextTurnItems,
@@ -2412,15 +2550,20 @@ export class CodexLiveRuntime {
               }
 
               let items = [...turn.items];
+              let optimisticUserMessage: Extract<ThreadItem, { type: "userMessage" }> | undefined;
               if (item.type === "userMessage") {
                 for (let index = items.length - 1; index >= 0; index -= 1) {
                   if (isOptimisticUserMessage(items[index])) {
+                    optimisticUserMessage = items[index] as Extract<ThreadItem, { type: "userMessage" }>;
                     items.splice(index, 1);
                   }
                 }
               }
 
               let nextItem = item;
+              if (item.type === "userMessage" && optimisticUserMessage) {
+                nextItem = mergeIncomingItem(item, optimisticUserMessage);
+              }
               if (item.type === "fileChange") {
                 const preview = items.find(
                   (entry): entry is Extract<ThreadItem, { type: "fileChange" }> => isLiveFileChangePreview(entry),

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -27,13 +28,13 @@ import type {
 } from "./mockData";
 import {
   approvalModeFromSettings,
-  attachmentDisplayLabel,
   buildComposerHighlightSegments,
   buildDiffReviewLines,
   composerHasMentionToken,
   diffEntryId,
   diffKindLabel,
   formatTurnErrorCode,
+  getFileAttachmentPreview,
   settingsPatchFromApprovalMode,
   shorten,
   turnErrorText,
@@ -340,6 +341,7 @@ export const ComposerTextarea = memo(function ComposerTextarea({
   placeholder,
   textareaRef,
   composerMirrorRef,
+  onPaste,
   onValueChange,
   onKeyDown,
 }: {
@@ -348,6 +350,7 @@ export const ComposerTextarea = memo(function ComposerTextarea({
   placeholder: string;
   textareaRef: { current: HTMLTextAreaElement | null };
   composerMirrorRef: { current: HTMLDivElement | null };
+  onPaste?: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
   onKeyDown: (
     event: ReactKeyboardEvent<HTMLTextAreaElement>,
@@ -440,6 +443,7 @@ export const ComposerTextarea = memo(function ComposerTextarea({
         value={draft}
         onChange={handleChange}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         onScroll={syncMirrorScroll}
       />
     </div>
@@ -577,6 +581,9 @@ const commandStatusTone = (
 
   return "err";
 };
+
+const messageAttachmentIdentity = (label: string, path: string) =>
+  `${label.trim().toLowerCase()}:${path.trim()}`;
 
 const TurnErrorCard = memo(function TurnErrorCard({
   status,
@@ -898,8 +905,30 @@ const ThreadItemView = memo(function ThreadItemView({
 
   if (item.type === "userMessage") {
     const display = getUserMessageDisplay(item);
+    const fileAttachmentKeys = new Set(
+      display.fileAttachments.map((attachment) =>
+        messageAttachmentIdentity(attachment.label, attachment.path),
+      ),
+    );
     const extraAttachments = item.content.filter(
-      (entry) => entry.type === "mention" || entry.type === "skill",
+      (
+        entry,
+      ): entry is Extract<ThreadItem, { type: "userMessage" }>["content"][number] & (
+        | { type: "mention"; name: string; path: string }
+        | { type: "skill"; name: string; path: string }
+      ) => {
+        if (entry.type === "skill") {
+          return true;
+        }
+
+        if (entry.type !== "mention") {
+          return false;
+        }
+
+        return !fileAttachmentKeys.has(
+          messageAttachmentIdentity(entry.name, entry.path),
+        );
+      },
     );
 
     return (
@@ -929,46 +958,68 @@ const ThreadItemView = memo(function ThreadItemView({
           {display.fileAttachments.length > 0 || extraAttachments.length > 0 ? (
             <div className="attachment-row">
               {display.fileAttachments.map((attachment) => {
-                const href = toBrowseUrl(attachment.path);
-                const attachmentLabel = attachmentDisplayLabel(
+                const preview = getFileAttachmentPreview(
                   attachment.label,
                   attachment.path,
                 );
 
                 return (
-                  <span className="attachment-chip" key={`${item.id}-file-${attachment.path}`}>
-                    <span>📄</span>
-                    {href === "#" ? (
-                      <button
-                        className="message-file-link attachment-chip-link file-link-button"
-                        onClick={() => onOpenFile(attachment.path)}
-                        title={attachment.path}
-                        type="button"
-                      >
-                        {attachmentLabel}
-                      </button>
-                    ) : (
-                      <button
-                        className="message-file-link attachment-chip-link file-link-button"
-                        onClick={() => onOpenFile(attachment.path)}
-                        title={attachment.path}
-                        type="button"
-                      >
-                        {attachmentLabel}
-                      </button>
+                  <button
+                    className={clsx(
+                      "attachment-chip attachment-chip-file file-link-button",
+                      `file-tone-${preview.tone}`,
                     )}
+                    key={`${item.id}-file-${attachment.path}`}
+                    onClick={() => onOpenFile(attachment.path)}
+                    title={attachment.path}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="file-chip-preview">
+                      <span className="file-chip-ext">{preview.badge}</span>
+                    </span>
+                    <span className="file-chip-copy">
+                      <span className="file-chip-title">{preview.title}</span>
+                      <span className="file-chip-meta">{preview.kindLabel}</span>
+                    </span>
+                  </button>
+                );
+              })}
+              {extraAttachments.map((attachment) => {
+                if (attachment.type === "mention") {
+                  const preview = getFileAttachmentPreview(attachment.name, attachment.path);
+
+                  return (
+                    <button
+                      className={clsx(
+                        "attachment-chip attachment-chip-file file-link-button",
+                        `file-tone-${preview.tone}`,
+                      )}
+                      key={`${item.id}-${attachment.type}-${attachment.name}`}
+                      onClick={() => onOpenFile(attachment.path)}
+                      title={attachment.path}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="file-chip-preview">
+                        <span className="file-chip-ext">{preview.badge}</span>
+                      </span>
+                      <span className="file-chip-copy">
+                        <span className="file-chip-title">{preview.title}</span>
+                        <span className="file-chip-meta">{preview.kindLabel}</span>
+                      </span>
+                    </button>
+                  );
+                }
+
+                return (
+                  <span
+                    className="attachment-chip"
+                    key={`${item.id}-${attachment.type}-${attachment.name}`}
+                  >
+                    <span>📋</span>
+                    <span>{attachment.name}</span>
                   </span>
                 );
               })}
-              {extraAttachments.map((attachment) => (
-                <span
-                  className="attachment-chip"
-                  key={`${item.id}-${attachment.type}-${attachment.name}`}
-                >
-                  <span>{attachment.type === "skill" ? "📋" : "📄"}</span>
-                  <span>{attachment.name}</span>
-                </span>
-              ))}
             </div>
           ) : null}
           {display.text ? <MessageTextFlow onOpenFile={onOpenFile} text={display.text} /> : null}
