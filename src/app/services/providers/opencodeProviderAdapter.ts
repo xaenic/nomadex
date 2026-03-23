@@ -10,7 +10,7 @@ export const opencodeProviderAdapter: ProviderAdapter = {
   transportLabel: "local OpenCode CLI",
   availability: "ready",
   transportKind: "cli",
-  defaultModel: "default",
+  defaultModel: "opencode/big-pickle",
   installCommand: "npm i -g opencode-ai@latest",
   wsProxyPath: "/codex-ws",
   authCompletePath: "/codex-auth/complete",

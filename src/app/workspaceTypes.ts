@@ -4,6 +4,7 @@ import type {
   ComposerImage,
   DashboardData,
   MentionAttachment,
+  ProviderAuthFlow,
   SettingsState,
   SkillCard,
   WorkspaceMode,
@@ -77,7 +78,7 @@ export type WorkspaceActions = {
       mode: WorkspaceMode;
       settings: SettingsState;
     },
-  ) => Promise<void>;
+  ) => Promise<string>;
   applySteer: (args: ComposerPayload & { threadId: string }) => Promise<boolean>;
   searchMentions: (cwd: string, query: string) => Promise<void>;
   loadDirectory: (cwd: string) => Promise<void>;
@@ -86,6 +87,19 @@ export type WorkspaceActions = {
   readGitGraph: (cwd: string, limit?: number) => Promise<string>;
   readGitStatus: (cwd: string) => Promise<string>;
   checkProviderSetup: (providerId?: SettingsState["provider"]) => Promise<void>;
+  startProviderAuth: (
+    providerId?: SettingsState["provider"],
+    flow?: ProviderAuthFlow,
+  ) => Promise<void>;
+  submitProviderAuthSecret: (
+    providerId: SettingsState["provider"] | undefined,
+    secret: string,
+  ) => Promise<void>;
+  cancelProviderAuth: (providerId?: SettingsState["provider"]) => Promise<void>;
+  switchProviderAccount: (
+    providerId?: SettingsState["provider"],
+    flow?: ProviderAuthFlow,
+  ) => Promise<void>;
   updateSettings: (patch: Partial<SettingsState>) => Promise<void>;
   toggleFeatureFlag: (name: string) => Promise<void>;
   toggleInstalledSkill: (skillId: string) => Promise<void>;

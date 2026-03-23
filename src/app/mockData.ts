@@ -4,6 +4,7 @@ import type { ReasoningEffort, Tool } from "../protocol";
 import type { InputModality } from "../protocol/InputModality";
 import type { Model, McpServerStatus, Thread, ThreadItem, Turn, UserInput } from "../protocol/v2";
 import {
+  getProviderAdapter,
   listProviderAdapters,
   readStoredProviderId,
   type ProviderAdapter,
@@ -168,6 +169,29 @@ export type ProviderSetupState = {
   checkedAt: string | null;
 };
 
+export type ProviderAuthFlow = "headless" | "browser" | "oauth" | "apiKey";
+
+export type ProviderAuthStatus =
+  | "idle"
+  | "starting"
+  | "waiting"
+  | "checking"
+  | "completed"
+  | "error";
+
+export type ProviderAuthState = {
+  providerId: ProviderId;
+  status: ProviderAuthStatus;
+  flow: ProviderAuthFlow | null;
+  summary: string;
+  detail: string | null;
+  authUrl: string | null;
+  userCode: string | null;
+  processId: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+};
+
 export type StreamSpec = {
   key: string;
   threadId: string;
@@ -205,6 +229,7 @@ export type DashboardData = {
   threads: ThreadRecord[];
   providers: ProviderAdapter[];
   providerSetup: Record<ProviderId, ProviderSetupState>;
+  providerAuth: Record<ProviderId, ProviderAuthState>;
   models: Model[];
   collaborationModes: CollaborationPreset[];
   settings: SettingsState;
@@ -535,9 +560,11 @@ const featureFlags: Array<FeatureFlag> = [
   { name: "image_generation", stage: "underDevelopment", enabled: false },
 ];
 
+const initialProvider = readStoredProviderId();
+
 const settings: SettingsState = {
-  provider: readStoredProviderId(),
-  model: "gpt-5.4",
+  provider: initialProvider,
+  model: getProviderAdapter(initialProvider).defaultModel ?? "gpt-5.4",
   reasoningEffort: "xhigh",
   approvalPolicy: "on-request",
   sandboxMode: "workspace-write",
@@ -1330,6 +1357,24 @@ const createProviderSetupState = (
   checkedAt: null,
 });
 
+const createProviderAuthState = (
+  provider: ProviderAdapter,
+): ProviderAuthState => ({
+  providerId: provider.id,
+  status: "idle",
+  flow: null,
+  summary:
+    provider.transportKind === "cli"
+      ? "No sign-in in progress."
+      : "Managed by the Nomadex bridge.",
+  detail: null,
+  authUrl: null,
+  userCode: null,
+  processId: null,
+  startedAt: null,
+  updatedAt: null,
+});
+
 export const createProviderSetupMap = (
   providers: ProviderAdapter[] = listProviderAdapters(),
 ): Record<ProviderId, ProviderSetupState> =>
@@ -1337,10 +1382,18 @@ export const createProviderSetupMap = (
     providers.map((provider) => [provider.id, createProviderSetupState(provider)]),
   ) as Record<ProviderId, ProviderSetupState>;
 
+export const createProviderAuthMap = (
+  providers: ProviderAdapter[] = listProviderAdapters(),
+): Record<ProviderId, ProviderAuthState> =>
+  Object.fromEntries(
+    providers.map((provider) => [provider.id, createProviderAuthState(provider)]),
+  ) as Record<ProviderId, ProviderAuthState>;
+
 const initialDashboardData: DashboardData = {
   threads: [],
   providers: listProviderAdapters(),
   providerSetup: createProviderSetupMap(),
+  providerAuth: createProviderAuthMap(),
   models,
   collaborationModes,
   settings,

@@ -5488,17 +5488,113 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .provider-setup-copy,
-.provider-setup-meta {
+.provider-setup-meta,
+.provider-auth-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .provider-setup-copy span,
-.provider-setup-meta span {
+.provider-setup-meta span,
+.provider-auth-copy span {
   font-size: 10px;
   line-height: 1.5;
   color: var(--tx2);
+  word-break: break-word;
+}
+
+.provider-auth-card {
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+  background: var(--panel-solid-2);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.provider-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.provider-auth-head strong {
+  font-size: 10px;
+  color: var(--tx);
+}
+
+.provider-auth-badge {
+  border: 1px solid var(--bdr);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 9px;
+  color: var(--tx2);
+  background: var(--bg4);
+}
+
+.provider-auth-badge.starting,
+.provider-auth-badge.waiting,
+.provider-auth-badge.checking {
+  border-color: rgb(96 165 250 / 35%);
+  color: rgb(147 197 253);
+}
+
+.provider-auth-badge.completed {
+  border-color: rgb(16 185 129 / 35%);
+  color: rgb(110 231 183);
+}
+
+.provider-auth-badge.error {
+  border-color: rgb(248 113 113 / 35%);
+  color: rgb(252 165 165);
+}
+
+.provider-auth-values {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-auth-value {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-auth-value span {
+  font-size: 9px;
+  color: var(--tx3);
+}
+
+.provider-auth-value code {
+  display: block;
+  padding: 8px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--bdr);
+  background: var(--bg4);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--tx);
+  word-break: break-all;
+}
+
+.provider-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.provider-detail-card {
+  gap: 4px;
+}
+
+.provider-detail-copy {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--tx);
   word-break: break-word;
 }
 

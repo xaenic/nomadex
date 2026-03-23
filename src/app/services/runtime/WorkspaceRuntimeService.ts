@@ -39,6 +39,7 @@ import type {
 import {
   createBlankThreadRecord,
   createFallbackDashboardData,
+  createProviderAuthMap,
   createProviderSetupMap,
   type ApprovalRequest,
   type CollaborationPreset,
@@ -47,6 +48,8 @@ import {
   type DashboardData,
   type FeatureFlag as UiFeatureFlag,
   type MentionAttachment,
+  type ProviderAuthFlow,
+  type ProviderAuthState,
   type ProviderSetupState,
   type RemoteSkillCard,
   type SettingsState,
@@ -68,6 +71,7 @@ import {
   type ProviderAdapter,
   type ProviderId,
 } from "../providers";
+import { getUserMessageDisplay } from "../presentation/workspacePresentationService";
 
 type EventListener = (snapshot: DashboardData) => void;
 
@@ -121,6 +125,9 @@ const providerUnavailableMessage = (adapter: ProviderAdapter) =>
   `${adapter.displayName} is scaffolded in Nomadex but its transport is not wired yet.`;
 
 const LOCAL_PROVIDER_THREAD_PREFIX = "local-provider:";
+const EXTERNAL_PROVIDER_AGENT_PREFIX = "external-agent:";
+const SHARED_THREAD_MEMORY_TURN_LIMIT = 8;
+const SHARED_THREAD_MEMORY_CHAR_LIMIT = 12_000;
 
 const isLocalProviderThreadId = (threadId: string) =>
   threadId.startsWith(LOCAL_PROVIDER_THREAD_PREFIX);
@@ -148,6 +155,12 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 
 const safeString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const stripAnsi = (value: string) => value.replace(/\x1B\[[0-9;]*m/gu, "");
+const trimAuthBuffer = (value: string, maxLength = 12000) =>
+  value.length > maxLength ? value.slice(-maxLength) : value;
+const parseAuthUrl = (value: string) => {
+  const matches = value.match(/https:\/\/[^\s"'<>`|│)]+/gu);
+  return matches?.at(-1) ?? null;
+};
 
 const cloneProviderSetupMap = (
   value: DashboardData["providerSetup"],
@@ -158,6 +171,83 @@ const cloneProviderSetupMap = (
       { ...setup },
     ]),
   ) as DashboardData["providerSetup"];
+
+const cloneProviderAuthMap = (
+  value: DashboardData["providerAuth"],
+): DashboardData["providerAuth"] =>
+  Object.fromEntries(
+    Object.entries(value).map(([providerId, authState]) => [
+      providerId,
+      { ...authState },
+    ]),
+  ) as DashboardData["providerAuth"];
+
+const parseProviderAuthProgress = (
+  providerId: ProviderId,
+  output: string,
+): Partial<ProviderAuthState> => {
+  if (providerId === "opencode") {
+    const authUrl =
+      output.match(/https:\/\/opencode\.ai\/auth[^\s"'<>`|│)]*/iu)?.[0] ??
+      parseAuthUrl(output);
+    const needsApiKey =
+      /Create an api key at/iu.test(output) ||
+      /Enter your API key/iu.test(output);
+
+    return {
+      status: authUrl || needsApiKey ? "waiting" : "starting",
+      summary:
+        authUrl || needsApiKey
+          ? "Open OpenCode Zen auth, then paste the API key below."
+          : "Preparing the OpenCode Zen sign-in…",
+      detail:
+        authUrl || needsApiKey
+          ? "Keep this panel open. Nomadex will send the API key to the local OpenCode CLI and verify the Zen session automatically."
+          : "Waiting for the local OpenCode CLI to request its Zen API key.",
+      authUrl: authUrl ?? null,
+      userCode: null,
+    };
+  }
+
+  if (providerId === "qwen-code") {
+    const authUrl =
+      output.match(/https:\/\/chat\.qwen\.ai\/authorize\?[^\s"'<>`|│)]+/iu)?.[0] ??
+      parseAuthUrl(output);
+    const userCode =
+      output.match(/[?&]user_code=([A-Z0-9-]+)/iu)?.[1] ??
+      (() => {
+        if (!authUrl) {
+          return null;
+        }
+
+        try {
+          return new URL(authUrl).searchParams.get("user_code");
+        } catch {
+          return null;
+        }
+      })();
+
+    return {
+      status: authUrl ? "waiting" : "starting",
+      summary: authUrl
+        ? "Open the Qwen authorization page to finish sign-in."
+        : "Preparing the Qwen OAuth sign-in…",
+      detail: authUrl
+        ? "Keep this panel open. Nomadex will verify the local session automatically when the CLI completes."
+        : "Waiting for the local Qwen CLI to publish its authorization URL.",
+      authUrl: authUrl ?? null,
+      userCode: userCode ?? null,
+    };
+  }
+
+  return {
+    status: "starting",
+    summary: "Preparing provider sign-in…",
+    detail: "Waiting for the local CLI sign-in flow to start.",
+    authUrl: null,
+    userCode: null,
+  };
+};
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message.trim()) {
@@ -795,10 +885,15 @@ const buildPromptText = (
   text: string,
   mentions: Array<MentionAttachment>,
   adapter: ProviderAdapter,
+  sharedThreadMemory?: string | null,
 ) => {
   const sections: string[] = [];
   const normalizedText = text.trim();
   const fileMentions = mentions.filter((mention) => mention.kind === "file");
+
+  if (sharedThreadMemory?.trim()) {
+    sections.push(sharedThreadMemory.trim());
+  }
 
   if (fileMentions.length > 0) {
     const seen = new Set<string>();
@@ -835,10 +930,11 @@ const toTurnInputs = (
   skills: Array<SkillCard>,
   images: Array<string>,
   providerId: ProviderId,
+  sharedThreadMemory?: string | null,
 ): Array<UserInput> => {
   const inputs: Array<UserInput> = [];
   const adapter = getProviderAdapter(providerId);
-  const promptText = buildPromptText(text, mentions, adapter);
+  const promptText = buildPromptText(text, mentions, adapter, sharedThreadMemory);
 
   if (promptText) {
     inputs.push({
@@ -878,15 +974,131 @@ const buildExternalCliPrompt = (
   adapter: ProviderAdapter,
   text: string,
   mentions: Array<MentionAttachment>,
-) => buildPromptText(text, mentions, adapter);
+  sharedThreadMemory?: string | null,
+) => buildPromptText(text, mentions, adapter, sharedThreadMemory);
+
+const threadHasExternalProviderTurns = (thread: Thread) =>
+  thread.turns.some((turn) =>
+    turn.items.some(
+      (item) =>
+        item.type === "agentMessage" &&
+        item.id.startsWith(EXTERNAL_PROVIDER_AGENT_PREFIX),
+    ),
+  );
+
+const shouldAttachSharedThreadMemory = (
+  thread: Thread,
+  providerId: ProviderId,
+) =>
+  isHeadlessCliProvider(providerId) ||
+  isLocalProviderThreadId(thread.id) ||
+  threadHasExternalProviderTurns(thread);
+
+const buildSharedThreadTurnContext = (
+  turn: Turn,
+  providerId: ProviderId,
+) => {
+  const lines: string[] = [];
+
+  for (const item of turn.items) {
+    if (item.type === "userMessage") {
+      const display = getUserMessageDisplay(item, providerId);
+      const text = display.text.trim();
+      const fileLabels = [...new Set(display.fileAttachments.map((file) => file.label.trim()).filter(Boolean))];
+
+      if (text) {
+        lines.push(`User: ${text}`);
+      }
+
+      if (fileLabels.length > 0) {
+        lines.push(`Files: ${fileLabels.join(", ")}`);
+      }
+
+      if (display.images.length > 0) {
+        lines.push(`Images: ${display.images.length} attached`);
+      }
+
+      continue;
+    }
+
+    if (item.type === "agentMessage") {
+      const text = item.text.trim();
+      if (!text) {
+        continue;
+      }
+
+      lines.push(
+        item.id.startsWith(EXTERNAL_PROVIDER_AGENT_PREFIX)
+          ? `Assistant (other provider): ${text}`
+          : `Assistant: ${text}`,
+      );
+    }
+  }
+
+  return lines.join("\n").trim();
+};
+
+const buildSharedThreadMemory = (
+  thread: Thread,
+  providerId: ProviderId,
+) => {
+  if (!shouldAttachSharedThreadMemory(thread, providerId)) {
+    return null;
+  }
+
+  const blocks: string[] = [];
+  let totalChars = 0;
+  const turns = sortTurnsById(thread.turns).filter(
+    (turn) =>
+      turn.status !== "inProgress" &&
+      !isTransientOptimisticTurn(turn),
+  );
+
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const block = buildSharedThreadTurnContext(turns[index], providerId);
+    if (!block) {
+      continue;
+    }
+
+    if (
+      blocks.length > 0 &&
+      totalChars + block.length > SHARED_THREAD_MEMORY_CHAR_LIMIT
+    ) {
+      break;
+    }
+
+    blocks.push(block);
+    totalChars += block.length;
+
+    if (blocks.length >= SHARED_THREAD_MEMORY_TURN_LIMIT) {
+      break;
+    }
+  }
+
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  return [
+    "# Shared thread memory:",
+    "Use this as the canonical Nomadex context for this thread. It may include turns from other providers or turns that do not exist in your native provider session history.",
+    "",
+    "## Recent thread context:",
+    ...blocks.reverse().flatMap((block, index) => [`### Memory ${index + 1}`, block, ""]),
+  ]
+    .join("\n")
+    .trim();
+};
 
 const buildExternalCliCommand = ({
+  binaryPath,
   adapter,
   prompt,
   cwd,
   model,
   filePaths,
 }: {
+  binaryPath: string;
   adapter: ProviderAdapter;
   prompt: string;
   cwd: string;
@@ -894,8 +1106,8 @@ const buildExternalCliCommand = ({
   filePaths: Array<string>;
 }) => {
   if (adapter.id === "opencode") {
-    const command = ["opencode", "run"];
-    if (model && model !== "default" && model.includes("/")) {
+    const command = [binaryPath, "run"];
+    if (model && model !== "default") {
       command.push("--model", model);
     }
     for (const filePath of filePaths) {
@@ -906,7 +1118,7 @@ const buildExternalCliCommand = ({
   }
 
   if (adapter.id === "qwen-code") {
-    return ["qwen", "-p", prompt];
+    return [binaryPath, "--auth-type=qwen-oauth", "-p", prompt];
   }
 
   return null;
@@ -933,6 +1145,7 @@ const cloneDashboardSnapshot = (snapshot: DashboardData): DashboardData => ({
   threads: [...snapshot.threads],
   providers: [...snapshot.providers],
   providerSetup: cloneProviderSetupMap(snapshot.providerSetup),
+  providerAuth: cloneProviderAuthMap(snapshot.providerAuth),
   models: [...snapshot.models],
   collaborationModes: [...snapshot.collaborationModes],
   settings: { ...snapshot.settings },
@@ -973,14 +1186,26 @@ const toRuntimeStatus = (
 
 const OPTIMISTIC_USER_MESSAGE_PREFIX = "optimistic-user:";
 const OPTIMISTIC_TURN_PREFIX = "optimistic-turn:";
+const LOCAL_PROVIDER_TURN_PREFIX = "local-provider-turn:";
 const LIVE_FILE_CHANGE_PREVIEW_PREFIX = "live-filechange-preview:";
+const MATERIALIZED_THREAD_ID_FIELD = "materializedThreadId";
 
 const isOptimisticUserMessage = (item: ThreadItem) => item.type === "userMessage" && item.id.startsWith(OPTIMISTIC_USER_MESSAGE_PREFIX);
 const isOptimisticTurn = (turn: Turn) => turn.id.startsWith(OPTIMISTIC_TURN_PREFIX);
+const isExternalProviderTurn = (turn: Turn) =>
+  turn.items.some(
+    (item) =>
+      item.type === "agentMessage" &&
+      item.id.startsWith(EXTERNAL_PROVIDER_AGENT_PREFIX),
+  );
+const isTransientOptimisticTurn = (turn: Turn) =>
+  isOptimisticTurn(turn) &&
+  !(isExternalProviderTurn(turn) && turn.status !== "inProgress");
 const isLiveFileChangePreview = (item: ThreadItem) => item.type === "fileChange" && item.id.startsWith(LIVE_FILE_CHANGE_PREVIEW_PREFIX);
 type FileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;
 
-const stripOptimisticTurns = (turns: Array<Turn>) => turns.filter((turn) => !isOptimisticTurn(turn));
+const stripOptimisticTurns = (turns: Array<Turn>) =>
+  turns.filter((turn) => !isTransientOptimisticTurn(turn));
 
 const normalizeDiffPath = (value: string) => value.replace(/^[ab]\//, "");
 const createEditingDiffChange = (diff: string): FileUpdateChange => ({
@@ -1300,6 +1525,16 @@ export class WorkspaceRuntimeService {
       stderr: string;
     }
   >();
+  private providerAuthRuns = new Map<
+    string,
+    {
+      providerId: ProviderId;
+      flow: ProviderAuthFlow;
+      output: string;
+      stderr: string;
+      cancelled: boolean;
+    }
+  >();
   private standaloneTerminalDecoders = new Map<
     string,
     { stdout: TextDecoder; stderr: TextDecoder }
@@ -1314,6 +1549,7 @@ export class WorkspaceRuntimeService {
       ...initialData,
       providers: [...initialData.providers],
       providerSetup: cloneProviderSetupMap(initialData.providerSetup),
+      providerAuth: cloneProviderAuthMap(initialData.providerAuth),
       transport: toRuntimeStatus(
         "mock",
         "connecting",
@@ -1351,6 +1587,7 @@ export class WorkspaceRuntimeService {
     this.clearScheduledEmit();
     this.markStandaloneTerminalsDisconnected("Connection closed.");
     this.markExternalProviderRunsDisconnected("Connection closed.");
+    this.markProviderAuthRunsDisconnected("Connection closed.");
     this.socket?.close();
     this.socket = null;
     this.failPending(new Error("Local agent bridge connection closed."));
@@ -1366,6 +1603,7 @@ export class WorkspaceRuntimeService {
 
     this.markStandaloneTerminalsDisconnected("Connection closed.");
     this.markExternalProviderRunsDisconnected("Connection closed.");
+    this.markProviderAuthRunsDisconnected("Connection closed.");
     this.socket = null;
     this.connectPromise = null;
     this.failPending(new Error("Local agent bridge connection closed."));
@@ -2245,11 +2483,28 @@ export class WorkspaceRuntimeService {
     thread: Thread,
   ) {
     const adapter = getProviderAdapter(args.settings.provider);
+    const binaryName = adapter.id === "opencode" ? "opencode" : "qwen";
+    const resolvedBinary = await this.resolveCliBinary(binaryName, thread.cwd);
+    if (!resolvedBinary) {
+      throw new Error(
+        `${adapter.displayName} is not installed on the host machine.`,
+      );
+    }
     const uploadedFileMentions = await this.uploadFiles(thread.cwd, args.files);
     const uploadedImages = await this.uploadImages(thread.cwd, args.images);
     const combinedMentions = [...args.mentions, ...uploadedFileMentions];
-    const prompt = buildExternalCliPrompt(adapter, args.prompt, combinedMentions);
+    const sharedThreadMemory = buildSharedThreadMemory(
+      thread,
+      args.settings.provider,
+    );
+    const prompt = buildExternalCliPrompt(
+      adapter,
+      args.prompt,
+      combinedMentions,
+      sharedThreadMemory,
+    );
     const command = buildExternalCliCommand({
+      binaryPath: resolvedBinary.path,
       adapter,
       prompt,
       cwd: thread.cwd,
@@ -2267,8 +2522,9 @@ export class WorkspaceRuntimeService {
       args.skills,
       uploadedImages,
       args.settings.provider,
+      sharedThreadMemory,
     );
-    const turnId = `${OPTIMISTIC_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
+    const turnId = `${LOCAL_PROVIDER_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
     const userItemId = `${OPTIMISTIC_USER_MESSAGE_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
     const agentItemId = `external-agent:${args.threadId}:${Date.now().toString(36)}`;
     const processId = randomTerminalProcessId();
@@ -2336,6 +2592,81 @@ export class WorkspaceRuntimeService {
       });
   }
 
+  private async materializeLocalProviderThread(
+    threadId: string,
+    settings: SettingsState,
+  ) {
+    const current = this.snapshot.threads.find((entry) => entry.thread.id === threadId);
+    if (!current || !isLocalProviderThreadId(threadId)) {
+      return current?.thread ?? null;
+    }
+
+    const response = await this.request<ThreadStartResponse>("thread/start", {
+      cwd: current.thread.cwd,
+      model: settings.model,
+      approvalPolicy: settings.approvalPolicy,
+      sandbox: settings.sandboxMode,
+      ephemeral: false,
+      experimentalRawEvents: false,
+      persistExtendedHistory: true,
+      personality: settings.personality === "none" ? null : (settings.personality satisfies Personality),
+    });
+
+    const nextThreadId = response.thread.id;
+    const mergedRecordBase = mergeThread(response.thread, {
+      ...current,
+      thread: {
+        ...current.thread,
+        id: nextThreadId,
+      },
+    });
+    const mergedRecord: ThreadRecord = {
+      ...mergedRecordBase,
+      thread: {
+        ...mergedRecordBase.thread,
+        preview: current.thread.preview || mergedRecordBase.thread.preview,
+        name: current.thread.name || mergedRecordBase.thread.name,
+        modelProvider: settings.provider,
+      },
+    };
+
+    this.loadingThreads.delete(threadId);
+    this.resumedThreads.delete(threadId);
+
+    for (const [processId, meta] of this.standaloneTerminalMeta.entries()) {
+      if (meta.threadId === threadId) {
+        this.standaloneTerminalMeta.set(processId, {
+          ...meta,
+          threadId: nextThreadId,
+        });
+      }
+    }
+
+    for (const [processId, meta] of this.externalProviderRuns.entries()) {
+      if (meta.threadId === threadId) {
+        this.externalProviderRuns.set(processId, {
+          ...meta,
+          threadId: nextThreadId,
+        });
+      }
+    }
+
+    this.mutate((snapshot) => {
+      snapshot.threads = snapshot.threads.filter((entry) => entry.thread.id !== threadId);
+      snapshot.streams = snapshot.streams.map((entry) =>
+        entry.threadId === threadId
+          ? {
+              ...entry,
+              threadId: nextThreadId,
+            }
+          : entry,
+      );
+      upsertThreadRecord(snapshot, mergedRecord);
+    });
+
+    return mergedRecord.thread;
+  }
+
   async sendComposer(args: {
     threadId: string;
     mode: WorkspaceMode;
@@ -2353,66 +2684,99 @@ export class WorkspaceRuntimeService {
     }
 
     if (!thread) {
-      return;
+      return args.threadId;
     }
 
+    let effectiveThreadId = args.threadId;
+    let effectiveThread = thread;
+
+    if (!isHeadlessCliProvider(args.settings.provider) && isLocalProviderThreadId(thread.id)) {
+      const materializedThread = await this.materializeLocalProviderThread(thread.id, args.settings);
+      if (!materializedThread) {
+        throw new Error("Unable to sync this local provider conversation to the live workspace.");
+      }
+
+      effectiveThread = materializedThread;
+      effectiveThreadId = materializedThread.id;
+    }
+    const attachMaterializedThreadId = (error: unknown) => {
+      if (effectiveThreadId === args.threadId || !error || typeof error !== "object") {
+        return error;
+      }
+
+      try {
+        return Object.assign(error, {
+          [MATERIALIZED_THREAD_ID_FIELD]: effectiveThreadId,
+        });
+      } catch {
+        return error;
+      }
+    };
+
     if (isHeadlessCliProvider(args.settings.provider)) {
-      await this.runHeadlessCliTurn(args, thread);
-      return;
+      await this.runHeadlessCliTurn(args, effectiveThread);
+      return effectiveThreadId;
     }
 
     if (args.mode === "review") {
-      const response = await this.request<ReviewStartResponse>("review/start", {
-        threadId: args.threadId,
-        delivery: "inline",
-        target: args.prompt.trim()
-          ? {
-              type: "custom",
-              instructions: args.prompt.trim(),
-            }
-          : {
-              type: "uncommittedChanges",
+      try {
+        const response = await this.request<ReviewStartResponse>("review/start", {
+          threadId: effectiveThreadId,
+          delivery: "inline",
+          target: args.prompt.trim()
+            ? {
+                type: "custom",
+                instructions: args.prompt.trim(),
+              }
+            : {
+                type: "uncommittedChanges",
+              },
+        });
+
+        this.mutate((snapshot) => {
+          updateThreadRecord(snapshot, effectiveThreadId, (record) => ({
+            ...record,
+            thread: {
+              ...record.thread,
+              modelProvider: args.settings.provider,
+              status: { type: "active", activeFlags: [] },
+              turns: sortTurnsById([...record.thread.turns, response.turn]),
+              updatedAt: Math.floor(Date.now() / 1000),
             },
-      });
+          }));
+        });
 
-      this.mutate((snapshot) => {
-        updateThreadRecord(snapshot, args.threadId, (record) => ({
-          ...record,
-          thread: {
-            ...record.thread,
-            status: { type: "active", activeFlags: [] },
-            turns: sortTurnsById([...record.thread.turns, response.turn]),
-            updatedAt: Math.floor(Date.now() / 1000),
-          },
-        }));
-      });
-
-      return;
+        return effectiveThreadId;
+      } catch (error) {
+        throw attachMaterializedThreadId(error);
+      }
     }
 
     const optimisticInputs = toTurnInputs(
       args.prompt,
       [
         ...args.mentions,
-        ...toOptimisticFileMentions(thread.cwd, args.files, args.settings.provider),
+        ...toOptimisticFileMentions(effectiveThread.cwd, args.files, args.settings.provider),
       ],
       args.skills,
       args.images.map((image) => image.url),
       args.settings.provider,
+      buildSharedThreadMemory(effectiveThread, args.settings.provider),
     );
     const optimisticUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
       type: "userMessage",
-      id: `${OPTIMISTIC_USER_MESSAGE_PREFIX}${args.threadId}:${Date.now().toString(36)}`,
+      id: `${OPTIMISTIC_USER_MESSAGE_PREFIX}${effectiveThreadId}:${Date.now().toString(36)}`,
       content: optimisticInputs,
     };
-    const optimisticTurnId = `${OPTIMISTIC_TURN_PREFIX}${args.threadId}:${Date.now().toString(36)}`;
+    const optimisticTurnId = `${OPTIMISTIC_TURN_PREFIX}${effectiveThreadId}:${Date.now().toString(36)}`;
 
     this.mutate((snapshot) => {
-      updateThreadRecord(snapshot, args.threadId, (record) => ({
+      updateThreadRecord(snapshot, effectiveThreadId, (record) => ({
         ...record,
         thread: {
           ...record.thread,
           preview: args.prompt.trim() || record.thread.preview,
+          modelProvider: args.settings.provider,
           status: { type: "active", activeFlags: [] },
           turns: sortTurnsById([
             ...stripOptimisticTurns(record.thread.turns),
@@ -2429,8 +2793,8 @@ export class WorkspaceRuntimeService {
     });
 
     try {
-      const uploadedFileMentions = await this.uploadFiles(thread.cwd, args.files);
-      const uploadedImages = await this.uploadImages(thread.cwd, args.images);
+      const uploadedFileMentions = await this.uploadFiles(effectiveThread.cwd, args.files);
+      const uploadedImages = await this.uploadImages(effectiveThread.cwd, args.images);
       const combinedMentions = [...args.mentions, ...uploadedFileMentions];
       const inputs = toTurnInputs(
         args.prompt,
@@ -2438,6 +2802,7 @@ export class WorkspaceRuntimeService {
         args.skills,
         uploadedImages,
         args.settings.provider,
+        buildSharedThreadMemory(effectiveThread, args.settings.provider),
       );
       const submittedUserMessage: Extract<ThreadItem, { type: "userMessage" }> = {
         ...optimisticUserMessage,
@@ -2445,7 +2810,7 @@ export class WorkspaceRuntimeService {
       };
 
       this.mutate((snapshot) => {
-        updateThreadRecord(snapshot, args.threadId, (record) => ({
+        updateThreadRecord(snapshot, effectiveThreadId, (record) => ({
           ...record,
           thread: {
             ...record.thread,
@@ -2461,7 +2826,7 @@ export class WorkspaceRuntimeService {
       });
 
       const response = await this.request<TurnStartResponse>("turn/start", {
-        threadId: args.threadId,
+        threadId: effectiveThreadId,
         input: inputs,
         model: args.settings.model,
         approvalPolicy: args.settings.approvalPolicy,
@@ -2470,22 +2835,22 @@ export class WorkspaceRuntimeService {
           args.settings.sandboxMode === "danger-full-access"
             ? { type: "dangerFullAccess" }
             : args.settings.sandboxMode === "read-only"
-              ? {
+                ? {
                   type: "readOnly",
                   access: {
                     type: "restricted",
                     includePlatformDefaults: true,
-                    readableRoots: [thread.cwd],
+                    readableRoots: [effectiveThread.cwd],
                   },
                   networkAccess: false,
                 }
               : {
                   type: "workspaceWrite",
-                  writableRoots: [thread.cwd],
+                  writableRoots: [effectiveThread.cwd],
                   readOnlyAccess: {
                     type: "restricted",
                     includePlatformDefaults: true,
-                    readableRoots: [thread.cwd],
+                    readableRoots: [effectiveThread.cwd],
                   },
                   networkAccess: false,
                   excludeTmpdirEnvVar: false,
@@ -2496,7 +2861,7 @@ export class WorkspaceRuntimeService {
       });
 
       this.mutate((snapshot) => {
-        updateThreadRecord(snapshot, args.threadId, (record) => {
+        updateThreadRecord(snapshot, effectiveThreadId, (record) => {
           const baseTurns = stripOptimisticTurns(record.thread.turns);
           const existingTurn = baseTurns.find((turn) => turn.id === response.turn.id);
           const mergedTurn = mergeIncomingTurn(response.turn, existingTurn);
@@ -2519,6 +2884,7 @@ export class WorkspaceRuntimeService {
             thread: {
               ...record.thread,
               preview: args.prompt.trim() || record.thread.preview,
+              modelProvider: args.settings.provider,
               status: { type: "active", activeFlags: [] },
               turns: sortTurnsById([
                 ...baseTurns.filter((turn) => turn.id !== response.turn.id),
@@ -2529,9 +2895,10 @@ export class WorkspaceRuntimeService {
           };
         });
       });
+      return effectiveThreadId;
     } catch (error) {
       this.mutate((snapshot) => {
-        updateThreadRecord(snapshot, args.threadId, (record) => ({
+        updateThreadRecord(snapshot, effectiveThreadId, (record) => ({
           ...record,
           thread: {
             ...record.thread,
@@ -2541,7 +2908,7 @@ export class WorkspaceRuntimeService {
           },
         }));
       });
-      throw error;
+      throw attachMaterializedThreadId(error);
     }
   }
 
@@ -2760,18 +3127,264 @@ export class WorkspaceRuntimeService {
     return createProviderSetupMap([getProviderAdapter(providerId)])[providerId];
   }
 
-  private async inspectOpenCodeSetup(cwd: string): Promise<ProviderSetupState> {
-    const adapter = getProviderAdapter("opencode");
-    const installResponse = await this.request<CommandExecResponse>("command/exec", {
-      command: ["bash", "-lc", "command -v opencode >/dev/null 2>&1 && opencode --version"],
+  private defaultProviderAuthState(providerId: ProviderId) {
+    return createProviderAuthMap([getProviderAdapter(providerId)])[providerId];
+  }
+
+  private upsertProviderAuthState(
+    providerId: ProviderId,
+    patch: Partial<ProviderAuthState>,
+  ) {
+    this.mutate((snapshot) => {
+      snapshot.providerAuth[providerId] = {
+        ...snapshot.providerAuth[providerId],
+        ...patch,
+      };
+    });
+  }
+
+  private appendProviderAuthOutput(
+    processId: string,
+    stream: "stdout" | "stderr",
+    deltaBase64: string,
+  ) {
+    const meta = this.providerAuthRuns.get(processId);
+    if (!meta) {
+      return;
+    }
+
+    if (this.snapshot.providerAuth[meta.providerId]?.processId !== processId) {
+      return;
+    }
+
+    const decoded = this.decodeStandaloneTerminalChunk(processId, stream, deltaBase64);
+    const normalized = normalizeTerminalText(decoded);
+    if (!normalized) {
+      return;
+    }
+
+    meta.output = trimAuthBuffer(`${meta.output}${normalized}`);
+    if (stream === "stderr") {
+      meta.stderr = trimAuthBuffer(`${meta.stderr}${normalized}`);
+    }
+
+    const progress = parseProviderAuthProgress(
+      meta.providerId,
+      meta.output,
+    );
+
+    this.upsertProviderAuthState(meta.providerId, {
+      status: progress.status ?? "starting",
+      flow: meta.flow,
+      summary: progress.summary ?? "Preparing provider sign-in…",
+      detail: progress.detail ?? null,
+      authUrl: progress.authUrl ?? null,
+      userCode: progress.userCode ?? null,
+      processId,
+      updatedAt: relativeNow(),
+    });
+  }
+
+  private async finalizeProviderAuthRun(
+    processId: string,
+    result:
+      | { type: "response"; response: CommandExecResponse }
+      | { type: "error"; error: unknown }
+      | { type: "disconnected"; detail: string },
+  ) {
+    const meta = this.providerAuthRuns.get(processId);
+    if (!meta) {
+      return;
+    }
+
+    if (
+      this.snapshot.providerAuth[meta.providerId]?.processId &&
+      this.snapshot.providerAuth[meta.providerId]?.processId !== processId
+    ) {
+      this.providerAuthRuns.delete(processId);
+      this.flushStandaloneTerminalDecoders(processId);
+      return;
+    }
+
+    const adapter = getProviderAdapter(meta.providerId);
+    const decoderTail = normalizeTerminalText(
+      this.flushStandaloneTerminalDecoders(processId),
+    );
+    const trailingText =
+      result.type === "response"
+        ? normalizeTerminalText(`${result.response.stdout}${result.response.stderr}`)
+        : result.type === "disconnected"
+          ? result.detail
+          : getErrorMessage(result.error) || "Unable to start provider sign-in.";
+    const combinedOutput = trimAuthBuffer(
+      `${meta.output}${decoderTail}${normalizeTerminalText(trailingText)}`,
+    );
+    const progress = parseProviderAuthProgress(
+      meta.providerId,
+      combinedOutput,
+    );
+
+    this.providerAuthRuns.delete(processId);
+
+    if (meta.cancelled) {
+      this.upsertProviderAuthState(meta.providerId, {
+        ...this.defaultProviderAuthState(meta.providerId),
+        summary: `${adapter.displayName} sign-in cancelled.`,
+        updatedAt: relativeNow(),
+      });
+      return;
+    }
+
+    if (result.type !== "response" || result.response.exitCode !== 0) {
+      const errorMessage =
+        result.type === "response"
+          ? [result.response.stderr, meta.stderr]
+              .filter((value) => value.trim().length > 0)
+              .join("\n")
+              .trim()
+          : result.type === "disconnected"
+            ? result.detail
+            : getErrorMessage(result.error);
+
+      this.upsertProviderAuthState(meta.providerId, {
+        status: "error",
+        flow: meta.flow,
+        summary: `${adapter.displayName} sign-in failed.`,
+        detail:
+          errorMessage ||
+          progress.detail ||
+          "The provider CLI ended before Nomadex could verify the account.",
+        authUrl: progress.authUrl ?? null,
+        userCode: progress.userCode ?? null,
+        processId: null,
+        updatedAt: relativeNow(),
+      });
+      return;
+    }
+
+    this.upsertProviderAuthState(meta.providerId, {
+      status: "checking",
+      flow: meta.flow,
+      summary: `Verifying ${adapter.displayName} session…`,
+      detail: "Nomadex is checking the local CLI session now.",
+      authUrl: progress.authUrl ?? null,
+      userCode: progress.userCode ?? null,
+      processId: null,
+      updatedAt: relativeNow(),
+    });
+
+    try {
+      await this.checkProviderSetup(meta.providerId);
+      const setup = this.snapshot.providerSetup[meta.providerId];
+      this.upsertProviderAuthState(meta.providerId, {
+        status: setup.status === "ready" ? "completed" : "error",
+        flow: meta.flow,
+        summary:
+          setup.status === "ready"
+            ? `${adapter.displayName} is ready.`
+            : `${adapter.displayName} sign-in finished, but setup is still not ready.`,
+        detail: setup.detail ?? setup.summary,
+        authUrl: setup.status === "ready" ? null : (progress.authUrl ?? null),
+        userCode: setup.status === "ready" ? null : (progress.userCode ?? null),
+        processId: null,
+        updatedAt: relativeNow(),
+      });
+    } catch (error) {
+      this.upsertProviderAuthState(meta.providerId, {
+        status: "error",
+        flow: meta.flow,
+        summary: `${adapter.displayName} sign-in completed, but verification failed.`,
+        detail:
+          error instanceof Error
+            ? error.message
+            : "Nomadex could not verify the new provider session.",
+        authUrl: progress.authUrl ?? null,
+        userCode: progress.userCode ?? null,
+        processId: null,
+        updatedAt: relativeNow(),
+      });
+    }
+  }
+
+  private markProviderAuthRunsDisconnected(detail: string) {
+    const processIds = [...this.providerAuthRuns.keys()];
+    for (const processId of processIds) {
+      void this.finalizeProviderAuthRun(processId, {
+        type: "disconnected",
+        detail,
+      });
+    }
+  }
+
+  private async resolveCliBinary(
+    binaryName: "opencode" | "qwen",
+    cwd: string,
+  ) {
+    const script = `
+binary="${binaryName}"
+resolved=""
+
+if command -v "$binary" >/dev/null 2>&1; then
+  resolved="$(command -v "$binary")"
+fi
+
+if [ -z "$resolved" ] && command -v npm >/dev/null 2>&1; then
+  prefix="$(npm config get prefix 2>/dev/null || true)"
+  if [ -n "$prefix" ] && [ -x "$prefix/bin/$binary" ]; then
+    resolved="$prefix/bin/$binary"
+  fi
+fi
+
+if [ -z "$resolved" ]; then
+  shopt -s nullglob
+  for candidate in "$HOME"/.nvm/versions/node/*/bin/"$binary" "$HOME"/.local/bin/"$binary"; do
+    if [ -x "$candidate" ]; then
+      resolved="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$resolved" ]; then
+  exit 1
+fi
+
+version="$("$resolved" --version 2>/dev/null | head -n 1 || true)"
+printf '%s\\n%s\\n' "$resolved" "$version"
+`.trim();
+
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: ["/bin/bash", "-lc", script],
       cwd,
       timeoutMs: 5000,
     });
 
-    const versionOutput = stripAnsi(
-      [installResponse.stdout, installResponse.stderr].join("\n"),
-    ).trim();
-    if (installResponse.exitCode !== 0) {
+    if (response.exitCode !== 0) {
+      return null;
+    }
+
+    const output = stripAnsi(
+      [response.stdout, response.stderr].join("\n"),
+    )
+      .trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (output.length === 0) {
+      return null;
+    }
+
+    return {
+      path: output[0],
+      version: output[1] ?? null,
+    };
+  }
+
+  private async inspectOpenCodeSetup(cwd: string): Promise<ProviderSetupState> {
+    const adapter = getProviderAdapter("opencode");
+    const resolvedBinary = await this.resolveCliBinary("opencode", cwd);
+    if (!resolvedBinary) {
       return {
         ...this.defaultProviderSetupState("opencode"),
         status: "needsInstall",
@@ -2785,7 +3398,7 @@ export class WorkspaceRuntimeService {
     }
 
     const authResponse = await this.request<CommandExecResponse>("command/exec", {
-      command: ["opencode", "auth", "list"],
+      command: [resolvedBinary.path, "auth", "list"],
       cwd,
       timeoutMs: 8000,
     });
@@ -2799,7 +3412,7 @@ export class WorkspaceRuntimeService {
         summary: "OpenCode is installed, but its auth status could not be read.",
         detail: authOutput || "OpenCode auth check failed.",
         installed: true,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
         checkedAt: relativeNow(),
       };
     }
@@ -2819,11 +3432,11 @@ export class WorkspaceRuntimeService {
       detail:
         credentialsCount > 0
           ? `${credentialsCount} credential${credentialsCount === 1 ? "" : "s"} available for OpenCode.`
-          : "Run `opencode auth login` on the host machine, then check again.",
+          : "Use the sign-in action below, or run `opencode auth login` on the host machine, then check again.",
       installed: true,
       configured: credentialsCount > 0,
       authenticated: credentialsCount > 0,
-      version: versionOutput.split(/\s+/u)[0] ?? null,
+      version: resolvedBinary.version,
       sourcePath,
       checkedAt: relativeNow(),
     };
@@ -2831,16 +3444,8 @@ export class WorkspaceRuntimeService {
 
   private async inspectQwenCodeSetup(cwd: string): Promise<ProviderSetupState> {
     const adapter = getProviderAdapter("qwen-code");
-    const installResponse = await this.request<CommandExecResponse>("command/exec", {
-      command: ["bash", "-lc", "command -v qwen >/dev/null 2>&1 && qwen --version"],
-      cwd,
-      timeoutMs: 5000,
-    });
-
-    const versionOutput = stripAnsi(
-      [installResponse.stdout, installResponse.stderr].join("\n"),
-    ).trim();
-    if (installResponse.exitCode !== 0) {
+    const resolvedBinary = await this.resolveCliBinary("qwen", cwd);
+    if (!resolvedBinary) {
       return {
         ...this.defaultProviderSetupState("qwen-code"),
         status: "needsInstall",
@@ -2921,7 +3526,7 @@ console.log(JSON.stringify({
         summary: "Qwen Code is installed, but its setup could not be inspected.",
         detail: configOutput || "Qwen Code setup check failed.",
         installed: true,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
         checkedAt: relativeNow(),
       };
     }
@@ -2951,7 +3556,7 @@ console.log(JSON.stringify({
         summary: "Qwen Code setup output could not be parsed.",
         detail: configOutput || "Unexpected Qwen Code setup output.",
         installed: true,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
         checkedAt: relativeNow(),
       };
     }
@@ -2961,6 +3566,7 @@ console.log(JSON.stringify({
       parsed.modelProviderCount > 0 ||
       parsed.inlineEnvCount > 0 ||
       parsed.envBackedProviderCount > 0;
+    const hasOauthSession = parsed.hasOauthCreds;
     const sourcePath =
       parsed.settingsPath ?? (parsed.hasOauthCreds ? parsed.oauthPath : null);
 
@@ -2973,7 +3579,23 @@ console.log(JSON.stringify({
         installed: true,
         configured: false,
         authenticated: false,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
+        sourcePath,
+        checkedAt: relativeNow(),
+      };
+    }
+
+    if (!selectedType && hasOauthSession) {
+      return {
+        ...this.defaultProviderSetupState("qwen-code"),
+        status: "ready",
+        summary: "Qwen OAuth credentials detected.",
+        detail:
+          "Nomadex will launch Qwen Code with `--auth-type=qwen-oauth`, so a missing selected auth type in settings will not block runs.",
+        installed: true,
+        configured: true,
+        authenticated: true,
+        version: resolvedBinary.version,
         sourcePath,
         checkedAt: relativeNow(),
       };
@@ -2985,11 +3607,11 @@ console.log(JSON.stringify({
         status: "needsConfig",
         summary: "Qwen Code is installed, but no auth type is selected.",
         detail:
-          "Set `security.auth.selectedType` in `~/.qwen/settings.json`, or open `qwen` and use `/auth` first.",
+          "Use the sign-in action below, or set `security.auth.selectedType` in `~/.qwen/settings.json` manually.",
         installed: true,
         configured: false,
         authenticated: false,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
         sourcePath,
         checkedAt: relativeNow(),
       };
@@ -3004,11 +3626,11 @@ console.log(JSON.stringify({
           : "Qwen OAuth is selected, but cached credentials are missing or expired.",
         detail: parsed.hasOauthCreds
           ? "Qwen Code can use the cached OAuth session on this host."
-          : "Open `qwen` on the host machine and run `/auth`, then check again.",
+          : "Use the sign-in action below, then check again.",
         installed: true,
         configured: true,
         authenticated: parsed.hasOauthCreds,
-        version: versionOutput.split(/\s+/u)[0] ?? null,
+        version: resolvedBinary.version,
         sourcePath,
         checkedAt: relativeNow(),
       };
@@ -3028,7 +3650,7 @@ console.log(JSON.stringify({
       installed: true,
       configured: hasApiConfig,
       authenticated: hasApiConfig,
-      version: versionOutput.split(/\s+/u)[0] ?? null,
+      version: resolvedBinary.version,
       sourcePath,
       checkedAt: relativeNow(),
     };
@@ -3077,6 +3699,289 @@ console.log(JSON.stringify({
     this.mutate((snapshot) => {
       snapshot.providerSetup[providerId] = nextState;
     });
+  }
+
+  private async ensureQwenOAuthSelection(cwd: string) {
+    const script = `
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const settingsPath = path.join(os.homedir(), ".qwen", "settings.json");
+let settings = {};
+
+if (fs.existsSync(settingsPath)) {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+}
+
+if (!settings.security || typeof settings.security !== "object") {
+  settings.security = {};
+}
+
+if (!settings.security.auth || typeof settings.security.auth !== "object") {
+  settings.security.auth = {};
+}
+
+settings.security.auth.selectedType = "qwen-oauth";
+fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\\n");
+console.log(settingsPath);
+`.trim();
+
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: ["node", "-e", script],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    if (response.exitCode !== 0) {
+      const details = normalizeTerminalText(
+        [response.stderr, response.stdout].join("\n"),
+      ).trim();
+      throw new Error(
+        details || "Unable to prepare Qwen Code for OAuth sign-in.",
+      );
+    }
+  }
+
+  async startProviderAuth(
+    providerId: ProviderId = this.snapshot.settings.provider,
+    flow?: ProviderAuthFlow,
+  ) {
+    const adapter = getProviderAdapter(providerId);
+    if (adapter.transportKind !== "cli") {
+      throw new Error(`${adapter.displayName} does not use local CLI sign-in.`);
+    }
+
+    if (providerId !== "opencode" && providerId !== "qwen-code") {
+      throw new Error(`${adapter.displayName} sign-in is not wired yet.`);
+    }
+
+    const existingRun = [...this.providerAuthRuns.entries()].find(
+      ([, meta]) => meta.providerId === providerId,
+    );
+    if (existingRun) {
+      const [existingProcessId, existingMeta] = existingRun;
+      existingMeta.cancelled = true;
+      try {
+        await this.request("command/exec/terminate", { processId: existingProcessId });
+      } catch {
+        // Ignore restart cleanup failures.
+      }
+    }
+
+    const cwd = this.providerCheckCwd();
+    const binaryName = providerId === "opencode" ? "opencode" : "qwen";
+    const resolvedBinary = await this.resolveCliBinary(binaryName, cwd);
+    if (!resolvedBinary) {
+      throw new Error(`${adapter.displayName} is not installed on the host machine.`);
+    }
+
+    const selectedFlow: ProviderAuthFlow =
+      flow ?? (providerId === "opencode" ? "apiKey" : "oauth");
+
+    if (providerId === "qwen-code") {
+      await this.ensureQwenOAuthSelection(cwd);
+    }
+
+    const command =
+      providerId === "opencode"
+        ? [resolvedBinary.path, "auth", "login", "-p", "opencode"]
+        : [resolvedBinary.path, "--auth-type=qwen-oauth", "-p", "ping"];
+    const processId = randomTerminalProcessId();
+
+    this.providerAuthRuns.set(processId, {
+      providerId,
+      flow: selectedFlow,
+      output: "",
+      stderr: "",
+      cancelled: false,
+    });
+
+    this.upsertProviderAuthState(providerId, {
+      ...this.defaultProviderAuthState(providerId),
+      status: "starting",
+      flow: selectedFlow,
+      summary: `Starting ${adapter.displayName} sign-in…`,
+      detail:
+        providerId === "opencode"
+          ? "Preparing the OpenCode Zen API key flow."
+          : "Preparing the local Qwen OAuth sign-in.",
+      processId,
+      startedAt: relativeNow(),
+      updatedAt: relativeNow(),
+    });
+
+    void this.request<CommandExecResponse>("command/exec", {
+      command,
+      cwd,
+      processId,
+      tty: true,
+      streamStdin: true,
+      streamStdoutStderr: true,
+      disableTimeout: true,
+      size: {
+        cols: 120,
+        rows: 24,
+      },
+    })
+      .then((response) => {
+        void this.finalizeProviderAuthRun(processId, {
+          type: "response",
+          response,
+        });
+      })
+      .catch((error) => {
+        void this.finalizeProviderAuthRun(processId, {
+          type: "error",
+          error,
+        });
+      });
+  }
+
+  async submitProviderAuthSecret(
+    providerId: ProviderId = this.snapshot.settings.provider,
+    secret: string,
+  ) {
+    const trimmedSecret = secret.trim();
+    if (!trimmedSecret) {
+      throw new Error("Enter the provider secret first.");
+    }
+
+    const entry = [...this.providerAuthRuns.entries()].find(
+      ([, meta]) => meta.providerId === providerId,
+    );
+    if (!entry) {
+      throw new Error("No provider sign-in is currently waiting for input.");
+    }
+
+    const [processId] = entry;
+    await this.request("command/exec/write", {
+      processId,
+      deltaBase64: textToBase64(`${trimmedSecret}\n`),
+    });
+
+    this.upsertProviderAuthState(providerId, {
+      status: "checking",
+      summary:
+        providerId === "opencode"
+          ? "Submitting OpenCode Zen API key…"
+          : "Submitting provider sign-in input…",
+      detail:
+        providerId === "opencode"
+          ? "Nomadex sent the API key to the local OpenCode CLI. Waiting for verification."
+          : "Waiting for the local provider CLI to verify the submitted input.",
+      updatedAt: relativeNow(),
+    });
+  }
+
+  async cancelProviderAuth(providerId: ProviderId = this.snapshot.settings.provider) {
+    const entry = [...this.providerAuthRuns.entries()].find(
+      ([, meta]) => meta.providerId === providerId,
+    );
+    if (!entry) {
+      this.upsertProviderAuthState(providerId, {
+        ...this.defaultProviderAuthState(providerId),
+        updatedAt: relativeNow(),
+      });
+      return;
+    }
+
+    const [processId, meta] = entry;
+    meta.cancelled = true;
+
+    try {
+      await this.request("command/exec/terminate", { processId });
+    } catch {
+      // Ignore termination races. The finalize handler will settle the state.
+    }
+  }
+
+  private async clearOpenCodeAuth(cwd: string) {
+    const resolvedBinary = await this.resolveCliBinary("opencode", cwd);
+    if (!resolvedBinary) {
+      throw new Error("OpenCode is not installed on the host machine.");
+    }
+
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: [resolvedBinary.path, "auth", "logout"],
+      cwd,
+      timeoutMs: 10000,
+    });
+
+    if (response.exitCode !== 0) {
+      const details = normalizeTerminalText(
+        [response.stderr, response.stdout].join("\n"),
+      ).trim();
+      throw new Error(details || "Unable to clear the current OpenCode account.");
+    }
+  }
+
+  private async clearQwenOAuthSession(cwd: string) {
+    const script = `
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const qwenRoot = path.join(os.homedir(), ".qwen");
+for (const fileName of ["oauth_creds.json", "oauth_creds.lock"]) {
+  const target = path.join(qwenRoot, fileName);
+  try {
+    fs.rmSync(target, { force: true });
+  } catch {}
+}
+console.log(qwenRoot);
+`.trim();
+
+    const response = await this.request<CommandExecResponse>("command/exec", {
+      command: ["node", "-e", script],
+      cwd,
+      timeoutMs: 5000,
+    });
+
+    if (response.exitCode !== 0) {
+      const details = normalizeTerminalText(
+        [response.stderr, response.stdout].join("\n"),
+      ).trim();
+      throw new Error(details || "Unable to clear the current Qwen Code account.");
+    }
+  }
+
+  async switchProviderAccount(
+    providerId: ProviderId = this.snapshot.settings.provider,
+    flow?: ProviderAuthFlow,
+  ) {
+    const adapter = getProviderAdapter(providerId);
+    if (adapter.transportKind !== "cli") {
+      throw new Error(`${adapter.displayName} does not use local CLI sign-in.`);
+    }
+
+    const cwd = this.providerCheckCwd();
+    await this.cancelProviderAuth(providerId);
+
+    if (providerId === "opencode") {
+      await this.clearOpenCodeAuth(cwd);
+    } else if (providerId === "qwen-code") {
+      await this.clearQwenOAuthSession(cwd);
+    } else {
+      throw new Error(`${adapter.displayName} account switching is not wired yet.`);
+    }
+
+    this.mutate((snapshot) => {
+      snapshot.providerSetup[providerId] = {
+        ...snapshot.providerSetup[providerId],
+        status: "needsAuth",
+        summary: `${adapter.displayName} session cleared.`,
+        detail: "Start a new sign-in to attach a different account.",
+        authenticated: false,
+        checkedAt: relativeNow(),
+      };
+      snapshot.providerAuth[providerId] = {
+        ...this.defaultProviderAuthState(providerId),
+        summary: `${adapter.displayName} session cleared.`,
+        updatedAt: relativeNow(),
+      };
+    });
+
+    await this.startProviderAuth(providerId, flow);
   }
 
   async startProjectTerminal(threadId: string, cwd: string) {
@@ -4012,6 +4917,11 @@ console.log(JSON.stringify({
         const deltaBase64 = safeString(params.deltaBase64);
 
         if (!processId || !deltaBase64) {
+          return;
+        }
+
+        if (this.providerAuthRuns.has(processId)) {
+          this.appendProviderAuthOutput(processId, stream, deltaBase64);
           return;
         }
 

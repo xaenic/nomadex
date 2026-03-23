@@ -16,6 +16,10 @@ export {
   readStoredProviderId,
   WORKSPACE_PROVIDER_STORAGE_KEY,
 } from "./providerRegistry";
+export {
+  findProviderModel,
+  listProviderModels,
+} from "./providerModels";
 export type {
   ProviderAdapter,
   ProviderAvailability,

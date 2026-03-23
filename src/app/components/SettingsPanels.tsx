@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 
 import type { DashboardData, SettingsState } from "../mockData";
+import { listProviderModels } from "../services/providers";
 import {
   approvalModeFromSettings,
   settingsPatchFromApprovalMode,
@@ -406,15 +407,82 @@ export const ConfigPanel = memo(function ConfigPanel({
   onOpenTheme: () => void;
 }) {
   const [mobileCallbackUrl, setMobileCallbackUrl] = useState("");
+  const [providerSecretInput, setProviderSecretInput] = useState("");
   const activeThemeLabel =
     activeTheme.charAt(0).toUpperCase() + activeTheme.slice(1);
   const activeProvider =
     snapshot.providers.find((entry) => entry.id === snapshot.settings.provider) ??
     snapshot.providers[0];
+  const providerModelOptions = activeProvider
+    ? listProviderModels(activeProvider.id, snapshot.models)
+    : snapshot.models;
   const providerUsesExternalCliAccount = activeProvider?.transportKind === "cli";
   const activeProviderSetup = activeProvider
     ? snapshot.providerSetup[activeProvider.id]
     : null;
+  const activeProviderAuth = activeProvider
+    ? snapshot.providerAuth[activeProvider.id]
+    : null;
+  const providerAuthBusy =
+    activeProviderAuth?.status === "starting" ||
+    activeProviderAuth?.status === "waiting" ||
+    activeProviderAuth?.status === "checking";
+  const providerAccountCopy = providerUsesExternalCliAccount
+    ? activeProvider?.id === "opencode" && activeProviderAuth?.status === "waiting"
+      ? "Paste the OpenCode Zen API key below"
+      : activeProviderAuth?.status === "waiting"
+        ? "Finish sign-in below"
+      : activeProviderSetup?.status === "ready"
+        ? "Local CLI session ready"
+        : "Sign in or configure this local CLI"
+    : `${snapshot.account.planType} · ${snapshot.account.authMode}`;
+  const providerAccountBadge = providerUsesExternalCliAccount
+    ? providerAuthBusy
+      ? activeProviderAuth?.status === "checking"
+        ? "Checking"
+        : "Signing in…"
+      : activeProviderSetup?.status === "ready"
+        ? "Ready"
+        : "External"
+    : snapshot.account.loginInProgress
+      ? "Signing in…"
+      : snapshot.account.loggedIn
+        ? "Active"
+        : "Signed out";
+  const providerAuthButtonLabel =
+    activeProvider?.id === "opencode"
+      ? "Use OpenCode Zen"
+      : activeProvider?.id === "qwen-code"
+        ? "Use Qwen Code"
+        : `Use ${activeProvider?.displayName ?? "provider"}`;
+  const providerCanSwitchAccount =
+    providerUsesExternalCliAccount &&
+    (activeProviderSetup?.authenticated === true ||
+      activeProviderSetup?.status === "ready" ||
+      activeProviderAuth?.status === "completed");
+  const providerSetupStatusLabel = activeProviderSetup
+    ? activeProviderSetup.status === "ready"
+      ? "Ready"
+      : activeProviderSetup.status === "checking"
+        ? "Checking"
+        : activeProviderSetup.status === "needsInstall"
+          ? "Install"
+          : activeProviderSetup.status === "needsAuth"
+            ? "Sign in"
+            : activeProviderSetup.status === "needsConfig"
+              ? "Config"
+              : activeProviderSetup.status === "error"
+                ? "Error"
+                : "Unknown"
+    : "Unknown";
+  const showProviderAuthHelper =
+    providerUsesExternalCliAccount &&
+    activeProviderAuth !== null &&
+    activeProviderAuth.status !== "idle" &&
+    activeProviderAuth.status !== "completed";
+  const showProviderSecretInput =
+    activeProvider?.id === "opencode" &&
+    activeProviderAuth?.status === "waiting";
 
   useEffect(() => {
     if (
@@ -433,6 +501,10 @@ export const ConfigPanel = memo(function ConfigPanel({
     activeProviderSetup,
     providerUsesExternalCliAccount,
   ]);
+
+  useEffect(() => {
+    setProviderSecretInput("");
+  }, [activeProvider?.id, activeProviderAuth?.status]);
 
   const handleChatGptLogin = useCallback(async () => {
     try {
@@ -523,6 +595,117 @@ export const ConfigPanel = memo(function ConfigPanel({
     }
   }, [actions, pushToast]);
 
+  const handleStartProviderAuth = useCallback(async () => {
+    if (!activeProvider || !providerUsesExternalCliAccount) {
+      return;
+    }
+
+    try {
+      await actions.startProviderAuth(
+        activeProvider.id,
+        activeProvider.id === "opencode" ? "apiKey" : "oauth",
+      );
+      pushToast(`${activeProvider.displayName} sign-in started`, "ok");
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Failed to start provider sign-in",
+        "err",
+      );
+    }
+  }, [actions, activeProvider, providerUsesExternalCliAccount, pushToast]);
+
+  const handleSwitchProviderAccount = useCallback(async () => {
+    if (!activeProvider || !providerUsesExternalCliAccount) {
+      return;
+    }
+
+    try {
+      await actions.switchProviderAccount(
+        activeProvider.id,
+        activeProvider.id === "opencode" ? "apiKey" : "oauth",
+      );
+      pushToast(`${activeProvider.displayName} is ready for a new sign-in`, "ok");
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Failed to switch provider account",
+        "err",
+      );
+    }
+  }, [actions, activeProvider, providerUsesExternalCliAccount, pushToast]);
+
+  const handleCancelProviderAuth = useCallback(async () => {
+    if (!activeProvider || !providerUsesExternalCliAccount) {
+      return;
+    }
+
+    try {
+      await actions.cancelProviderAuth(activeProvider.id);
+      pushToast(`${activeProvider.displayName} sign-in cancelled`, "ok");
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Failed to cancel provider sign-in",
+        "err",
+      );
+    }
+  }, [actions, activeProvider, providerUsesExternalCliAccount, pushToast]);
+
+  const handleOpenProviderAuthUrl = useCallback(() => {
+    if (!activeProviderAuth?.authUrl) {
+      return;
+    }
+
+    window.open(activeProviderAuth.authUrl, "_blank", "noopener,noreferrer");
+  }, [activeProviderAuth?.authUrl]);
+
+  const handleCopyProviderAuthCode = useCallback(async () => {
+    if (!activeProviderAuth?.userCode) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(activeProviderAuth.userCode);
+      pushToast("Copied sign-in code", "ok");
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Failed to copy sign-in code",
+        "err",
+      );
+    }
+  }, [activeProviderAuth?.userCode, pushToast]);
+
+  const handleSubmitProviderSecret = useCallback(async () => {
+    if (!activeProvider || !showProviderSecretInput) {
+      return;
+    }
+
+    if (!providerSecretInput.trim()) {
+      pushToast("Paste the API key first", "warn");
+      return;
+    }
+
+    try {
+      await actions.submitProviderAuthSecret(
+        activeProvider.id,
+        providerSecretInput.trim(),
+      );
+      setProviderSecretInput("");
+      pushToast("API key submitted to OpenCode", "ok");
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to submit the provider secret",
+        "err",
+      );
+    }
+  }, [
+    actions,
+    activeProvider,
+    providerSecretInput,
+    pushToast,
+    showProviderSecretInput,
+  ]);
+
   return (
     <div className="config-stack">
       <div className="sg">
@@ -537,27 +720,19 @@ export const ConfigPanel = memo(function ConfigPanel({
                   ? snapshot.account.workspace
                   : "No active account"}
               </strong>
-              <div className="account-copy">
-                {providerUsesExternalCliAccount
-                  ? "Managed outside Nomadex"
-                  : `${snapshot.account.planType} · ${snapshot.account.authMode}`}
-              </div>
+              <div className="account-copy">{providerAccountCopy}</div>
             </div>
             <span
               className={clsx(
                 "account-badge",
-                providerUsesExternalCliAccount || snapshot.account.loggedIn
+                (providerUsesExternalCliAccount &&
+                  (providerAuthBusy || activeProviderSetup?.status === "ready")) ||
+                  snapshot.account.loggedIn
                   ? "ok"
                   : "off",
               )}
             >
-              {providerUsesExternalCliAccount
-                ? "External"
-                : snapshot.account.loginInProgress
-                ? "Signing in…"
-                : snapshot.account.loggedIn
-                  ? "Active"
-                  : "Signed out"}
+              {providerAccountBadge}
             </span>
           </div>
           <div className="account-meta">
@@ -570,65 +745,162 @@ export const ConfigPanel = memo(function ConfigPanel({
               <span>OpenAI auth required</span>
             ) : null}
           </div>
-          {providerUsesExternalCliAccount && activeProviderSetup ? (
-            <div className="provider-setup-card">
-              <div className="provider-setup-head">
-                <strong>Setup</strong>
-                <span
-                  className={clsx(
-                    "provider-setup-badge",
-                    activeProviderSetup.status,
-                  )}
-                >
-                  {activeProviderSetup.status === "ready"
-                    ? "Ready"
-                    : activeProviderSetup.status === "checking"
-                      ? "Checking"
-                      : activeProviderSetup.status === "needsInstall"
-                        ? "Install"
-                        : activeProviderSetup.status === "needsAuth"
-                          ? "Sign in"
-                          : activeProviderSetup.status === "needsConfig"
-                            ? "Config"
-                            : activeProviderSetup.status === "error"
-                              ? "Error"
-                              : "Unknown"}
-                </span>
-              </div>
-              <div className="provider-setup-copy">
-                <span>{activeProviderSetup.summary}</span>
-                {activeProviderSetup.detail ? (
-                  <span>{activeProviderSetup.detail}</span>
-                ) : null}
-              </div>
-              <div className="provider-setup-meta">
-                {activeProviderSetup.version ? (
-                  <span>Version {activeProviderSetup.version}</span>
-                ) : null}
-                {activeProviderSetup.sourcePath ? (
-                  <span>{activeProviderSetup.sourcePath}</span>
-                ) : null}
-                {activeProviderSetup.checkedAt ? (
-                  <span>Checked {activeProviderSetup.checkedAt}</span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
           {providerUsesExternalCliAccount ? (
-            <div className="usage-limit-empty">
-              {activeProvider.installCommand ? (
-                <>
-                  Install with <code>{activeProvider.installCommand}</code>, then
-                  sign in or configure that CLI on the host machine. Nomadex will
-                  use the existing local session for new turns.
-                </>
+            <>
+              {activeProviderSetup ? (
+                <div className="usage-limit-list">
+                  <div className="usage-limit-card provider-detail-card">
+                    <div className="usage-limit-head">
+                      <strong>Session</strong>
+                      <span>{providerSetupStatusLabel}</span>
+                    </div>
+                    <div className="provider-detail-copy">
+                      {activeProviderSetup.summary}
+                    </div>
+                    {activeProviderSetup.detail ? (
+                      <div className="usage-limit-copy">
+                        {activeProviderSetup.detail}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="usage-limit-card provider-detail-card">
+                    <div className="usage-limit-head">
+                      <strong>Transport</strong>
+                      <span>{activeProvider.transportLabel}</span>
+                    </div>
+                    <div className="provider-detail-copy">
+                      {activeProviderSetup.sourcePath ?? "Local CLI session on this host."}
+                    </div>
+                    <div className="usage-limit-copy">
+                      {activeProviderSetup.checkedAt
+                        ? `Checked ${activeProviderSetup.checkedAt}`
+                        : "Not checked yet."}
+                    </div>
+                  </div>
+                  <div className="usage-limit-card provider-detail-card">
+                    <div className="usage-limit-head">
+                      <strong>CLI</strong>
+                      <span>{activeProviderSetup.version ? "Detected" : "Unknown"}</span>
+                    </div>
+                    <div className="provider-detail-copy">
+                      {activeProviderSetup.version
+                        ? `Version ${activeProviderSetup.version}`
+                        : "Version unavailable"}
+                    </div>
+                    <div className="usage-limit-copy">
+                      {providerCanSwitchAccount
+                        ? "Ready for new turns."
+                        : "Sign in or configure the provider to use it in Nomadex."}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {showProviderAuthHelper ? (
+                <div className="account-helper">
+                  <div className="account-helper-copy">
+                    {activeProviderAuth?.summary}
+                    {activeProviderAuth?.detail ? ` ${activeProviderAuth.detail}` : ""}
+                  </div>
+                  {activeProviderAuth?.userCode || activeProviderAuth?.authUrl ? (
+                    <div className="account-callback-form">
+                      {activeProviderAuth.userCode ? (
+                        <div className="provider-auth-value">
+                          <span>Code</span>
+                          <code>{activeProviderAuth.userCode}</code>
+                        </div>
+                      ) : null}
+                      {activeProviderAuth.authUrl ? (
+                        <div className="provider-auth-value">
+                          <span>URL</span>
+                          <code>{activeProviderAuth.authUrl}</code>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {showProviderSecretInput ? (
+                    <div className="account-callback-form">
+                      <input
+                        className="account-callback-input"
+                        type="password"
+                        value={providerSecretInput}
+                        onChange={(event) =>
+                          setProviderSecretInput(event.target.value)
+                        }
+                        placeholder="Paste OpenCode Zen API key"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="provider-auth-actions">
+                    {activeProviderAuth?.authUrl ? (
+                      <button
+                        className="mini-action"
+                        type="button"
+                        onClick={handleOpenProviderAuthUrl}
+                      >
+                        Open auth page
+                      </button>
+                    ) : null}
+                    {activeProviderAuth?.userCode ? (
+                      <button
+                        className="mini-action"
+                        type="button"
+                        onClick={() => void handleCopyProviderAuthCode()}
+                      >
+                        Copy code
+                      </button>
+                    ) : null}
+                    {showProviderSecretInput ? (
+                      <button
+                        className="mini-action"
+                        type="button"
+                        disabled={!providerSecretInput.trim()}
+                        onClick={() => void handleSubmitProviderSecret()}
+                      >
+                        Submit key
+                      </button>
+                    ) : null}
+                    {providerAuthBusy ? (
+                      <button
+                        className="mini-action danger"
+                        type="button"
+                        onClick={() => void handleCancelProviderAuth()}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               ) : (
-                <>
-                  Sign in or configure {activeProvider.displayName} on the host
-                  machine first. Nomadex will use the existing local CLI session.
-                </>
+                <div className="usage-limit-empty">
+                  {activeProvider.id === "opencode" ? (
+                    <>
+                      OpenCode Zen uses an API key from{" "}
+                      <code>opencode.ai/auth</code>. Start the sign-in below, open
+                      the auth page, then paste the Zen API key back into Nomadex.
+                    </>
+                  ) : activeProvider.id === "qwen-code" ? (
+                    <>
+                      Use the provider action below to connect{" "}
+                      {activeProvider.displayName}. Nomadex will verify the local
+                      session automatically after the provider flow completes.
+                    </>
+                  ) : activeProvider.installCommand ? (
+                    <>
+                      Install with <code>{activeProvider.installCommand}</code>, then
+                      sign in or configure that CLI on the host machine. Nomadex will
+                      use the existing local session for new turns.
+                    </>
+                  ) : (
+                    <>
+                      Sign in or configure {activeProvider.displayName} on the host
+                      machine first. Nomadex will use the existing local CLI session.
+                    </>
+                  )}
+                </div>
               )}
-            </div>
+            </>
           ) : (
             <div className="usage-limit-list">
               {snapshot.account.usageWindows.map((windowEntry) => (
@@ -660,6 +932,24 @@ export const ConfigPanel = memo(function ConfigPanel({
           <div className="account-actions">
             {providerUsesExternalCliAccount ? (
               <>
+                {activeProvider.id === "opencode" || activeProvider.id === "qwen-code" ? (
+                  <button
+                    className="mini-action"
+                    type="button"
+                    disabled={providerAuthBusy}
+                    onClick={() =>
+                      void (providerCanSwitchAccount
+                        ? handleSwitchProviderAccount()
+                        : handleStartProviderAuth())
+                    }
+                  >
+                    {providerAuthBusy
+                      ? "Starting…"
+                      : providerCanSwitchAccount
+                        ? "Switch account"
+                        : providerAuthButtonLabel}
+                  </button>
+                ) : null}
                 <button
                   className="mini-action"
                   type="button"
@@ -669,18 +959,6 @@ export const ConfigPanel = memo(function ConfigPanel({
                   {activeProviderSetup?.status === "checking"
                     ? "Checking…"
                     : "Check setup"}
-                </button>
-                <button
-                  className="mini-action"
-                  type="button"
-                  onClick={() =>
-                    pushToast(
-                      `${activeProvider.displayName} auth is managed by the local CLI on the host machine`,
-                      "warn",
-                    )
-                  }
-                >
-                  Local CLI auth
                 </button>
               </>
             ) : (
@@ -797,7 +1075,7 @@ export const ConfigPanel = memo(function ConfigPanel({
         </div>
         <div className="sr">
           <span className="sl">model</span>
-          {activeProvider?.transportKind === "cli" ? (
+          {providerModelOptions.length === 0 ? (
             <span className="sl">provider default</span>
           ) : (
             <select
@@ -805,7 +1083,7 @@ export const ConfigPanel = memo(function ConfigPanel({
               value={snapshot.settings.model}
               onChange={(event) => void selectModel(event.target.value)}
             >
-              {snapshot.models.map((entry) => (
+              {providerModelOptions.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.displayName}
                 </option>

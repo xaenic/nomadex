@@ -26,7 +26,9 @@ import {
   toBrowseUrl,
 } from "./services/presentation/workspacePresentationService";
 import {
+  findProviderModel,
   getProviderAdapter,
+  listProviderModels,
   persistProviderId,
   type ProviderId,
 } from "./services/providers";
@@ -123,6 +125,17 @@ import {
   ProjectFolderPickerModal,
   QueuedMessagesStrip,
 } from "./WorkspaceView";
+
+const MATERIALIZED_THREAD_ID_FIELD = "materializedThreadId";
+
+const getMaterializedThreadId = (error: unknown) => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const value = (error as Record<string, unknown>)[MATERIALIZED_THREAD_ID_FIELD];
+  return typeof value === "string" ? value : null;
+};
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
@@ -775,6 +788,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       }, 2800);
 
       timersRef.current.push(completionTimer);
+      return threadId;
     },
     [mutateLocal],
   );
@@ -858,10 +872,10 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         await withLiveFallback(
           async () => {
             const runtime = runtimeRef.current!;
-            await runtime.sendComposer(args);
+            return await runtime.sendComposer(args);
           },
           async () => {
-            await sendComposerLocal(args);
+            return await sendComposerLocal(args);
           },
           {
             preferLive: true,
@@ -1028,6 +1042,105 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                 checkedAt: "just now",
               };
             });
+          },
+          {
+            preferLive: true,
+          },
+        ),
+      startProviderAuth: async (providerId, flow) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.startProviderAuth(providerId, flow);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              const targetProvider = providerId ?? draft.settings.provider;
+              draft.providerAuth[targetProvider] = {
+                ...draft.providerAuth[targetProvider],
+                status: "error",
+                flow: flow ?? draft.providerAuth[targetProvider].flow,
+                summary: "Provider sign-in requires a live workspace connection.",
+                detail: "Reconnect Nomadex to the host bridge, then try again.",
+                processId: null,
+                updatedAt: "just now",
+              };
+            });
+          },
+          {
+            preferLive: true,
+          },
+        ),
+      submitProviderAuthSecret: async (providerId, secret) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.submitProviderAuthSecret(providerId, secret);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              const targetProvider = providerId ?? draft.settings.provider;
+              draft.providerAuth[targetProvider] = {
+                ...draft.providerAuth[targetProvider],
+                status: "error",
+                summary: "Provider sign-in requires a live workspace connection.",
+                detail: "Reconnect Nomadex to the host bridge, then try again.",
+                processId: null,
+                updatedAt: "just now",
+              };
+            });
+          },
+          {
+            preferLive: true,
+          },
+        ),
+      cancelProviderAuth: async (providerId) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.cancelProviderAuth(providerId);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              const targetProvider = providerId ?? draft.settings.provider;
+              draft.providerAuth[targetProvider] = {
+                ...draft.providerAuth[targetProvider],
+                status: "idle",
+                summary: "No sign-in in progress.",
+                detail: null,
+                authUrl: null,
+                userCode: null,
+                processId: null,
+                updatedAt: "just now",
+              };
+            });
+          },
+          {
+            preferLive: true,
+          },
+        ),
+      switchProviderAccount: async (providerId, flow) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.switchProviderAccount(providerId, flow);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              const targetProvider = providerId ?? draft.settings.provider;
+              draft.providerAuth[targetProvider] = {
+                ...draft.providerAuth[targetProvider],
+                status: "error",
+                flow: flow ?? draft.providerAuth[targetProvider].flow,
+                summary: "Provider account switching requires a live workspace connection.",
+                detail: "Reconnect Nomadex to the host bridge, then try again.",
+                processId: null,
+                updatedAt: "just now",
+              };
+            });
+          },
+          {
+            preferLive: true,
           },
         ),
       updateSettings: async (patch) =>
@@ -1770,14 +1883,30 @@ export function WorkspacePage() {
     return groups;
   }, [uniqueThreads]);
 
-  const modelOptions = snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models;
   const activeProvider = useMemo(
     () =>
       snapshot.providers.find((entry) => entry.id === snapshot.settings.provider) ??
       getProviderAdapter(snapshot.settings.provider),
     [snapshot.providers, snapshot.settings.provider],
   );
-  const providerModelLabel = `${activeProvider.displayName} · ${snapshot.settings.model}`;
+  const modelOptions = useMemo(
+    () =>
+      listProviderModels(
+        activeProvider.id,
+        snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models,
+      ),
+    [activeProvider.id, snapshot.models],
+  );
+  const activeModelOption = useMemo(
+    () =>
+      findProviderModel(
+        activeProvider.id,
+        snapshot.settings.model,
+        snapshot.models.length > 0 ? snapshot.models : FALLBACK_DATA.models,
+      ),
+    [activeProvider.id, snapshot.settings.model, snapshot.models],
+  );
+  const providerModelLabel = `${activeProvider.displayName} · ${activeModelOption?.displayName ?? (snapshot.settings.model === "default" ? "provider default" : snapshot.settings.model)}`;
   const activeThemeOption = useMemo(
     () => getUiThemeOption(uiTheme),
     [uiTheme],
@@ -2147,6 +2276,114 @@ export function WorkspacePage() {
     setQueueWakeSignal((current) => current + 1);
   }, []);
 
+  const syncMaterializedThreadId = useCallback(
+    (
+      previousThreadId: string,
+      nextThreadId: string,
+      section: RouteSection = "chat",
+    ) => {
+      if (!previousThreadId || !nextThreadId || previousThreadId === nextThreadId) {
+        return;
+      }
+
+      setTabIds((current) => {
+        const replaced = current.map((entry) => (entry === previousThreadId ? nextThreadId : entry));
+        if (!replaced.includes(nextThreadId)) {
+          replaced.unshift(nextThreadId);
+        }
+
+        return [...new Set(replaced)].slice(0, 6);
+      });
+
+      setQueuedByThreadId((current) => {
+        const previousQueue = current[previousThreadId] ?? [];
+        if (previousQueue.length === 0) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[previousThreadId];
+        next[nextThreadId] = [...previousQueue, ...(next[nextThreadId] ?? [])];
+        return next;
+      });
+
+      if (queueProcessingRef.current[previousThreadId]) {
+        queueProcessingRef.current[nextThreadId] = queueProcessingRef.current[previousThreadId];
+        delete queueProcessingRef.current[previousThreadId];
+      }
+
+      if (queueAwaitingIdleRef.current[previousThreadId]) {
+        queueAwaitingIdleRef.current[nextThreadId] = queueAwaitingIdleRef.current[previousThreadId];
+        delete queueAwaitingIdleRef.current[previousThreadId];
+      }
+
+      if (chatScrollStateRef.current[previousThreadId]) {
+        chatScrollStateRef.current[nextThreadId] = chatScrollStateRef.current[previousThreadId];
+        delete chatScrollStateRef.current[previousThreadId];
+      }
+
+      if (pendingChatRestoreThreadIdRef.current === previousThreadId) {
+        pendingChatRestoreThreadIdRef.current = nextThreadId;
+      }
+
+      if (pendingHistoryPrependRef.current?.threadId === previousThreadId) {
+        pendingHistoryPrependRef.current = {
+          ...pendingHistoryPrependRef.current,
+          threadId: nextThreadId,
+        };
+      }
+
+      setVisibleTurnStartByThreadId((current) => {
+        if (!(previousThreadId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        next[nextThreadId] = next[previousThreadId] ?? next[nextThreadId] ?? 0;
+        delete next[previousThreadId];
+        return next;
+      });
+
+      if (route.threadId === previousThreadId) {
+        if (section === "chat") {
+          void navigate({
+            to: "/threads/$threadId",
+            params: { threadId: nextThreadId } as never,
+          });
+        } else {
+          void navigate({
+            to: "/threads/$threadId/$section",
+            params: { threadId: nextThreadId, section } as never,
+          });
+        }
+      }
+
+      requestQueuePump();
+    },
+    [navigate, requestQueuePump, route.threadId],
+  );
+
+  const sendComposerAndSyncThread = useCallback(
+    async (
+      args: Parameters<WorkspaceActions["sendComposer"]>[0],
+      section: RouteSection = "chat",
+    ) => {
+      try {
+        const nextThreadId = await actions.sendComposer(args);
+        syncMaterializedThreadId(args.threadId, nextThreadId, section);
+        return nextThreadId;
+      } catch (error) {
+        const materializedThreadId = getMaterializedThreadId(error);
+        if (materializedThreadId) {
+          syncMaterializedThreadId(args.threadId, materializedThreadId, section);
+        }
+
+        throw error;
+      }
+    },
+    [actions, syncMaterializedThreadId],
+  );
+
   useEffect(() => {
     if (!route.threadId || snapshot.transport.mode !== "live" || snapshot.transport.status !== "connected") {
       return;
@@ -2264,8 +2501,7 @@ export function WorkspacePage() {
         };
       });
 
-      void actions
-        .sendComposer({
+      void sendComposerAndSyncThread({
           threadId,
           mode: nextMessage.mode,
           prompt: nextMessage.prompt,
@@ -2275,13 +2511,14 @@ export function WorkspacePage() {
           files: nextMessage.files,
           settings: effectiveComposerSettings,
         })
-        .then(() => {
-          queueAwaitingIdleRef.current[threadId] = true;
+        .then((resolvedThreadId) => {
+          queueAwaitingIdleRef.current[resolvedThreadId] = true;
         })
-        .catch(() => {
+        .catch((error) => {
+          const resolvedThreadId = getMaterializedThreadId(error) ?? threadId;
           setQueuedByThreadId((current) => ({
             ...current,
-            [threadId]: [nextMessage, ...(current[threadId] ?? [])],
+            [resolvedThreadId]: [nextMessage, ...(current[resolvedThreadId] ?? [])],
           }));
           requestQueuePump();
         })
@@ -2290,11 +2527,11 @@ export function WorkspacePage() {
         });
     });
   }, [
-    actions,
     effectiveComposerSettings,
     queuedByThreadId,
     queueWakeSignal,
     requestQueuePump,
+    sendComposerAndSyncThread,
     snapshot.threads,
     snapshot.transport.mode,
     snapshot.transport.status,
@@ -3428,7 +3665,7 @@ export function WorkspacePage() {
           setComposerMode("review");
           openPanel("diff");
           if (inline && activeThreadId) {
-            await actions.sendComposer({
+            await sendComposerAndSyncThread({
               threadId: activeThreadId,
               mode: "review",
               prompt: restText,
@@ -3437,7 +3674,7 @@ export function WorkspacePage() {
               files: selectedFiles,
               images: selectedImages,
               settings: effectiveComposerSettings,
-            });
+            }, "review");
             resetComposer();
           } else {
             pushToast("/review ready", "ok");
@@ -3497,7 +3734,7 @@ export function WorkspacePage() {
           break;
         default:
           if (inline && activeThreadId) {
-            await actions.sendComposer({
+            await sendComposerAndSyncThread({
               threadId: activeThreadId,
               mode: composerMode,
               prompt: slash,
@@ -3526,6 +3763,7 @@ export function WorkspacePage() {
       openSkillsLibrary,
       pushToast,
       resetComposer,
+      sendComposerAndSyncThread,
       focusComposerEnd,
       selectedImages,
       selectedFiles,
@@ -3567,15 +3805,19 @@ export function WorkspacePage() {
           command: { type: "runSlash", slash: entry.cmd },
         })),
       },
-      {
-        label: "Model",
-        items: modelOptions.map((entry) => ({
-          icon: "🤖",
-          name: entry.displayName,
-          key: "",
-          command: { type: "selectModel", modelId: entry.id },
-        })),
-      },
+      ...(modelOptions.length > 0
+        ? [
+            {
+              label: "Model",
+              items: modelOptions.map((entry) => ({
+                icon: "🤖",
+                name: entry.displayName,
+                key: "",
+                command: { type: "selectModel" as const, modelId: entry.id },
+              })),
+            },
+          ]
+        : []),
     ];
 
     const query = commandQuery.trim().toLowerCase();
@@ -3775,7 +4017,7 @@ export function WorkspacePage() {
         await waitForNextPaint();
       }
 
-      await actions.sendComposer({
+      threadId = await sendComposerAndSyncThread({
         threadId,
         mode,
         prompt: nextPrompt,
@@ -3819,6 +4061,7 @@ export function WorkspacePage() {
     resetComposer,
     route.section,
     runSlash,
+    sendComposerAndSyncThread,
     snapshot.transport.error,
     snapshot.threads,
     selectedMentions,
@@ -4009,7 +4252,7 @@ export function WorkspacePage() {
       }
 
       try {
-        await actions.sendComposer({
+        await sendComposerAndSyncThread({
           threadId: activeThreadId,
           mode: queuedMessage.mode,
           prompt: queuedMessage.prompt,
@@ -4019,11 +4262,11 @@ export function WorkspacePage() {
           images: queuedMessage.images,
           settings: effectiveComposerSettings,
         });
-      } catch {
-        prependQueuedMessage(activeThreadId, queuedMessage);
+      } catch (error) {
+        prependQueuedMessage(getMaterializedThreadId(error) ?? activeThreadId, queuedMessage);
       }
     },
-    [actions, activeThreadId, activeTurn, effectiveComposerSettings, prependQueuedMessage, pushToast, queuedByThreadId, removeQueuedMessage],
+    [activeThreadId, activeTurn, effectiveComposerSettings, prependQueuedMessage, pushToast, queuedByThreadId, removeQueuedMessage, sendComposerAndSyncThread],
   );
 
   const removeTab = useCallback(
@@ -4677,17 +4920,17 @@ export function WorkspacePage() {
           className="hmodel"
           id="hmodel"
           type="button"
-          disabled={activeProvider.transportKind === "cli"}
+          disabled={modelOptions.length === 0}
           ref={modelButtonRef}
           onClick={() => {
-            if (activeProvider.transportKind === "cli") {
+            if (modelOptions.length === 0) {
               return;
             }
             setThemePickerOpen(false);
             setModelPickerOpen((current) => !current);
           }}
           title={
-            activeProvider.transportKind === "cli"
+            modelOptions.length === 0
               ? `${activeProvider.displayName} uses its own CLI model configuration`
               : undefined
           }
@@ -5178,7 +5421,7 @@ export function WorkspacePage() {
         </div>
       </div>
 
-      {modelPickerOpen && activeProvider.transportKind !== "cli" ? (
+      {modelPickerOpen && modelOptions.length > 0 ? (
         <div
           id="mpicker"
           style={{
