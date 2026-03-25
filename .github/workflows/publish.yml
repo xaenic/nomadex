@@ -45,7 +45,8 @@ jobs:
       - name: Check npm for existing version
         id: npm_check
         run: |
-          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+          npm view "${{ steps.pkg.outputs.name }}" versions --json >/tmp/nomadexapp-npm-versions.json 2>/dev/null || echo "[]" >/tmp/nomadexapp-npm-versions.json
+          if node -e 'const fs = require("fs"); const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const versions = Array.isArray(raw) ? raw : raw ? [raw] : []; process.exit(versions.includes(process.argv[2]) ? 0 : 1);' /tmp/nomadexapp-npm-versions.json "${{ steps.pkg.outputs.version }}"; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "Version already published. Skipping."
           else
@@ -67,7 +68,12 @@ jobs:
         if: steps.npm_check.outputs.publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+            echo "Version was published before the publish step ran. Skipping."
+            exit 0
+          fi
+          npm publish --access public --provenance
 
       - name: Check GitHub release
         id: release_check
