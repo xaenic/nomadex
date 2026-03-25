@@ -187,9 +187,26 @@ export const ChatTranscript = memo(function ChatTranscript({
       {activeTurns.map((turn) => {
         const errorText = turnErrorText(turn);
         const turnFileChanges = summarizeTurnFileChanges(turn);
-        const turnSteers = (activeThread.steers ?? []).filter(
-          (entry) => entry.turnId === turn.id,
-        );
+        const turnUserMessageTexts = turn.items
+          .filter(
+            (item): item is Extract<ThreadItem, { type: "userMessage" }> =>
+              item.type === "userMessage",
+          )
+          .map((item) =>
+            normalizeSteerPrompt(getUserMessageDisplay(item, providerId).text),
+          )
+          .filter(Boolean);
+        const turnSteers = (activeThread.steers ?? [])
+          .filter((entry) => entry.turnId === turn.id)
+          .filter((entry) => {
+            if (entry.status === "pending") {
+              return true;
+            }
+
+            return !turnUserMessageTexts.includes(
+              normalizeSteerPrompt(entry.prompt),
+            );
+          });
         const liveAgentMessageId =
           turn.status === "inProgress"
             ? [...turn.items].reverse().find((entry) => entry.type === "agentMessage")?.id ?? null
@@ -264,6 +281,9 @@ const steerTimeFormatter = new Intl.DateTimeFormat([], {
   hour: "numeric",
   minute: "2-digit",
 });
+
+const normalizeSteerPrompt = (value: string) =>
+  value.replace(/\s+/gu, " ").trim();
 
 const SteerHistoryCard = memo(function SteerHistoryCard({
   entry,
