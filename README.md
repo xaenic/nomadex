@@ -1,125 +1,121 @@
 # Nomadex
 
-Nomadex is a browser workspace for local coding agents.
+<p align="center">
+  <img src="public/favicon.svg" alt="Nomadex logo" width="72" />
+</p>
 
-The core idea is simple: keep the real agent, repo, CLI tools, and credentials on your own machine, then open a clean control UI from your phone or another device to watch the run, send prompts, steer the current turn, inspect files, review diffs, and manage the session from anywhere.
+<p align="center">
+  Remote web UI for local coding agents.
+</p>
 
-This project exists for the workflow where your coding agent runs on a workstation, server, or home machine, and you want to supervise it remotely without living inside one terminal tab.
+<p align="center">
+  <a href="https://nodejs.org/">
+    <img src="https://img.shields.io/badge/Node-20%2B-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node 20+" />
+  </a>
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-f2c94c?style=flat-square" alt="MIT License" />
+  </a>
+  <img src="https://img.shields.io/badge/UI-Web%20%2B%20Mobile-1f7aec?style=flat-square" alt="Web and mobile UI" />
+  <img src="https://img.shields.io/badge/Providers-Codex%20%7C%20OpenCode%20%7C%20Qwen%20Code-7b61ff?style=flat-square" alt="Providers" />
+</p>
 
-Today, Codex is the most complete live provider path through the local app-server bridge. The app is being extended toward more providers, but Codex remains the reference workflow.
+Nomadex is a browser workspace for running and supervising coding agents on your own machine.
 
-## Sample UI
+The repo is built for the workflow where the real agent, repository, CLI tools, and credentials stay on your workstation, server, or home box, while the UI stays reachable from your laptop, tablet, or phone. You can open the session remotely, watch live output, inspect files and diffs, answer approvals, steer the current turn, and keep moving without living in one terminal window.
+
+If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that works well on mobile, that is the direction Nomadex is built for. The app layer is also being shaped to support future providers such as Claude Code and Antigravity without rebuilding the whole shell.
+
+## Screenshots
 
 ### Desktop
 
-![Desktop UI sample](docs/ui-desktop.png)
+![Nomadex desktop UI](docs/ui-desktop.png)
 
 ### Mobile
 
-![Mobile UI sample](docs/ui-mobile.png)
+![Nomadex mobile UI](docs/ui-mobile.png)
 
-## Main Purpose
+## Why Nomadex
 
-Nomadex is built so you can:
+- Keep the actual execution environment local and under your control.
+- Supervise long-running agent work from your phone or another machine.
+- Stay in one threaded workspace for chat, plans, files, diffs, approvals, and terminal output.
+- Avoid exposing a raw local CLI session directly just to monitor progress remotely.
+- Use a UI that is shaped for remote, mobile, and browser-first workflows instead of a desktop-only shell.
 
-- run the coding agent locally on your own machine
-- keep the execution environment private and under your control
-- open the UI from your phone or another device
-- continue supervising and steering the work from anywhere
+## Feature Highlights
 
-In practice, that means you can leave the agent running on your machine and still:
+| Area | What you get |
+| --- | --- |
+| Live sessions | Real-time threaded chat over the local app-server bridge |
+| Mobile UX | Responsive workspace shell, tail-first transcript loading, and remote-friendly controls |
+| Files and diffs | Explorer, editor, diff review, changed-file summaries, and local file browse routes |
+| Composer | File attachments, image attachments, image paste, queueing, steer, and prompt tools |
+| Runtime controls | Approvals, question prompts, rollback support, and in-progress visibility |
+| Provider layer | Codex as the reference live path, plus OpenCode and Qwen Code integration work |
+| Launch flow | Packaged `npx nomadex` launcher with app-server startup, password gate, and update check |
 
-- check progress from your phone
-- review changed files and diffs remotely
-- send follow-up instructions during an active turn
-- handle approvals without sitting at your workstation
-- inspect terminal output and file edits while the run is happening
+## Providers
 
-## Use Cases
-
-- Remote coding companion for a workstation you access over SSH
-- Phone-friendly UI for long-running agent sessions
-- Reviewing diffs and changed files before asking the agent to continue
-- Sending steer or follow-up prompts while away from your desk
-- Watching shell runs, plans, and edits without keeping a desktop terminal open
-- Managing a local coding box or home lab machine through a private overlay network
-
-## Status
-
-### Done
-
-- [x] Live threaded chat over the local websocket bridge
-- [x] Mobile-friendly workspace shell
-- [x] Tail-first transcript loading for long conversations
-- [x] File explorer, editor, diff review, and terminal surfaces
-- [x] File attachments, image attachments, and image paste
-- [x] Queueing, steer, approvals, and in-progress turn visibility
-- [x] Theme picker, settings, skills library, and MCP/account surfaces
-- [x] Local workspace browsing and uploaded asset handling
-- [x] Provider-aware app layer with Codex as the main live path
-- [x] Publish-ready CLI launcher shape for `npx nomadex`
-
-### Todo
-
-- [ ] Publish the first public npm release
-- [ ] Harden the packaged launcher for more providers and remote auth cases
-- [ ] Finish stronger auth/setup parity for non-Codex providers
-- [ ] Improve durable cross-provider thread memory and reload persistence
-- [ ] Add stronger server-side access control for internet-facing setups
-- [ ] Keep tightening mobile performance on very long threads
-
-## Highlights
-
-- Live threaded chat over the local websocket bridge
-- Mobile-first shell for checking and steering sessions away from your workstation
-- Tail-first transcript loading for long conversations
-- File explorer, editor preview, diff review, and terminal surfaces
-- File and image attachments, image paste, and local file browsing
-- Theme picker, skills library, settings, MCP state, and account controls
-- Queueing and in-progress turn visibility
-- Provider abstraction in the app layer
-
-## Requirements
-
-- Node.js 20 or newer recommended
-- `npm`
-- `codex` CLI available on `PATH`
-- A working Codex account/session if you want the live bridge instead of mock mode
+| Provider | Status | Notes |
+| --- | --- | --- |
+| Codex | Live | Main reference path through the local app-server bridge |
+| OpenCode | Integrated | CLI-backed path with provider-aware model handling |
+| Qwen Code | Integrated | CLI-backed path with local setup/auth flow support |
+| Claude Code | Planned | Target provider for the shared shell architecture |
+| Antigravity | Planned | Scaffolded direction, not yet a complete live runtime |
 
 ## Quick Start
+
+### Packaged launcher
 
 ```bash
 npx nomadex
 ```
 
-`npx nomadex` uses the published package launcher. It:
+The packaged launcher:
 
 1. serves the built Nomadex UI
 2. checks whether a Codex app-server is already healthy on `ws://127.0.0.1:3901`
 3. starts one if needed
 4. binds the UI on `0.0.0.0:3784`
 5. proxies the browser websocket through `/codex-ws`
-6. shows a UI password in the terminal and requires that password in the browser before the workspace loads
-
-If a newer npm release exists, the launcher also prompts at startup so you can switch to the latest package before it starts.
+6. prints a UI password and requires it before the browser can open the workspace
+7. checks whether a newer npm release is available and prompts before startup when appropriate
 
 Open:
 
 - Local machine: `http://127.0.0.1:3784`
 - Another device on the same network: `http://<your-lan-ip>:3784`
 
-## Repo Development
-
-If you are developing Nomadex itself from this repository:
+### Repo development
 
 ```bash
 npm install
 npm run dev:live
 ```
 
-`dev:live` is still the fastest local development path. It runs the strict-port Vite shell and the same app-server checks, but keeps the full dev experience.
+Use `dev:live` when you are developing Nomadex itself and want the Vite development workflow.
 
-If port `3784` is already taken, the script fails on purpose instead of silently switching to another port.
+## Remote Access
+
+Preferred setup: ZeroTier.
+
+Why:
+
+- it keeps Nomadex on a private overlay network
+- it is safer than exposing the local UI directly to the internet
+- it works well for phone access from anywhere
+- it matches the core model of keeping the real agent local to your machine
+
+Recommended flow:
+
+1. Install ZeroTier on the host machine and on your phone.
+2. Join both devices to the same ZeroTier network.
+3. Run `npx nomadex` on the host machine.
+4. Open `http://<host-zerotier-ip>:3784` on the remote device.
+
+Tailscale or SSH tunneling also work well. Avoid exposing the raw Nomadex port directly to the public internet without real network and auth controls in front of it.
 
 ## Common Commands
 
@@ -131,99 +127,91 @@ npm run build
 npm run preview
 ```
 
-Use `npx nomadex` for the packaged launcher and `npm run dev:live` when you are working on the repo itself.
+## Architecture
 
-## Preferred Remote Setup
+```text
+Browser or phone
+  -> Nomadex UI host
+    -> same-origin websocket proxy
+      -> local coding agent bridge
+```
 
-Preferred setup: ZeroTier.
+Main layers:
 
-Why ZeroTier:
+- `src/app/WorkspaceShell.tsx`: routing, shell state, active thread, overlays, and composer orchestration
+- `src/app/WorkspaceView.tsx`: reusable workspace UI sections
+- `src/app/components/*`: transcript, settings, terminal, summaries, approvals, and supporting cards
+- `src/app/services/runtime/*`: websocket lifecycle, uploads, turn mutations, auth/setup flows, and local runtime actions
+- `src/app/services/presentation/*`: render shaping for transcript items, attachments, file links, and summaries
+- `src/app/services/providers/*`: provider-specific transport and path conventions
 
-- it keeps Nomadex on a private overlay network
-- it is safer than exposing the raw dev server directly
-- it works well for phone access from anywhere
-- it keeps the actual agent and repo local to your own machine
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-Recommended flow:
+## Use Cases
 
-1. Install ZeroTier on the host machine and on your phone.
-2. Join both devices to the same ZeroTier network.
-3. Run `npx nomadex` on the host machine.
-4. Open `http://<host-zerotier-ip>:3784` from your phone.
+- Remote coding companion for a workstation you access over SSH
+- Phone-friendly control panel for long-running local agent sessions
+- Reviewing changed files and diffs before asking the agent to continue
+- Sending steer prompts while away from your desk
+- Handling approvals and question prompts from mobile
+- Watching shell output and file edits on a private remote box or home lab machine
 
-You can also use Tailscale or SSH tunneling, but ZeroTier is the preferred setup for this project.
+## Status
 
-For LAN-only use, `dev:live` already binds to `0.0.0.0`.
+### Done
 
-Do not expose the raw Nomadex dev server directly to the public internet without real auth in front of it.
+- [x] Live threaded workspace over the local websocket bridge
+- [x] Mobile-friendly shell and long-thread transcript handling
+- [x] File explorer, editor, diff review, and terminal surfaces
+- [x] File and image attachments, including pasted images
+- [x] Queueing, steer, approvals, and in-progress turn visibility
+- [x] Theme picker, settings, skills library, and account/provider surfaces
+- [x] Local workspace browsing and uploaded asset handling
+- [x] Provider-aware launcher and app layer
 
-More detail: [docs/SETUP.md](docs/SETUP.md)
+### Next
+
+- [ ] Publish the first public npm release
+- [ ] Harden the packaged launcher for more providers and remote auth flows
+- [ ] Extend provider parity beyond the current Codex-first runtime path
+- [ ] Improve durable cross-provider thread memory and reload persistence
+- [ ] Tighten remote access hardening for internet-facing setups
+- [ ] Keep improving performance on very long mobile sessions
 
 ## Documentation
 
 - Setup and launch: [docs/SETUP.md](docs/SETUP.md)
 - Architecture and extension points: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## Open For Contributions
+## Contributing
 
 Contributions are welcome.
 
 Useful areas:
 
 - provider integrations
-- production launcher and npm packaging
+- launcher and packaging improvements
 - remote access hardening
 - mobile performance and long-thread rendering
-- auth/session UX
+- auth and session UX
 - editor, diff, and terminal polish
 
-If you want to contribute, open an issue or PR with a focused change. Small, concrete improvements are much easier to review and land than broad refactors.
-
-## Current Stack
-
-- React 19
-- TanStack Router
-- TanStack Query
-- Vite
-- `react-markdown` + GFM rendering
-- Local Codex app-server websocket bridge
-
-## Project Shape
-
-```text
-src/app/
-  WorkspaceShell.tsx
-  WorkspaceView.tsx
-  components/
-  services/
-    runtime/
-    presentation/
-    providers/
-```
-
-The current shell is split between:
-
-- `WorkspaceShell.tsx`: composition root, routing glue, shell state
-- `WorkspaceView.tsx`: reusable workspace UI sections
-- `src/app/components/*`: transcript, settings, terminal, brand mark, summaries
-- `src/app/services/runtime/*`: live bridge and runtime mutations
-- `src/app/services/presentation/*`: UI display shaping, file/image resolution
-- `src/app/services/providers/*`: provider-specific transport and path conventions
+Open an issue or PR with a focused change. Small, well-scoped improvements are much easier to review and land than broad refactors.
 
 ## Notes
 
-- Uploaded assets currently land under the workspace in `.codex-web/uploads` and `.codex-web/uploads/files`.
-- The provider registry exists, and Codex is still the most complete live runtime path.
-- `npm run preview` is useful for checking the built shell in the repo, but the main packaged workflow is `npx nomadex`.
+- Uploaded assets currently land under `.codex-web/uploads` and `.codex-web/uploads/files`.
+- Codex is still the strongest live provider path today.
 - Set `NOMADEX_PASSWORD` if you want a stable password instead of the generated per-launch password.
+- `npm run preview` is useful for checking the built shell in the repo, while `npx nomadex` is the packaged launcher flow.
 
 ## Troubleshooting
 
 - `UI port 3784 is already in use`
-  Stop the old Nomadex process or set `VITE_CODEX_UI_PORT`.
+  Stop the old Nomadex process or choose a different port.
 - `Port 3901 ... is already in use, but it is not responding like a Codex app-server`
   Another process is already on the websocket port. Stop it or point Nomadex to a different bridge.
-- Browser still shows the old theme color or favicon
-  Hard refresh, then fully close and reopen the tab once. Mobile browsers cache these aggressively.
+- Browser still shows an old favicon or theme color
+  Hard refresh, then fully close and reopen the tab once. Mobile browsers cache this aggressively.
 
-For the full setup and troubleshooting guide, see [docs/SETUP.md](docs/SETUP.md).
+For the full setup guide, see [docs/SETUP.md](docs/SETUP.md).
