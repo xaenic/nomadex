@@ -16,7 +16,7 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 
 import type { ThreadItem, Turn } from "../../protocol/v2";
-import type { ThreadRecord } from "../mockData";
+import type { SteerHistoryEntry, ThreadRecord } from "../mockData";
 import type { ProviderId } from "../services/providers";
 import {
   getUserMessageDisplay,
@@ -139,6 +139,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending,
   streamVisible,
   onReview,
+  onRollback,
   onFill,
   onSlash,
   onCopy,
@@ -155,6 +156,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   existingThreadHistoryPending: boolean;
   streamVisible: Record<string, number>;
   onReview: (diffId?: string) => void;
+  onRollback: (turnId: string) => void;
   onFill: (value: string) => void;
   onSlash: (value: string) => void;
   onCopy: (value: string) => void;
@@ -177,12 +179,17 @@ export const ChatTranscript = memo(function ChatTranscript({
     return <WelcomeState onFill={onFill} onSlash={onSlash} />;
   }
 
+  const latestTurnId = activeTurns[activeTurns.length - 1]?.id ?? null;
+  const rollbackDisabled = activeTurns.some((turn) => turn.status === "inProgress");
+
   return (
     <>
       {activeTurns.map((turn) => {
         const errorText = turnErrorText(turn);
         const turnFileChanges = summarizeTurnFileChanges(turn);
-        const latestTurnId = activeTurns[activeTurns.length - 1]?.id ?? null;
+        const turnSteers = (activeThread.steers ?? []).filter(
+          (entry) => entry.turnId === turn.id,
+        );
         const liveAgentMessageId =
           turn.status === "inProgress"
             ? [...turn.items].reverse().find((entry) => entry.type === "agentMessage")?.id ?? null
@@ -200,8 +207,12 @@ export const ChatTranscript = memo(function ChatTranscript({
                 onFork={onFork}
                 onOpenFile={onOpenFile}
                 onPlan={onPlan}
+                onRollback={onRollback}
                 providerId={providerId}
                 onReview={onReview}
+                rollbackDisabled={rollbackDisabled}
+                showRollback={item.type === "userMessage"}
+                turnId={turn.id}
                 outputVisible={
                   item.type === "commandExecution"
                     ? streamVisible[`${item.id}:aggregatedOutput`]
@@ -215,6 +226,14 @@ export const ChatTranscript = memo(function ChatTranscript({
                 }
                 plan={turn.id === latestTurnId ? activeThread.plan : null}
                 turnStatus={turn.status}
+              />
+            ))}
+            {turnSteers.map((entry) => (
+              <SteerHistoryCard
+                entry={entry}
+                key={entry.id}
+                onOpenFile={onOpenFile}
+                providerId={providerId}
               />
             ))}
             {errorText ? (
@@ -238,6 +257,41 @@ export const ChatTranscript = memo(function ChatTranscript({
         );
       })}
     </>
+  );
+});
+
+const steerTimeFormatter = new Intl.DateTimeFormat([], {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const SteerHistoryCard = memo(function SteerHistoryCard({
+  entry,
+  onOpenFile,
+  providerId,
+}: {
+  entry: SteerHistoryEntry;
+  onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
+}) {
+  return (
+    <div className={clsx("steer-card", entry.status === "pending" && "pending")}>
+      <div className="steer-card-head">
+        <span className="steer-card-label">Steer</span>
+        <span className="steer-card-meta">
+          {entry.status === "pending"
+            ? "Applying"
+            : steerTimeFormatter.format(new Date(entry.createdAt))}
+        </span>
+      </div>
+      <div className="steer-card-body">
+        <MessageInlineFlow
+          onOpenFile={onOpenFile}
+          providerId={providerId}
+          text={entry.prompt}
+        />
+      </div>
+    </div>
   );
 });
 
@@ -798,11 +852,15 @@ const ThreadItemView = memo(function ThreadItemView({
   onCopy,
   onFork,
   onPlan,
+  onRollback,
   onReview,
   onEdit,
   onContext,
   onOpenFile,
   providerId,
+  turnId,
+  showRollback = false,
+  rollbackDisabled = false,
 }: {
   item: ThreadItem;
   plan: ThreadRecord["plan"] | null;
@@ -813,11 +871,15 @@ const ThreadItemView = memo(function ThreadItemView({
   onCopy: (value: string) => void;
   onFork: () => void;
   onPlan: () => void;
+  onRollback: (turnId: string) => void;
   onReview: (diffId?: string) => void;
   onEdit: (value: string) => void;
   onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
   onOpenFile: (path: string, line?: number | null) => void;
   providerId?: ProviderId;
+  turnId: string;
+  showRollback?: boolean;
+  rollbackDisabled?: boolean;
 }) {
   const [commandExpanded, setCommandExpanded] = useState(
     item.type === "commandExecution" ? item.status === "inProgress" : false,
@@ -992,6 +1054,21 @@ const ThreadItemView = memo(function ThreadItemView({
           <div className="msg-time">{userMessageTimeLabel}</div>
         </div>
         <div className="macts">
+          {showRollback ? (
+            <button
+              className="mact rollback"
+              disabled={rollbackDisabled}
+              title={
+                rollbackDisabled
+                  ? "Wait for the current response to finish before rolling back."
+                  : "Remove this prompt and everything after it."
+              }
+              type="button"
+              onClick={() => onRollback(turnId)}
+            >
+              ↶ Rollback
+            </button>
+          ) : null}
           <button className="mact" type="button" onClick={() => onCopy(display.text)}>
             📋 Copy
           </button>
@@ -1265,7 +1342,12 @@ function DiffCard({
     <>
       {changes.map((change, index) => (
         <div
-          className={clsx("dw", item.status === "inProgress" && "live")}
+          className={clsx(
+            "dw",
+            item.status === "inProgress" && "live",
+            change.kind.type === "add" && "new-file",
+          )}
+          data-change-kind={change.kind.type}
           key={`${item.id}-${change.path}-${index}`}
         >
           <div className="dh">

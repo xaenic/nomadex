@@ -2,6 +2,7 @@ import type { Personality } from "../../../protocol/Personality";
 import type { FuzzyFileSearchResult } from "../../../protocol/FuzzyFileSearchResult";
 import type { CollaborationMode } from "../../../protocol/CollaborationMode";
 import type {
+  AdditionalPermissionProfile,
   CollaborationModeListResponse,
   CommandExecResponse,
   CommandExecutionRequestApprovalParams,
@@ -28,6 +29,7 @@ import type {
   Thread,
   ThreadItem,
   ThreadReadResponse,
+  ThreadRollbackResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
   Turn,
@@ -41,6 +43,7 @@ import {
   createFallbackDashboardData,
   createProviderAuthMap,
   createProviderSetupMap,
+  type ApprovalDecision,
   type ApprovalRequest,
   type CollaborationPreset,
   type ComposerFile,
@@ -54,11 +57,22 @@ import {
   type RemoteSkillCard,
   type SettingsState,
   type SkillCard,
+  type SteerHistoryEntry,
   type TerminalSession,
   type ThreadPlan,
   type ThreadRecord,
   type WorkspaceMode,
 } from "../../mockData";
+import {
+  buildCommitGenerationPrompt,
+  extractCommitMessageCandidate,
+  normalizeWorkspaceProjectSettings,
+  serializeWorkspaceProjectSettings,
+  splitCommitMessageParagraphs,
+  WORKSPACE_PROJECT_SETTINGS_RELATIVE_PATH,
+  type CommitGenerationContext,
+  type WorkspaceProjectSettings,
+} from "../commitAssistant";
 import {
   buildProviderFilesUploadRoot,
   buildProviderOptimisticFileUploadPath,
@@ -124,6 +138,9 @@ const defaultWsUrlForProvider = (adapter: ProviderAdapter) =>
 const providerUnavailableMessage = (adapter: ProviderAdapter) =>
   `${adapter.displayName} is scaffolded in Nomadex but its transport is not wired yet.`;
 
+const THREAD_STEER_STORAGE_KEY = "nomadex-thread-steers";
+const MAX_STEER_HISTORY_PER_THREAD = 24;
+
 const LOCAL_PROVIDER_THREAD_PREFIX = "local-provider:";
 const EXTERNAL_PROVIDER_AGENT_PREFIX = "external-agent:";
 const SHARED_THREAD_MEMORY_TURN_LIMIT = 8;
@@ -151,12 +168,305 @@ const toArray = <T>(value: Array<T> | null | undefined) => value ?? [];
 
 const relativeNow = () => "just now";
 
+const canUseWindowStorage = () =>
+  typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+
+const normalizeStoredSteerEntry = (entry: unknown): SteerHistoryEntry | null => {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const record = entry as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id.trim() : "";
+  const turnId = typeof record.turnId === "string" ? record.turnId.trim() : "";
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+  const createdAt =
+    typeof record.createdAt === "number" && Number.isFinite(record.createdAt)
+      ? record.createdAt
+      : Date.now();
+
+  if (!id || !turnId || !prompt) {
+    return null;
+  }
+
+  return {
+    id,
+    turnId,
+    prompt,
+    createdAt,
+    status: "applied",
+  };
+};
+
+const readStoredThreadSteerMap = (): Record<string, Array<SteerHistoryEntry>> => {
+  if (!canUseWindowStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(THREAD_STEER_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).flatMap(([threadId, entries]) => {
+        if (!Array.isArray(entries)) {
+          return [];
+        }
+
+        const normalized = entries
+          .map(normalizeStoredSteerEntry)
+          .filter((entry): entry is SteerHistoryEntry => Boolean(entry))
+          .slice(0, MAX_STEER_HISTORY_PER_THREAD);
+
+        return normalized.length > 0 ? [[threadId, normalized]] : [];
+      }),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const readStoredThreadSteers = (threadId: string): Array<SteerHistoryEntry> =>
+  readStoredThreadSteerMap()[threadId] ?? [];
+
+const writeStoredThreadSteers = (
+  threadId: string,
+  entries: Array<SteerHistoryEntry> | undefined,
+) => {
+  if (!canUseWindowStorage()) {
+    return;
+  }
+
+  try {
+    const nextMap = readStoredThreadSteerMap();
+    const persistedEntries = (entries ?? [])
+      .filter((entry) => entry.status === "applied")
+      .slice(0, MAX_STEER_HISTORY_PER_THREAD)
+      .map(({ id, turnId, prompt, createdAt }) => ({
+        id,
+        turnId,
+        prompt,
+        createdAt,
+      }));
+
+    if (persistedEntries.length === 0) {
+      delete nextMap[threadId];
+    } else {
+      nextMap[threadId] = persistedEntries.map((entry) => ({
+        ...entry,
+        status: "applied",
+      }));
+    }
+
+    window.localStorage.setItem(THREAD_STEER_STORAGE_KEY, JSON.stringify(nextMap));
+  } catch {
+    // Ignore client-side storage failures; steer still lives in memory for this session.
+  }
+};
+
+const mergeSteerHistory = (
+  ...lists: Array<Array<SteerHistoryEntry> | undefined>
+): Array<SteerHistoryEntry> => {
+  const byId = new Map<string, SteerHistoryEntry>();
+
+  for (const list of lists) {
+    for (const entry of list ?? []) {
+      const existing = byId.get(entry.id);
+      if (!existing) {
+        byId.set(entry.id, entry);
+        continue;
+      }
+
+      byId.set(entry.id, {
+        ...existing,
+        ...entry,
+        status:
+          entry.status === "applied" || existing.status === "applied"
+            ? "applied"
+            : "pending",
+        createdAt: Math.max(existing.createdAt, entry.createdAt),
+      });
+    }
+  }
+
+  return [...byId.values()]
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, MAX_STEER_HISTORY_PER_THREAD);
+};
+
+const buildSteerSummary = (args: {
+  prompt: string;
+  mentions: Array<MentionAttachment>;
+  skills: Array<SkillCard>;
+  files: Array<ComposerFile>;
+  images: Array<ComposerImage>;
+}) => {
+  const prompt = args.prompt.trim().replace(/\s+/g, " ");
+  if (prompt) {
+    return prompt;
+  }
+
+  const parts: string[] = [];
+  if (args.files.length > 0) {
+    parts.push(`${args.files.length} file${args.files.length === 1 ? "" : "s"}`);
+  }
+  if (args.images.length > 0) {
+    parts.push(`${args.images.length} image${args.images.length === 1 ? "" : "s"}`);
+  }
+  if (args.mentions.length > 0) {
+    parts.push(`${args.mentions.length} mention${args.mentions.length === 1 ? "" : "s"}`);
+  }
+  if (args.skills.length > 0) {
+    parts.push(`${args.skills.length} skill${args.skills.length === 1 ? "" : "s"}`);
+  }
+
+  return parts.length > 0 ? `Steer with ${parts.join(", ")}` : "Steer applied";
+};
+
+const createSteerEntry = (
+  threadId: string,
+  turnId: string,
+  args: {
+    prompt: string;
+    mentions: Array<MentionAttachment>;
+    skills: Array<SkillCard>;
+    files: Array<ComposerFile>;
+    images: Array<ComposerImage>;
+  },
+  status: SteerHistoryEntry["status"],
+): SteerHistoryEntry => ({
+  id: `steer:${threadId}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  turnId,
+  prompt: buildSteerSummary(args),
+  createdAt: Date.now(),
+  status,
+});
+
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const safeString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const stripAnsi = (value: string) => value.replace(/\x1B\[[0-9;]*m/gu, "");
 const trimAuthBuffer = (value: string, maxLength = 12000) =>
   value.length > maxLength ? value.slice(-maxLength) : value;
+const APPROVAL_DECISIONS: Array<ApprovalDecision> = [
+  "accept",
+  "acceptForSession",
+  "decline",
+  "cancel",
+];
+const isApprovalDecision = (value: string): value is ApprovalDecision =>
+  APPROVAL_DECISIONS.includes(value as ApprovalDecision);
+const normalizeApprovalDecision = (value: unknown): ApprovalDecision | null => {
+  if (typeof value === "string") {
+    return isApprovalDecision(value) ? value : null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const key = Object.keys(value)[0];
+  return key && isApprovalDecision(key) ? key : null;
+};
+const normalizeApprovalDecisionList = (
+  values: Array<unknown> | null | undefined,
+  fallback: Array<ApprovalDecision>,
+) => {
+  const normalized = toArray(values)
+    .map((value) => normalizeApprovalDecision(value))
+    .filter((value): value is ApprovalDecision => Boolean(value));
+
+  return [...new Set(normalized.length > 0 ? normalized : fallback)];
+};
+const commandArrayToString = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .filter((entry): entry is string => typeof entry === "string")
+        .join(" ")
+        .trim()
+    : "";
+const summarizeAdditionalPermissions = (
+  permissions: AdditionalPermissionProfile | null | undefined,
+) => {
+  const summary: string[] = [];
+
+  if (permissions?.network?.enabled) {
+    summary.push("Network access");
+  }
+
+  const readPaths = toArray(permissions?.fileSystem?.read).filter((entry): entry is string => typeof entry === "string");
+  if (readPaths.length > 0) {
+    summary.push(`Read access: ${readPaths.join(", ")}`);
+  }
+
+  const writePaths = toArray(permissions?.fileSystem?.write).filter((entry): entry is string => typeof entry === "string");
+  if (writePaths.length > 0) {
+    summary.push(`Write access: ${writePaths.join(", ")}`);
+  }
+
+  if (permissions?.macos?.accessibility) {
+    summary.push("macOS accessibility access");
+  }
+
+  if (permissions?.macos?.calendar) {
+    summary.push("macOS calendar access");
+  }
+
+  if (permissions?.macos?.contacts && permissions.macos.contacts !== "none") {
+    summary.push(`macOS contacts: ${permissions.macos.contacts}`);
+  }
+
+  if (permissions?.macos?.launchServices) {
+    summary.push("macOS launch services");
+  }
+
+  if (permissions?.macos?.preferences && permissions.macos.preferences !== "none") {
+    summary.push(`macOS preferences: ${permissions.macos.preferences}`);
+  }
+
+  if (permissions?.macos?.reminders) {
+    summary.push("macOS reminders access");
+  }
+
+  if (permissions?.macos?.automations === "all") {
+    summary.push("macOS automation: all apps");
+  } else if (
+    permissions?.macos?.automations &&
+    typeof permissions.macos.automations === "object" &&
+    "bundle_ids" in permissions.macos.automations
+  ) {
+    const bundleIds = toArray(permissions.macos.automations.bundle_ids).filter(
+      (entry): entry is string => typeof entry === "string",
+    );
+    if (bundleIds.length > 0) {
+      summary.push(`macOS automation: ${bundleIds.join(", ")}`);
+    }
+  }
+
+  return summary;
+};
+const approvalStateFromDecision = (decision: ApprovalDecision): ApprovalRequest["state"] =>
+  decision === "accept" || decision === "acceptForSession" ? "approved" : "declined";
+const legacyReviewDecisionFromApprovalDecision = (decision: ApprovalDecision) => {
+  switch (decision) {
+    case "accept":
+      return "approved" as const;
+    case "acceptForSession":
+      return "approved_for_session" as const;
+    case "cancel":
+      return "abort" as const;
+    case "decline":
+    default:
+      return "denied" as const;
+  }
+};
 const parseAuthUrl = (value: string) => {
   const matches = value.match(/https:\/\/[^\s"'<>`|│)]+/gu);
   return matches?.at(-1) ?? null;
@@ -269,6 +579,43 @@ const getErrorMessage = (error: unknown) => {
   return "";
 };
 
+const isRuntimeFileNotFoundError = (error: unknown) => {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes("enoent") || message.includes("not found");
+};
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+const normalizeRuntimePath = (value: string) => value.replace(/[\\/]+$/u, "");
+
+const runtimePathSeparator = (value: string) =>
+  value.includes("\\") && !value.includes("/") ? "\\" : "/";
+
+const joinRuntimePath = (root: string, ...segments: string[]) => {
+  const separator = runtimePathSeparator(root);
+  const cleanedRoot = normalizeRuntimePath(root);
+  const cleanedTail = segments
+    .flatMap((segment) => segment.split(/[\\/]+/u))
+    .filter(Boolean)
+    .join(separator);
+
+  return cleanedTail ? `${cleanedRoot}${separator}${cleanedTail}` : cleanedRoot;
+};
+
+const dirnameRuntimePath = (value: string) => {
+  const trimmed = normalizeRuntimePath(value);
+  const separator = runtimePathSeparator(trimmed);
+  const index = trimmed.lastIndexOf(separator);
+  if (index <= 0) {
+    return trimmed;
+  }
+
+  return trimmed.slice(0, index);
+};
+
 const isFreshThreadUnavailableError = (error: unknown) => {
   const message = getErrorMessage(error).toLowerCase();
   return (
@@ -299,6 +646,16 @@ const mapPersonality = (value: Config["personality"], fallback: SettingsState["p
   return fallback;
 };
 
+const invalidBackendModelProviderFromError = (error: unknown) => {
+  const message = getErrorMessage(error);
+  const match = message.match(/model provider\s+[`'"]?([^`'"\n]+)[`'"]?\s+not found/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return isProviderId(match[1].trim()) ? match[1].trim() : null;
+};
+
 const toSettingsState = (config: Config, fallback: SettingsState): SettingsState => {
   const notice = "notice" in config && typeof config.notice === "object" && config.notice ? config.notice : null;
   const analytics =
@@ -307,7 +664,7 @@ const toSettingsState = (config: Config, fallback: SettingsState): SettingsState
       : fallback.analytics;
 
   return {
-    provider: isProviderId(config.model_provider) ? config.model_provider : fallback.provider,
+    provider: fallback.provider,
     model: config.model ?? fallback.model,
     reasoningEffort: config.model_reasoning_effort ?? fallback.reasoningEffort,
     approvalPolicy: mapApprovalPolicy(config.approval_policy, fallback.approvalPolicy),
@@ -771,6 +1128,7 @@ const mergeThread = (thread: Thread, current?: ThreadRecord): ThreadRecord => {
   return {
     thread: mergedThread,
     plan: current?.plan ?? createDefaultPlan(mergedThread),
+    steers: mergeSteerHistory(current?.steers, readStoredThreadSteers(thread.id)),
     steerSuggestions: current?.steerSuggestions ?? DEFAULT_STEER_SUGGESTIONS,
     approvals: current?.approvals ?? [],
     terminals: mergeTerminalsForThread(mergedThread, current?.terminals),
@@ -976,6 +1334,17 @@ const buildExternalCliPrompt = (
   mentions: Array<MentionAttachment>,
   sharedThreadMemory?: string | null,
 ) => buildPromptText(text, mentions, adapter, sharedThreadMemory);
+
+const getTurnAgentMessageText = (turn: Turn) =>
+  turn.items
+    .filter(
+      (item): item is Extract<ThreadItem, { type: "agentMessage" }> =>
+        item.type === "agentMessage",
+    )
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
 
 const threadHasExternalProviderTurns = (thread: Thread) =>
   thread.turns.some((turn) =>
@@ -1357,6 +1726,248 @@ const parseUnifiedDiffChanges = (diff: string): Array<FileUpdateChange> => {
   return changes.length > 0
     ? changes
     : [createEditingDiffChange(diff.trimEnd())];
+};
+
+type RollbackHunkLine = {
+  type: "context" | "add" | "remove";
+  text: string;
+  noNewlineAfter: boolean;
+};
+
+type RollbackHunk = {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: Array<RollbackHunkLine>;
+};
+
+type ParsedRollbackChange = {
+  oldPath: string | null;
+  newPath: string | null;
+  hunks: Array<RollbackHunk>;
+};
+
+type RollbackTextBuffer = {
+  lines: Array<string>;
+  endsWithNewline: boolean;
+};
+
+const normalizeRollbackPatchPath = (value: string) =>
+  normalizeDiffPath(value).replace(/\\/g, "/");
+
+const isAbsoluteRuntimePath = (value: string) =>
+  value.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
+
+const parseUnifiedDiffRange = (value: string) => {
+  const [startToken, countToken] = value.split(",", 2);
+  const start = Number.parseInt(startToken, 10);
+  const count =
+    countToken === undefined || countToken === ""
+      ? 1
+      : Number.parseInt(countToken, 10);
+
+  if (!Number.isFinite(start) || !Number.isFinite(count)) {
+    throw new Error("Rollback is unavailable because a saved diff hunk is malformed.");
+  }
+
+  return { start, count };
+};
+
+const parseRollbackChange = (change: FileUpdateChange): ParsedRollbackChange => {
+  const fallbackPath = normalizeRollbackPatchPath(change.path);
+  if (!fallbackPath || fallbackPath === "Editing files") {
+    throw new Error(
+      "Rollback is unavailable because the saved change does not include a concrete file path.",
+    );
+  }
+
+  let oldPath = change.kind.type === "add" ? null : fallbackPath;
+  let newPath = change.kind.type === "delete" ? null : fallbackPath;
+  const hunks: Array<RollbackHunk> = [];
+  let currentHunk: RollbackHunk | null = null;
+
+  const flushHunk = () => {
+    if (currentHunk) {
+      hunks.push(currentHunk);
+      currentHunk = null;
+    }
+  };
+
+  const diffBody = change.diff.replace(/\r/g, "").replace(/^\n+|\n+$/g, "");
+  if (diffBody) {
+    for (const line of diffBody.split("\n")) {
+      if (line === "GIT binary patch" || line.startsWith("Binary files ")) {
+        throw new Error("Rollback is unavailable for binary file changes.");
+      }
+
+      if (line.startsWith("diff --git ")) {
+        flushHunk();
+        const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+        if (match) {
+          oldPath = normalizeRollbackPatchPath(match[1]);
+          newPath = normalizeRollbackPatchPath(match[2]);
+        }
+        continue;
+      }
+
+      if (line.startsWith("rename from ")) {
+        oldPath = normalizeRollbackPatchPath(line.slice("rename from ".length).trim());
+        continue;
+      }
+
+      if (line.startsWith("rename to ")) {
+        newPath = normalizeRollbackPatchPath(line.slice("rename to ".length).trim());
+        continue;
+      }
+
+      if (line.startsWith("--- ")) {
+        const source = line.slice(4).trim();
+        oldPath = source === "/dev/null" ? null : normalizeRollbackPatchPath(source);
+        continue;
+      }
+
+      if (line.startsWith("+++ ")) {
+        const target = line.slice(4).trim();
+        newPath = target === "/dev/null" ? null : normalizeRollbackPatchPath(target);
+        continue;
+      }
+
+      if (line.startsWith("@@")) {
+        flushHunk();
+        const match = line.match(/^@@ -(\d+(?:,\d+)?) \+(\d+(?:,\d+)?) @@/);
+        if (!match) {
+          throw new Error("Rollback is unavailable because a saved diff hunk header is malformed.");
+        }
+
+        const oldRange = parseUnifiedDiffRange(match[1]);
+        const newRange = parseUnifiedDiffRange(match[2]);
+        currentHunk = {
+          oldStart: oldRange.start,
+          oldCount: oldRange.count,
+          newStart: newRange.start,
+          newCount: newRange.count,
+          lines: [],
+        };
+        continue;
+      }
+
+      if (!currentHunk) {
+        continue;
+      }
+
+      if (line === "\\ No newline at end of file") {
+        const lastLine = currentHunk.lines[currentHunk.lines.length - 1];
+        if (lastLine) {
+          lastLine.noNewlineAfter = true;
+        }
+        continue;
+      }
+
+      const prefix = line[0];
+      if (prefix !== " " && prefix !== "+" && prefix !== "-") {
+        continue;
+      }
+
+      currentHunk.lines.push({
+        type: prefix === " " ? "context" : prefix === "+" ? "add" : "remove",
+        text: line.slice(1),
+        noNewlineAfter: false,
+      });
+    }
+  }
+
+  flushHunk();
+
+  if (change.kind.type === "update" && change.kind.move_path && (!oldPath || !newPath)) {
+    throw new Error(
+      "Rollback is unavailable for rename-only file changes without complete diff headers.",
+    );
+  }
+
+  return { oldPath, newPath, hunks };
+};
+
+const textToRollbackBuffer = (value: string): RollbackTextBuffer => {
+  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!normalized) {
+    return {
+      lines: [],
+      endsWithNewline: true,
+    };
+  }
+
+  const endsWithNewline = normalized.endsWith("\n");
+  const lines = normalized.split("\n");
+  if (endsWithNewline) {
+    lines.pop();
+  }
+
+  return {
+    lines,
+    endsWithNewline,
+  };
+};
+
+const rollbackBufferToText = (buffer: RollbackTextBuffer) => {
+  if (buffer.lines.length === 0) {
+    return "";
+  }
+
+  return `${buffer.lines.join("\n")}${buffer.endsWithNewline ? "\n" : ""}`;
+};
+
+const rollbackLineArraysEqual = (left: Array<string>, right: Array<string>) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const revertFileTextFromChange = (
+  currentText: string,
+  parsedChange: ParsedRollbackChange,
+  fileLabel: string,
+) => {
+  let buffer = textToRollbackBuffer(currentText);
+
+  for (const hunk of parsedChange.hunks.slice().reverse()) {
+    const currentSegment = hunk.lines.filter((line) => line.type !== "remove");
+    const previousSegment = hunk.lines.filter((line) => line.type !== "add");
+    const startIndex = Math.max(0, hunk.newStart - 1);
+    const actualSegment = buffer.lines.slice(
+      startIndex,
+      startIndex + currentSegment.length,
+    );
+
+    if (!rollbackLineArraysEqual(actualSegment, currentSegment.map((line) => line.text))) {
+      throw new Error(
+        `Rollback could not be applied cleanly to ${fileLabel}. The local file no longer matches the saved diff.`,
+      );
+    }
+
+    const nextLines = [...buffer.lines];
+    nextLines.splice(
+      startIndex,
+      currentSegment.length,
+      ...previousSegment.map((line) => line.text),
+    );
+
+    let endsWithNewline = buffer.endsWithNewline;
+    const touchesEndAfter =
+      startIndex + previousSegment.length === nextLines.length;
+    if (nextLines.length === 0) {
+      endsWithNewline = true;
+    } else if (touchesEndAfter) {
+      const lastLine = previousSegment[previousSegment.length - 1];
+      if (lastLine) {
+        endsWithNewline = !lastLine.noNewlineAfter;
+      }
+    }
+
+    buffer = {
+      lines: nextLines,
+      endsWithNewline,
+    };
+  }
+
+  return rollbackBufferToText(buffer);
 };
 
 const upsertLiveFileChangePreview = (items: Array<ThreadItem>, turnId: string, diff: string): Array<ThreadItem> => {
@@ -2198,7 +2809,7 @@ export class WorkspaceRuntimeService {
         enabled: true,
       }),
       this.request<ListMcpServerStatusResponse>("mcpServerStatus/list", {}),
-      this.request<ConfigReadResponse>("config/read", {}),
+      this.readConfigWithRecovery(),
     ]);
 
     const current = this.snapshot;
@@ -2257,6 +2868,25 @@ export class WorkspaceRuntimeService {
     if (firstThread) {
       await this.resumeThread(firstThread.id);
       await this.loadDirectory(firstThread.cwd);
+    }
+  }
+
+  private async readConfigWithRecovery() {
+    try {
+      return await this.request<ConfigReadResponse>("config/read", {});
+    } catch (error) {
+      const invalidProvider = invalidBackendModelProviderFromError(error);
+      if (!invalidProvider) {
+        throw error;
+      }
+
+      await this.request("config/value/write", {
+        keyPath: "model_provider",
+        value: null,
+        mergeStrategy: "replace",
+      });
+
+      return await this.request<ConfigReadResponse>("config/read", {});
     }
   }
 
@@ -2357,10 +2987,11 @@ export class WorkspaceRuntimeService {
       cwd?: string;
     },
   ) {
+    const resolvedCwd = await this.resolveWorkspaceCwd(options?.cwd);
+
     if (isHeadlessCliProvider(settings.provider)) {
       const threadId = randomLocalProviderThreadId(settings.provider);
-      const cwd =
-        options?.cwd ?? this.snapshot.threads[0]?.thread.cwd ?? "/home/allan";
+      const cwd = resolvedCwd ?? ".";
       const record = createBlankThreadRecord(
         threadId,
         "New Session",
@@ -2387,7 +3018,7 @@ export class WorkspaceRuntimeService {
     }
 
     const response = await this.request<ThreadStartResponse>("thread/start", {
-      cwd: options?.cwd ?? this.snapshot.threads[0]?.thread.cwd ?? "/home/allan",
+      cwd: resolvedCwd,
       model: settings.model,
       approvalPolicy: settings.approvalPolicy,
       sandbox: settings.sandboxMode,
@@ -2995,29 +3626,64 @@ export class WorkspaceRuntimeService {
       return false;
     }
 
-    const uploadedFileMentions = await this.uploadFiles(record.thread.cwd, args.files);
-    const uploadedImages = await this.uploadImages(record.thread.cwd, args.images);
-    const inputs = toTurnInputs(
-      args.prompt,
-      [...args.mentions, ...uploadedFileMentions],
-      args.skills,
-      uploadedImages,
-      this.getActiveProviderId(),
-    );
+    const steerEntry = createSteerEntry(args.threadId, activeTurn.id, args, "pending");
 
     this.mutate((snapshot) => {
-      activeTurn.items.forEach((item) => stopStreamsForItem(snapshot, item.id));
+      updateThreadRecord(snapshot, args.threadId, (current) => ({
+        ...current,
+        steers: mergeSteerHistory([steerEntry], current.steers),
+      }));
     });
 
     try {
+      const uploadedFileMentions = await this.uploadFiles(record.thread.cwd, args.files);
+      const uploadedImages = await this.uploadImages(record.thread.cwd, args.images);
+      const inputs = toTurnInputs(
+        args.prompt,
+        [...args.mentions, ...uploadedFileMentions],
+        args.skills,
+        uploadedImages,
+        this.getActiveProviderId(),
+      );
+
+      this.mutate((snapshot) => {
+        activeTurn.items.forEach((item) => stopStreamsForItem(snapshot, item.id));
+      });
+
       await this.request("turn/steer", {
         threadId: args.threadId,
         expectedTurnId: activeTurn.id,
         input: inputs,
       });
 
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, args.threadId, (current) => ({
+          ...current,
+          steers: mergeSteerHistory(
+            current.steers?.map((entry) =>
+              entry.id === steerEntry.id ? { ...entry, status: "applied" } : entry,
+            ),
+          ),
+        }));
+      });
+      writeStoredThreadSteers(
+        args.threadId,
+        this.snapshot.threads.find((entry) => entry.thread.id === args.threadId)?.steers,
+      );
+      await this.resumeThread(args.threadId, true).catch(() => undefined);
+
       return true;
     } catch {
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, args.threadId, (current) => ({
+          ...current,
+          steers: current.steers?.filter((entry) => entry.id !== steerEntry.id) ?? [],
+        }));
+      });
+      writeStoredThreadSteers(
+        args.threadId,
+        this.snapshot.threads.find((entry) => entry.thread.id === args.threadId)?.steers,
+      );
       await this.resumeThread(args.threadId, true).catch(() => undefined);
       return false;
     }
@@ -3068,7 +3734,93 @@ export class WorkspaceRuntimeService {
     });
   }
 
+  private async readRuntimeFileOrNull(path: string) {
+    try {
+      return await this.readFile(path);
+    } catch (error) {
+      if (isRuntimeFileNotFoundError(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private resolveRollbackPath(baseCwd: string, filePath: string | null) {
+    if (!filePath) {
+      return null;
+    }
+
+    return isAbsoluteRuntimePath(filePath)
+      ? filePath
+      : joinRuntimePath(baseCwd, filePath);
+  }
+
+  private async rollbackLocalFileChange(baseCwd: string, change: FileUpdateChange) {
+    const parsedChange = parseRollbackChange(change);
+    const currentPath = this.resolveRollbackPath(
+      baseCwd,
+      parsedChange.newPath ?? parsedChange.oldPath,
+    );
+    const previousPath = this.resolveRollbackPath(baseCwd, parsedChange.oldPath);
+    const fileLabel = currentPath ?? previousPath ?? change.path;
+
+    let currentText = "";
+    if (currentPath) {
+      const existing = await this.readRuntimeFileOrNull(currentPath);
+      if (existing === null) {
+        if (parsedChange.newPath === null) {
+          currentText = "";
+        } else {
+          throw new Error(
+            `Rollback could not find ${currentPath}. The local file state no longer matches the selected prompt.`,
+          );
+        }
+      } else {
+        currentText = existing;
+      }
+    }
+
+    const revertedText =
+      parsedChange.hunks.length > 0
+        ? revertFileTextFromChange(currentText, parsedChange, fileLabel)
+        : currentText;
+
+    if (previousPath === null) {
+      if (currentPath) {
+        await this.request("fs/remove", {
+          path: currentPath,
+          force: true,
+        }).catch(() => undefined);
+      }
+      return;
+    }
+
+    if (currentPath && currentPath !== previousPath) {
+      const existingTarget = await this.readRuntimeFileOrNull(previousPath);
+      if (existingTarget !== null) {
+        throw new Error(
+          `Rollback cannot restore ${previousPath} because a local file already exists there.`,
+        );
+      }
+    }
+
+    await this.request("fs/createDirectory", {
+      path: dirnameRuntimePath(previousPath),
+      recursive: true,
+    });
+    await this.writeFile(previousPath, revertedText);
+
+    if (currentPath && currentPath !== previousPath) {
+      await this.request("fs/remove", {
+        path: currentPath,
+        force: true,
+      }).catch(() => undefined);
+    }
+  }
+
   async readGitGraph(cwd: string, limit = 80) {
+    const resolvedCwd = await this.resolveGitWorkspaceCwd(cwd);
     const fieldSeparator = String.fromCharCode(31);
     const prettyFormat = [
       `${fieldSeparator}%h`,
@@ -3090,7 +3842,7 @@ export class WorkspaceRuntimeService {
         "-n",
         String(Math.max(20, Math.min(limit, 120))),
       ],
-      cwd,
+      cwd: resolvedCwd,
       timeoutMs: 5000,
     });
 
@@ -3106,6 +3858,7 @@ export class WorkspaceRuntimeService {
   }
 
   async readGitStatus(cwd: string) {
+    const resolvedCwd = await this.resolveGitWorkspaceCwd(cwd);
     const response = await this.request<CommandExecResponse>("command/exec", {
       command: [
         "git",
@@ -3114,7 +3867,7 @@ export class WorkspaceRuntimeService {
         "--branch",
         "--renames",
       ],
-      cwd,
+      cwd: resolvedCwd,
       timeoutMs: 5000,
     });
 
@@ -3129,8 +3882,590 @@ export class WorkspaceRuntimeService {
     return response.stdout;
   }
 
+  private async runCommand(
+    command: string[],
+    cwd?: string | null,
+    options?: {
+      timeoutMs?: number;
+      disableTimeout?: boolean;
+    },
+  ) {
+    const params: {
+      command: string[];
+      cwd?: string | null;
+      timeoutMs?: number;
+      disableTimeout?: boolean;
+    } = {
+      command,
+      timeoutMs: options?.timeoutMs,
+      disableTimeout: options?.disableTimeout,
+    };
+
+    if (cwd && cwd.trim()) {
+      params.cwd = cwd;
+    }
+
+    return await this.request<CommandExecResponse>("command/exec", params);
+  }
+
+  private commandFailureDetails(
+    response: CommandExecResponse,
+    fallback: string,
+  ) {
+    const details = [response.stderr, response.stdout]
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .join("\n")
+      .trim();
+
+    return details || fallback;
+  }
+
+  private hasGitStatusEntries(rawStatus: string) {
+    return rawStatus
+      .split("\n")
+      .map((line) => line.trim())
+      .some((line) => line.length > 0 && !line.startsWith("## "));
+  }
+
+  private workspacePathCandidates(...values: Array<string | null | undefined>) {
+    return [...new Set(values.map((value) => safeString(value).trim()).filter(Boolean))];
+  }
+
+  private async directoryExists(path: string) {
+    try {
+      await this.request<FsReadDirectoryResponse>("fs/readDirectory", {
+        path,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async detectServerCwd() {
+    const attempts: Array<string[]> = [
+      ["pwd"],
+      ["cmd", "/d", "/s", "/c", "cd"],
+    ];
+
+    for (const command of attempts) {
+      const response = await this.runCommand(command, null, { timeoutMs: 5000 }).catch(
+        () => null,
+      );
+
+      const cwd = response?.exitCode === 0 ? response.stdout.trim() : "";
+      if (cwd) {
+        return cwd;
+      }
+    }
+
+    return null;
+  }
+
+  private async resolveWorkspaceCwd(preferredCwd?: string | null) {
+    const candidates = this.workspacePathCandidates(
+      preferredCwd,
+      this.snapshot.directoryCatalogRoot,
+      ...this.snapshot.threads.map((entry) => entry.thread.cwd),
+    );
+
+    for (const candidate of candidates) {
+      if (await this.directoryExists(candidate)) {
+        return candidate;
+      }
+    }
+
+    const detected = await this.detectServerCwd();
+    if (detected && (await this.directoryExists(detected))) {
+      return detected;
+    }
+
+    return detected || candidates[0] || null;
+  }
+
+  private async resolveGitWorkspaceCwd(preferredCwd?: string | null) {
+    const fallbackCwd = await this.resolveWorkspaceCwd(preferredCwd);
+    const candidates = this.workspacePathCandidates(preferredCwd, fallbackCwd);
+    let sawDirectory = false;
+    let lastGitFailure: string | null = null;
+
+    for (const candidate of candidates) {
+      if (!(await this.directoryExists(candidate))) {
+        continue;
+      }
+
+      sawDirectory = true;
+      const response = await this.runCommand(
+        ["git", "rev-parse", "--show-toplevel"],
+        candidate,
+        { timeoutMs: 5000 },
+      );
+
+      if (response.exitCode === 0) {
+        return response.stdout.trim() || candidate;
+      }
+
+      lastGitFailure = this.commandFailureDetails(
+        response,
+        "This directory is not a git repository.",
+      );
+    }
+
+    if (sawDirectory) {
+      throw new Error(
+        lastGitFailure || "This session is not attached to a git repository.",
+      );
+    }
+
+    throw new Error(
+      "No project directory is attached to this session. Open the repository folder first.",
+    );
+  }
+
+  private async resolveWorkspaceProjectRoot(cwd: string) {
+    const resolvedCwd = await this.resolveWorkspaceCwd(cwd);
+    if (!resolvedCwd) {
+      throw new Error(
+        "No project directory is attached to this session. Open the repository folder first.",
+      );
+    }
+
+    const response = await this.runCommand(
+      ["git", "rev-parse", "--show-toplevel"],
+      resolvedCwd,
+      { timeoutMs: 5000 },
+    );
+
+    if (response.exitCode !== 0) {
+      return resolvedCwd;
+    }
+
+    return response.stdout.trim() || resolvedCwd;
+  }
+
+  private async resolveWorkspaceProjectSettingsPath(cwd: string) {
+    const projectRoot = await this.resolveWorkspaceProjectRoot(cwd);
+    return joinRuntimePath(projectRoot, WORKSPACE_PROJECT_SETTINGS_RELATIVE_PATH);
+  }
+
+  private async readWorkspaceProjectSettings(
+    cwd: string,
+    fallbackProvider = this.snapshot.settings.provider,
+  ) {
+    const filePath = await this.resolveWorkspaceProjectSettingsPath(cwd);
+
+    try {
+      const response = await this.request<FsReadFileResponse>("fs/readFile", {
+        path: filePath,
+      });
+      const parsed = JSON.parse(base64ToText(response.dataBase64)) as unknown;
+
+      return {
+        filePath,
+        settings: normalizeWorkspaceProjectSettings(parsed, fallbackProvider),
+      };
+    } catch (error) {
+      const message = getErrorMessage(error).toLowerCase();
+      if (message.includes("enoent") || message.includes("not found")) {
+        return {
+          filePath,
+          settings: normalizeWorkspaceProjectSettings({}, fallbackProvider),
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async readWorkspaceCommitPreferences(cwd: string) {
+    const { filePath, settings } = await this.readWorkspaceProjectSettings(cwd);
+    return {
+      provider: settings.commitAssistant.provider,
+      filePath,
+    };
+  }
+
+  async writeWorkspaceCommitPreferences(
+    cwd: string,
+    patch: { provider?: ProviderId },
+  ) {
+    const { filePath, settings } = await this.readWorkspaceProjectSettings(cwd);
+    const nextSettings: WorkspaceProjectSettings = {
+      ...settings,
+      commitAssistant: {
+        ...settings.commitAssistant,
+        ...(patch.provider ? { provider: patch.provider } : {}),
+      },
+    };
+
+    await this.request("fs/createDirectory", {
+      path: dirnameRuntimePath(filePath),
+      recursive: true,
+    });
+    await this.request("fs/writeFile", {
+      path: filePath,
+      dataBase64: textToBase64(serializeWorkspaceProjectSettings(nextSettings)),
+    });
+
+    return {
+      provider: nextSettings.commitAssistant.provider,
+      filePath,
+    };
+  }
+
+  private async buildCommitGenerationContext(
+    cwd: string,
+  ): Promise<CommitGenerationContext> {
+    const resolvedCwd = await this.resolveGitWorkspaceCwd(cwd);
+    const rawStatus = await this.readGitStatus(resolvedCwd);
+    if (!this.hasGitStatusEntries(rawStatus)) {
+      throw new Error("No changes are available to describe.");
+    }
+
+    const stagedCheck = await this.runCommand(
+      ["git", "diff", "--cached", "--quiet", "--exit-code", "--no-ext-diff"],
+      resolvedCwd,
+      { timeoutMs: 5000 },
+    );
+    if (![0, 1].includes(stagedCheck.exitCode)) {
+      throw new Error(
+        this.commandFailureDetails(
+          stagedCheck,
+          "Failed to inspect staged changes.",
+        ),
+      );
+    }
+
+    const scope: CommitGenerationContext["scope"] =
+      stagedCheck.exitCode === 1 ? "staged" : "working-tree";
+    const diffStatCommand =
+      scope === "staged"
+        ? ["git", "diff", "--cached", "--stat", "--no-ext-diff"]
+        : ["git", "diff", "--stat", "--no-ext-diff"];
+    const diffCommand =
+      scope === "staged"
+        ? ["git", "diff", "--cached", "--no-ext-diff", "--unified=3"]
+        : ["git", "diff", "--no-ext-diff", "--unified=3"];
+
+    const [diffStatResponse, diffResponse] = await Promise.all([
+      this.runCommand(diffStatCommand, resolvedCwd, { timeoutMs: 5000 }),
+      this.runCommand(diffCommand, resolvedCwd, { timeoutMs: 10000 }),
+    ]);
+
+    if (diffStatResponse.exitCode !== 0) {
+      throw new Error(
+        this.commandFailureDetails(
+          diffStatResponse,
+          "Failed to read git diff statistics.",
+        ),
+      );
+    }
+
+    if (diffResponse.exitCode !== 0) {
+      throw new Error(
+        this.commandFailureDetails(diffResponse, "Failed to read git diff."),
+      );
+    }
+
+    return {
+      scope,
+      status: rawStatus,
+      diffStat: diffStatResponse.stdout,
+      diff: diffResponse.stdout,
+    };
+  }
+
+  private async waitForTurnCompletion(threadId: string, turnId: string) {
+    const timeoutAt = Date.now() + 90000;
+
+    while (Date.now() < timeoutAt) {
+      const response = await this.request<ThreadReadResponse>("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      const turn = response.thread.turns.find((entry) => entry.id === turnId);
+
+      if (turn && turn.status !== "inProgress") {
+        return turn;
+      }
+
+      await wait(400);
+    }
+
+    throw new Error("Timed out waiting for the commit message draft.");
+  }
+
+  private async commitAssistantSkill() {
+    const skill =
+      this.snapshot.installedSkills.find(
+        (entry) =>
+          entry.enabled && entry.name.trim().toLowerCase() === "commit-work",
+      ) ?? null;
+
+    if (!skill) {
+      return null;
+    }
+
+    try {
+      await this.request<FsReadFileResponse>("fs/readFile", {
+        path: skill.path,
+      });
+      return skill;
+    } catch {
+      return null;
+    }
+  }
+
+  private async generateCommitMessageWithCliProvider(
+    cwd: string,
+    providerId: ProviderId,
+    prompt: string,
+  ) {
+    const adapter = getProviderAdapter(providerId);
+    const binaryName = providerId === "opencode" ? "opencode" : "qwen";
+    const resolvedBinary = await this.resolveCliBinary(binaryName, cwd);
+
+    if (!resolvedBinary) {
+      throw new Error(
+        `${adapter.displayName} is not installed on the host machine.`,
+      );
+    }
+
+    const command = buildExternalCliCommand({
+      binaryPath: resolvedBinary.path,
+      adapter,
+      prompt,
+      cwd,
+      model:
+        providerId === this.snapshot.settings.provider
+          ? this.snapshot.settings.model
+          : adapter.defaultModel ?? "default",
+      filePaths: [],
+    });
+
+    if (!command) {
+      throw new Error(`${adapter.displayName} does not support commit drafting.`);
+    }
+
+    const response = await this.runCommand(command, cwd, {
+      disableTimeout: true,
+    });
+
+    if (response.exitCode !== 0) {
+      throw new Error(
+        this.commandFailureDetails(
+          response,
+          `${adapter.displayName} failed to generate a commit message.`,
+        ),
+      );
+    }
+
+    return extractCommitMessageCandidate(
+      [response.stdout, response.stderr]
+        .filter((value) => value.trim().length > 0)
+        .join("\n"),
+    );
+  }
+
+  private async generateCommitMessageWithBridgeProvider(
+    cwd: string,
+    providerId: ProviderId,
+    prompt: string,
+  ) {
+    const adapter = getProviderAdapter(providerId);
+    const commitSkill = await this.commitAssistantSkill();
+    const model =
+      providerId === this.snapshot.settings.provider
+        ? this.snapshot.settings.model
+        : adapter.defaultModel;
+    const response = await this.request<ThreadStartResponse>("thread/start", {
+      cwd,
+      model: model && model !== "default" ? model : null,
+      modelProvider: providerId,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      personality: "pragmatic" satisfies Personality,
+      ephemeral: true,
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
+    });
+    const turnResponse = await this.request<TurnStartResponse>("turn/start", {
+      threadId: response.thread.id,
+      input: toTurnInputs(
+        prompt,
+        [],
+        commitSkill ? [commitSkill] : [],
+        [],
+        providerId,
+      ),
+      model: model && model !== "default" ? model : null,
+      approvalPolicy: "never",
+      effort: this.snapshot.settings.reasoningEffort,
+      personality: "pragmatic" satisfies Personality,
+      sandboxPolicy: {
+        type: "readOnly",
+        access: {
+          type: "restricted",
+          includePlatformDefaults: true,
+          readableRoots: [cwd],
+        },
+        networkAccess: false,
+      },
+    });
+    const completedTurn = await this.waitForTurnCompletion(
+      response.thread.id,
+      turnResponse.turn.id,
+    );
+
+    if (completedTurn.status === "failed") {
+      throw new Error(
+        completedTurn.error?.message ||
+          `${adapter.displayName} failed to generate a commit message.`,
+      );
+    }
+
+    return extractCommitMessageCandidate(getTurnAgentMessageText(completedTurn));
+  }
+
+  async generateCommitMessage(args: { cwd: string; providerId: ProviderId }) {
+    const resolvedCwd = await this.resolveGitWorkspaceCwd(args.cwd);
+    const context = await this.buildCommitGenerationContext(resolvedCwd);
+    const prompt = buildCommitGenerationPrompt(context);
+    const message = isHeadlessCliProvider(args.providerId)
+      ? await this.generateCommitMessageWithCliProvider(
+          resolvedCwd,
+          args.providerId,
+          prompt,
+        )
+      : await this.generateCommitMessageWithBridgeProvider(
+          resolvedCwd,
+          args.providerId,
+          prompt,
+        );
+
+    if (!message.trim()) {
+      throw new Error("The selected provider returned an empty commit message.");
+    }
+
+    return message.trim();
+  }
+
+  private async readGitHeadInfo(cwd: string) {
+    const [shaResponse, branchResponse] = await Promise.all([
+      this.runCommand(["git", "rev-parse", "HEAD"], cwd, {
+        timeoutMs: 5000,
+      }),
+      this.runCommand(["git", "branch", "--show-current"], cwd, {
+        timeoutMs: 5000,
+      }),
+    ]);
+
+    return {
+      sha: shaResponse.exitCode === 0 ? shaResponse.stdout.trim() || null : null,
+      branch:
+        branchResponse.exitCode === 0
+          ? branchResponse.stdout.trim() || null
+          : null,
+    };
+  }
+
+  async commitWorkingTree(args: { cwd: string; message: string }) {
+    const resolvedCwd = await this.resolveGitWorkspaceCwd(args.cwd);
+    const paragraphs = splitCommitMessageParagraphs(args.message);
+    if (paragraphs.length === 0) {
+      throw new Error("Enter a commit message first.");
+    }
+
+    const rawStatus = await this.readGitStatus(resolvedCwd);
+    if (!this.hasGitStatusEntries(rawStatus)) {
+      throw new Error("There are no git changes to commit.");
+    }
+
+    const stagedCheck = await this.runCommand(
+      ["git", "diff", "--cached", "--quiet", "--exit-code", "--no-ext-diff"],
+      resolvedCwd,
+      { timeoutMs: 5000 },
+    );
+    if (![0, 1].includes(stagedCheck.exitCode)) {
+      throw new Error(
+        this.commandFailureDetails(
+          stagedCheck,
+          "Failed to inspect staged changes.",
+        ),
+      );
+    }
+
+    let stagedAll = false;
+    if (stagedCheck.exitCode === 0) {
+      const addResponse = await this.runCommand(["git", "add", "-A"], resolvedCwd, {
+        timeoutMs: 15000,
+      });
+
+      if (addResponse.exitCode !== 0) {
+        throw new Error(
+          this.commandFailureDetails(addResponse, "Failed to stage changes."),
+        );
+      }
+
+      stagedAll = true;
+    }
+
+    const commitCommand = [
+      "git",
+      "commit",
+      "-m",
+      paragraphs[0],
+      ...paragraphs
+        .slice(1)
+        .flatMap((paragraph) => ["-m", paragraph] as const),
+    ];
+    const commitResponse = await this.runCommand(commitCommand, resolvedCwd, {
+      disableTimeout: true,
+    });
+
+    if (commitResponse.exitCode !== 0) {
+      throw new Error(
+        this.commandFailureDetails(commitResponse, "Failed to create commit."),
+      );
+    }
+
+    const headInfo = await this.readGitHeadInfo(resolvedCwd);
+    this.mutate((snapshot) => {
+      snapshot.threads = snapshot.threads.map((record) =>
+        record.thread.cwd === args.cwd || record.thread.cwd === resolvedCwd
+          ? {
+              ...record,
+              thread: {
+                ...record.thread,
+                cwd: resolvedCwd,
+                gitInfo: {
+                  sha: headInfo.sha,
+                  branch: headInfo.branch,
+                  originUrl: record.thread.gitInfo?.originUrl ?? null,
+                },
+                updatedAt: Math.floor(Date.now() / 1000),
+              },
+            }
+          : record,
+      );
+    });
+
+    return {
+      summary:
+        commitResponse.stdout.trim() ||
+        commitResponse.stderr.trim() ||
+        "Committed changes.",
+      sha: headInfo.sha,
+      stagedAll,
+    };
+  }
+
   private providerCheckCwd() {
-    return this.snapshot.threads[0]?.thread.cwd ?? "/home/allan/codex-console";
+    return (
+      this.snapshot.directoryCatalogRoot ||
+      this.snapshot.threads[0]?.thread.cwd ||
+      "."
+    );
   }
 
   private defaultProviderSetupState(providerId: ProviderId) {
@@ -4258,7 +5593,109 @@ console.log(qwenRoot);
     });
   }
 
-  async resolveApproval(requestId: string, approved: boolean) {
+  async rollbackToTurn(threadId: string, targetTurnId: string) {
+    await this.ensureThreadLoaded(threadId);
+
+    const currentRecord = this.snapshot.threads.find(
+      (entry) => entry.thread.id === threadId,
+    );
+    if (!currentRecord) {
+      throw new Error("Thread not found.");
+    }
+
+    if (currentRecord.thread.turns.some((turn) => turn.status === "inProgress")) {
+      throw new Error("Wait for the current response to finish before rolling back.");
+    }
+
+    const completedTurns = stripOptimisticTurns(currentRecord.thread.turns).filter(
+      (turn) => turn.status !== "inProgress",
+    );
+    const rollbackStartIndex = completedTurns.findIndex(
+      (turn) => turn.id === targetTurnId,
+    );
+    if (rollbackStartIndex === -1) {
+      throw new Error("The selected turn can no longer be rolled back.");
+    }
+    const turnsToRollback = completedTurns.slice(rollbackStartIndex);
+
+    if (turnsToRollback.length === 0) {
+      throw new Error("There is no completed turn to roll back.");
+    }
+
+    const rollbackRoot =
+      currentRecord.thread.cwd.trim() || this.snapshot.directoryCatalogRoot?.trim() || "";
+    const fileChangeItems = turnsToRollback
+      .slice()
+      .reverse()
+      .flatMap((turn) =>
+        turn.items
+          .filter(
+            (item): item is Extract<ThreadItem, { type: "fileChange" }> =>
+              item.type === "fileChange" && item.status === "completed",
+          )
+          .slice()
+          .reverse(),
+      );
+
+    if (fileChangeItems.length > 0) {
+      if (!rollbackRoot) {
+        throw new Error("Rollback requires a local working directory for this thread.");
+      }
+
+      for (const item of fileChangeItems) {
+        for (const change of item.changes.slice().reverse()) {
+          await this.rollbackLocalFileChange(rollbackRoot, change);
+        }
+      }
+    }
+
+    const response = await this.request<ThreadRollbackResponse>(
+      "thread/rollback",
+      {
+        threadId,
+        numTurns: turnsToRollback.length,
+      },
+    );
+
+    this.mutate((snapshot) => {
+      const existingRecord = snapshot.threads.find(
+        (entry) => entry.thread.id === threadId,
+      );
+      if (!existingRecord) {
+        return;
+      }
+
+      const nextTurns = sortTurnsById(
+        response.thread.turns.map((turn) =>
+          mergeIncomingTurn(
+            turn,
+            existingRecord.thread.turns.find((entry) => entry.id === turn.id),
+          ),
+        ),
+      );
+      const nextThread: Thread = {
+        ...existingRecord.thread,
+        ...response.thread,
+        cwd: rollbackRoot || response.thread.cwd || existingRecord.thread.cwd,
+        turns: nextTurns,
+      };
+
+      updateThreadRecord(snapshot, threadId, (record) => ({
+        ...record,
+        thread: nextThread,
+        steers: (record.steers ?? []).filter((entry) =>
+          nextTurns.some((turn) => turn.id === entry.turnId),
+        ),
+        approvals: record.approvals.filter(
+          (approval) =>
+            !approval.turnId || nextTurns.some((turn) => turn.id === approval.turnId),
+        ),
+        review: parseReviewFindings(nextThread),
+      }));
+    });
+  }
+
+  async resolveApproval(requestId: string, decision: ApprovalDecision) {
     const request = this.approvalMap.get(requestId);
     if (!request) {
       return;
@@ -4266,25 +5703,38 @@ console.log(qwenRoot);
 
     if (request.method === "item/commandExecution/requestApproval") {
       this.respond(request.requestId, {
-        decision: approved ? "accept" : "decline",
+        decision,
       });
     }
 
     if (request.method === "item/fileChange/requestApproval") {
       this.respond(request.requestId, {
-        decision: approved ? "accept" : "decline",
+        decision,
       });
     }
 
     if (request.method === "item/permissions/requestApproval") {
       this.respond(request.requestId, {
-        permissions: approved ? (request.params.permissions ?? {}) : {},
-        scope: "turn",
+        permissions:
+          decision === "accept" || decision === "acceptForSession"
+            ? (request.params.permissions ?? {})
+            : {},
+        scope: decision === "acceptForSession" ? "session" : "turn",
+      });
+    }
+
+    if (request.method === "execCommandApproval" || request.method === "applyPatchApproval") {
+      this.respond(request.requestId, {
+        decision: legacyReviewDecisionFromApprovalDecision(decision),
       });
     }
 
     this.mutate((snapshot) => {
-      const record = snapshot.threads.find((entry) => entry.thread.id === safeString(request.params.threadId));
+      const threadId = safeString(
+        request.params.threadId,
+        safeString(request.params.conversationId),
+      );
+      const record = snapshot.threads.find((entry) => entry.thread.id === threadId);
       if (!record) {
         return;
       }
@@ -4293,7 +5743,7 @@ console.log(qwenRoot);
         approval.id === requestId
           ? {
               ...approval,
-              state: approved ? "approved" : "declined",
+              state: approvalStateFromDecision(decision),
             }
           : approval,
       );
@@ -4371,21 +5821,27 @@ console.log(qwenRoot);
   private buildApproval(requestId: string, method: string, params: Record<string, unknown>): ApprovalRequest | null {
     if (method === "item/commandExecution/requestApproval") {
       const commandParams = params as unknown as CommandExecutionRequestApprovalParams;
+      const permissionsSummary = summarizeAdditionalPermissions(commandParams.additionalPermissions);
       return {
         id: requestId,
         kind: "command",
         title: "Approve command execution",
         detail: commandParams.reason ?? "The agent is requesting permission to run a command.",
-        risk: "medium",
+        risk:
+          commandParams.networkApprovalContext || permissionsSummary.length > 0 ? "high" : "medium",
         state: "pending",
         threadId: commandParams.threadId,
         turnId: commandParams.turnId,
         itemId: commandParams.itemId,
         method,
         command: commandParams.command ?? undefined,
-        availableDecisions: toArray(commandParams.availableDecisions).map((entry) =>
-          typeof entry === "string" ? entry : Object.keys(entry)[0],
-        ),
+        cwd: commandParams.cwd ?? undefined,
+        availableDecisions: normalizeApprovalDecisionList(commandParams.availableDecisions, [
+          "accept",
+          "decline",
+        ]),
+        permissionsSummary:
+          permissionsSummary.length > 0 ? permissionsSummary : undefined,
       };
     }
 
@@ -4403,6 +5859,9 @@ console.log(qwenRoot);
         itemId: fileParams.itemId,
         method,
         files: fileParams.grantRoot ? [fileParams.grantRoot] : undefined,
+        availableDecisions: fileParams.grantRoot
+          ? ["accept", "acceptForSession", "decline"]
+          : ["accept", "decline"],
       };
     }
 
@@ -4459,6 +5918,8 @@ console.log(qwenRoot);
     }
 
     if (method === "item/permissions/requestApproval") {
+      const permissionsParams = params as unknown as { permissions?: AdditionalPermissionProfile | null };
+      const permissionsSummary = summarizeAdditionalPermissions(permissionsParams.permissions);
       return {
         id: requestId,
         kind: "permissions",
@@ -4470,6 +5931,71 @@ console.log(qwenRoot);
         turnId: safeString(params.turnId),
         itemId: safeString(params.itemId),
         method,
+        availableDecisions: ["accept", "decline"],
+        permissionsSummary:
+          permissionsSummary.length > 0 ? permissionsSummary : undefined,
+      };
+    }
+
+    if (method === "execCommandApproval") {
+      const commandParams = params as {
+        approvalId?: string | null;
+        callId?: string | null;
+        command?: Array<string>;
+        conversationId?: string;
+        cwd?: string | null;
+        reason?: string | null;
+      };
+
+      return {
+        id: requestId,
+        kind: "command",
+        title: "Approve command execution",
+        detail:
+          safeString(commandParams.reason) ||
+          "The agent is requesting permission to run a command.",
+        risk: "medium",
+        state: "pending",
+        threadId: safeString(commandParams.conversationId),
+        turnId: null,
+        itemId: safeString(commandParams.approvalId, safeString(commandParams.callId)) || null,
+        method,
+        command: commandArrayToString(commandParams.command),
+        cwd: safeString(commandParams.cwd) || undefined,
+        availableDecisions: ["accept", "acceptForSession", "decline"],
+      };
+    }
+
+    if (method === "applyPatchApproval") {
+      const patchParams = params as {
+        callId?: string | null;
+        conversationId?: string;
+        fileChanges?: Record<string, unknown> | null;
+        grantRoot?: string | null;
+        reason?: string | null;
+      };
+      const files = [
+        ...Object.keys(patchParams.fileChanges ?? {}),
+        ...(safeString(patchParams.grantRoot) ? [safeString(patchParams.grantRoot)] : []),
+      ];
+
+      return {
+        id: requestId,
+        kind: "patch",
+        title: "Approve file changes",
+        detail:
+          safeString(patchParams.reason) ||
+          "The agent is requesting write access for file updates.",
+        risk: patchParams.grantRoot ? "high" : "medium",
+        state: "pending",
+        threadId: safeString(patchParams.conversationId),
+        turnId: null,
+        itemId: safeString(patchParams.callId) || null,
+        method,
+        files: files.length > 0 ? [...new Set(files)] : undefined,
+        availableDecisions: patchParams.grantRoot
+          ? ["accept", "acceptForSession", "decline"]
+          : ["accept", "decline"],
       };
     }
 

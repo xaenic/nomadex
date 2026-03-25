@@ -38,6 +38,7 @@ import {
   createBlankThreadRecord,
   createFallbackDashboardData,
   createSimulatedTurn,
+  type ApprovalDecision,
   type ComposerFile,
   type ComposerImage,
   type DashboardData,
@@ -108,8 +109,10 @@ import type {
   WorkspaceContextValue,
 } from "./workspaceTypes";
 import { ChatTranscript } from "./components/ChatTranscript";
+import { ApprovalRequestCard } from "./components/ApprovalRequestCard";
 import { BrandMark } from "./components/BrandMark";
 import { ConnectionLoadingState } from "./components/ConnectionLoadingState";
+import { CommitComposerCard } from "./components/CommitComposerCard";
 import { FileChangeSummary } from "./components/FileChangeSummary";
 import { GitActivityGraph } from "./components/GitActivityGraph";
 import { QuestionRequestCard } from "./components/QuestionRequestCard";
@@ -177,7 +180,7 @@ type CommandPaletteGroup = {
 
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
-const SESSION_PROJECT_ROOT = "/home/allan";
+const SESSION_PROJECT_ROOT = FALLBACK_DATA.directoryCatalogRoot || ".";
 const INITIAL_VISIBLE_TURNS = 18;
 const TURN_HISTORY_BATCH = 14;
 const STARTUP_CONNECTION_MESSAGES = [
@@ -662,7 +665,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       files: Array<ComposerFile>;
       settings: SettingsState;
     }) => {
-      const threadCwd = snapshotRef.current.threads.find((entry) => entry.thread.id === threadId)?.thread.cwd ?? "/home/allan/codex-console";
+      const threadCwd =
+        snapshotRef.current.threads.find((entry) => entry.thread.id === threadId)
+          ?.thread.cwd ??
+        snapshotRef.current.directoryCatalogRoot ??
+        ".";
       const result = createSimulatedTurn({
         threadId,
         prompt,
@@ -904,6 +911,13 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
           },
           async () => {
             let applied = false;
+            const steerEntry = {
+              id: `steer:${args.threadId}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+              turnId: "",
+              prompt: args.prompt.trim() || "Steer applied",
+              createdAt: Date.now(),
+              status: "applied" as const,
+            };
 
             mutateLocal((draft) => {
               draft.threads = draft.threads.map((record) => {
@@ -917,38 +931,14 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                 }
 
                 applied = true;
+                steerEntry.turnId = activeTurn.id;
 
                 return {
                   ...record,
-                  plan: record.plan
-                    ? {
-                        ...record.plan,
-                        explanation: `Steer applied: ${args.prompt}`,
-                      }
-                    : {
-                        explanation: `Steer applied: ${args.prompt}`,
-                        steps: [],
-                      },
-                  thread: {
-                    ...record.thread,
-                    turns: record.thread.turns.map((turn) => {
-                      if (turn.id !== activeTurn.id) {
-                        return turn;
-                      }
-
-                      return {
-                        ...turn,
-                        items: turn.items.map((item) =>
-                          item.type === "agentMessage"
-                            ? {
-                                ...item,
-                                text: `Steer applied: ${args.prompt}\n\n${item.text}`,
-                              }
-                            : item,
-                        ),
-                      };
-                    }),
-                  },
+                  steers: [
+                    steerEntry,
+                    ...(record.steers ?? []).filter((entry) => entry.id !== steerEntry.id),
+                  ],
                 };
               });
             });
@@ -1038,6 +1028,68 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             return await runtime.readGitStatus(cwd);
           },
           async () => "",
+        ),
+      readWorkspaceCommitPreferences: async (cwd) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.readWorkspaceCommitPreferences(cwd);
+          },
+          async () => {
+            throw new Error(
+              "Commit preferences require a live workspace connection.",
+            );
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
+      writeWorkspaceCommitPreferences: async (cwd, patch) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.writeWorkspaceCommitPreferences(cwd, patch);
+          },
+          async () => {
+            throw new Error(
+              "Commit preferences require a live workspace connection.",
+            );
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
+      generateCommitMessage: async ({ cwd, providerId }) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.generateCommitMessage({ cwd, providerId });
+          },
+          async () => {
+            throw new Error(
+              "Commit drafting requires a live workspace connection.",
+            );
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
+      commitWorkingTree: async ({ cwd, message }) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            return await runtime.commitWorkingTree({ cwd, message });
+          },
+          async () => {
+            throw new Error("Git commit requires a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
         ),
       checkProviderSetup: async (providerId) =>
         await withLiveFallback(
@@ -1429,11 +1481,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             fallbackOnLiveError: false,
           },
         ),
-      resolveApproval: async (requestId, approved) =>
+      resolveApproval: async (requestId, decision) =>
         await withLiveFallback(
           async () => {
             const runtime = runtimeRef.current!;
-            await runtime.resolveApproval(requestId, approved);
+            await runtime.resolveApproval(requestId, decision);
           },
           async () => {
             mutateLocal((draft) => {
@@ -1443,7 +1495,10 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                   approval.id === requestId
                     ? {
                         ...approval,
-                        state: approved ? "approved" : "declined",
+                        state:
+                          decision === "accept" || decision === "acceptForSession"
+                            ? "approved"
+                            : "declined",
                       }
                     : approval,
                 ),
@@ -1497,6 +1552,62 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                 ),
               }));
             });
+          },
+        ),
+      rollbackToTurn: async (threadId, targetTurnId) =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.rollbackToTurn(threadId, targetTurnId);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.threads = draft.threads.map((record) => {
+                if (record.thread.id !== threadId) {
+                  return record;
+                }
+
+                const completedTurns = record.thread.turns.filter(
+                  (turn) => turn.status !== "inProgress",
+                );
+                const rollbackStartIndex = completedTurns.findIndex(
+                  (turn) => turn.id === targetTurnId,
+                );
+                if (rollbackStartIndex === -1) {
+                  return record;
+                }
+                const removedTurnIds = new Set(
+                  completedTurns.slice(rollbackStartIndex).map((turn) => turn.id),
+                );
+
+                if (removedTurnIds.size === 0) {
+                  return record;
+                }
+
+                const nextTurns = record.thread.turns.filter(
+                  (turn) => !removedTurnIds.has(turn.id),
+                );
+
+                return {
+                  ...record,
+                  thread: {
+                    ...record.thread,
+                    turns: nextTurns,
+                    updatedAt: Math.floor(Date.now() / 1000),
+                  },
+                  steers: (record.steers ?? []).filter(
+                    (entry) => !removedTurnIds.has(entry.turnId),
+                  ),
+                  approvals: record.approvals.filter(
+                    (approval) => !approval.turnId || !removedTurnIds.has(approval.turnId),
+                  ),
+                };
+              });
+            });
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       forkThread: async (threadId) => {
@@ -1694,12 +1805,19 @@ export function WorkspacePage() {
   const [questionAnswersByRequestId, setQuestionAnswersByRequestId] = useState<
     Record<string, Record<string, string>>
   >({});
+  const [mcpResponseByRequestId, setMcpResponseByRequestId] = useState<Record<string, string>>({});
   const terminalDockPaintFrameRef = useRef<number | null>(null);
   const terminalDockLaunchFrameRef = useRef<number | null>(null);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [gitActivityGraph, setGitActivityGraph] = useState<GitActivityGraphModel | null>(null);
   const [gitActivityGraphLoading, setGitActivityGraphLoading] = useState(false);
   const [gitActivityGraphError, setGitActivityGraphError] = useState<string | null>(null);
+  const [gitActivityRefreshNonce, setGitActivityRefreshNonce] = useState(0);
+  const [commitProviderId, setCommitProviderId] = useState<ProviderId>(snapshot.settings.provider);
+  const [commitPreferencesPath, setCommitPreferencesPath] = useState<string | null>(null);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitGenerating, setCommitGenerating] = useState(false);
+  const [commitCommitting, setCommitCommitting] = useState(false);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [composerSyncKey, setComposerSyncKey] = useState(0);
 
@@ -1889,11 +2007,8 @@ export function WorkspacePage() {
     () => activeThread?.approvals.filter((approval) => approval.state === "pending").length ?? 0,
     [activeThread?.approvals],
   );
-  const activeQuestionApprovals = useMemo(
-    () =>
-      activeThread?.approvals.filter(
-        (approval) => approval.kind === "question" && approval.state === "pending",
-      ) ?? [],
+  const activePendingApprovals = useMemo(
+    () => activeThread?.approvals.filter((approval) => approval.state === "pending") ?? [],
     [activeThread?.approvals],
   );
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
@@ -1927,6 +2042,28 @@ export function WorkspacePage() {
     );
 
     setQuestionAnswersByRequestId((current) => {
+      const nextEntries = Object.entries(current).filter(([requestId]) =>
+        activeRequestIds.has(requestId),
+      );
+
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+  }, [snapshot.threads]);
+
+  useEffect(() => {
+    const activeRequestIds = new Set(
+      snapshot.threads.flatMap((record) =>
+        record.approvals
+          .filter((approval) => approval.kind === "mcp" && approval.state === "pending")
+          .map((approval) => approval.id),
+      ),
+    );
+
+    setMcpResponseByRequestId((current) => {
       const nextEntries = Object.entries(current).filter(([requestId]) =>
         activeRequestIds.has(requestId),
       );
@@ -2034,11 +2171,59 @@ export function WorkspacePage() {
     () => uniqueThreads.filter((entry) => entry.thread.cwd === activeThread?.thread.cwd),
     [activeThread?.thread.cwd, uniqueThreads],
   );
+  const activeWorkspaceCwd = useMemo(
+    () =>
+      activeThread?.thread.cwd?.trim() ||
+      snapshot.directoryCatalogRoot ||
+      null,
+    [activeThread?.thread.cwd, snapshot.directoryCatalogRoot],
+  );
 
   const selectedDiffEntry = useMemo(
     () => diffEntries.find((entry) => entry.id === selectedDiffEntryId) ?? diffEntries[0] ?? null,
     [diffEntries, selectedDiffEntryId],
   );
+
+  useEffect(() => {
+    if (!activeThread) {
+      setCommitProviderId(snapshot.settings.provider);
+      setCommitPreferencesPath(null);
+      setCommitMessage("");
+      return;
+    }
+
+    if (!activeWorkspaceCwd) {
+      setCommitProviderId(snapshot.settings.provider);
+      setCommitPreferencesPath(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCommitMessage("");
+
+    void actions
+      .readWorkspaceCommitPreferences(activeWorkspaceCwd)
+      .then((preferences) => {
+        if (cancelled) {
+          return;
+        }
+
+        setCommitProviderId(preferences.provider);
+        setCommitPreferencesPath(preferences.filePath);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setCommitProviderId(snapshot.settings.provider);
+        setCommitPreferencesPath(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actions, activeThread, activeWorkspaceCwd, snapshot.settings.provider]);
 
   useEffect(() => {
     if (!activeThread) {
@@ -2115,7 +2300,21 @@ export function WorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [actions, activeThread, panelTab, relatedRepoThreads]);
+  }, [actions, activeThread, gitActivityRefreshNonce, panelTab, relatedRepoThreads]);
+
+  const gitWorkingTree = gitActivityGraph?.workingTree ?? null;
+  const gitWorkingTreeDirty = Boolean(gitWorkingTree?.dirty);
+  const commitDraftHasChanges =
+    gitWorkingTreeDirty || fileChanges.some((entry) => entry.status !== "failed");
+  const gitHasStagedChanges = Boolean(
+    gitWorkingTree?.buckets.some(
+      (bucket) => bucket.id === "staged" && bucket.entries.length > 0,
+    ),
+  );
+  const gitCommitBranchLabel =
+    gitActivityGraph?.branchLabel ||
+    activeThread?.thread.gitInfo?.branch ||
+    "current branch";
 
   const selectedDiffFindings = useMemo(() => {
     if (!activeThread) {
@@ -2489,6 +2688,73 @@ export function WorkspacePage() {
       });
     },
     [actions, questionAnswersByRequestId],
+  );
+
+  const updateMcpResponseDraft = useCallback((requestId: string, value: string) => {
+    setMcpResponseByRequestId((current) => ({
+      ...current,
+      [requestId]: value,
+    }));
+  }, []);
+
+  const resolvePendingApproval = useCallback(
+    async (approval: ApprovalRequest, decision: ApprovalDecision) => {
+      await actions.resolveApproval(approval.id, decision);
+    },
+    [actions],
+  );
+
+  const submitMcpApproval = useCallback(
+    async (approval: ApprovalRequest, action: "accept" | "decline" | "cancel") => {
+      await actions.submitMcp(
+        approval.id,
+        action,
+        mcpResponseByRequestId[approval.id] ?? "",
+      );
+      setMcpResponseByRequestId((current) => {
+        if (!(approval.id in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[approval.id];
+        return next;
+      });
+    },
+    [actions, mcpResponseByRequestId],
+  );
+
+  const renderApprovalRequest = useCallback(
+    (approval: ApprovalRequest) =>
+      approval.kind === "question" ? (
+        <QuestionRequestCard
+          answers={questionAnswersByRequestId[approval.id] ?? {}}
+          approval={approval}
+          key={approval.id}
+          onAnswerChange={(questionId, value) =>
+            updateQuestionAnswer(approval.id, questionId, value)
+          }
+          onSubmit={() => void submitQuestionApproval(approval)}
+        />
+      ) : (
+        <ApprovalRequestCard
+          approval={approval}
+          key={approval.id}
+          mcpContentText={mcpResponseByRequestId[approval.id] ?? ""}
+          onMcpContentChange={(value) => updateMcpResponseDraft(approval.id, value)}
+          onResolve={(decision) => void resolvePendingApproval(approval, decision)}
+          onSubmitMcp={(action, _contentText) => void submitMcpApproval(approval, action)}
+        />
+      ),
+    [
+      mcpResponseByRequestId,
+      questionAnswersByRequestId,
+      resolvePendingApproval,
+      submitMcpApproval,
+      submitQuestionApproval,
+      updateMcpResponseDraft,
+      updateQuestionAnswer,
+    ],
   );
 
   useEffect(() => {
@@ -3180,6 +3446,176 @@ export function WorkspacePage() {
     toastTimersRef.current[id] = timer;
   }, []);
 
+  const refreshGitPanel = useCallback(() => {
+    gitActivityGraphCacheRef.current = {};
+    setGitActivityRefreshNonce((current) => current + 1);
+  }, []);
+
+  const refreshWorkspacePanelsAfterRollback = useCallback(async () => {
+    refreshGitPanel();
+    setSelectedDiffEntryId(null);
+
+    const preferredDirectory = activeExplorerPath ?? activeWorkspaceCwd;
+    if (preferredDirectory) {
+      try {
+        await actions.loadDirectory(preferredDirectory);
+      } catch {
+        if (activeWorkspaceCwd && activeWorkspaceCwd !== preferredDirectory) {
+          setExplorerPath(activeWorkspaceCwd);
+          await actions.loadDirectory(activeWorkspaceCwd).catch(() => undefined);
+        }
+      }
+    }
+
+    if (editorPath) {
+      const normalizedName =
+        editorPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ??
+        editorPath;
+
+      setFilePreview({
+        path: editorPath,
+        name: normalizedName,
+        content: "",
+        loading: true,
+        error: null,
+        line: editorLine,
+      });
+    }
+  }, [
+    actions,
+    activeExplorerPath,
+    activeWorkspaceCwd,
+    editorLine,
+    editorPath,
+    refreshGitPanel,
+  ]);
+
+  const updateCommitProvider = useCallback(
+    async (providerId: ProviderId) => {
+      const previous = commitProviderId;
+      setCommitProviderId(providerId);
+
+      if (!activeThread) {
+        return;
+      }
+
+      if (!activeWorkspaceCwd) {
+        setCommitProviderId(previous);
+        pushToast("Open the repository folder first.", "warn");
+        return;
+      }
+
+      try {
+        const preferences = await actions.writeWorkspaceCommitPreferences(
+          activeWorkspaceCwd ?? activeThread.thread.cwd,
+          { provider: providerId },
+        );
+        setCommitPreferencesPath(preferences.filePath);
+        refreshGitPanel();
+      } catch (error) {
+        setCommitProviderId(previous);
+        pushToast(
+          errorMessage(
+            error,
+            "Failed to save the commit provider for this project.",
+          ),
+          "err",
+        );
+      }
+    },
+    [
+      actions,
+      activeThread,
+      activeWorkspaceCwd,
+      commitProviderId,
+      pushToast,
+      refreshGitPanel,
+    ],
+  );
+
+  const generateCommitDraft = useCallback(async () => {
+    if (!activeThread || commitGenerating || commitCommitting) {
+      return;
+    }
+
+    if (!activeWorkspaceCwd) {
+      pushToast("Open the repository folder first.", "warn");
+      return;
+    }
+
+    setCommitGenerating(true);
+
+    try {
+      const message = await actions.generateCommitMessage({
+        cwd: activeWorkspaceCwd,
+        providerId: commitProviderId,
+      });
+      setCommitMessage(message);
+      pushToast("Drafted a commit message.", "ok");
+    } catch (error) {
+      pushToast(
+        errorMessage(error, "Failed to draft a commit message."),
+        "err",
+      );
+    } finally {
+      setCommitGenerating(false);
+    }
+  }, [
+    actions,
+    activeThread,
+    activeWorkspaceCwd,
+    commitCommitting,
+    commitGenerating,
+    commitProviderId,
+    pushToast,
+  ]);
+
+  const commitWorkingTreeDraft = useCallback(async () => {
+    if (!activeThread || commitGenerating || commitCommitting) {
+      return;
+    }
+
+    if (!activeWorkspaceCwd) {
+      pushToast("Open the repository folder first.", "warn");
+      return;
+    }
+
+    if (!commitMessage.trim()) {
+      pushToast("Enter a commit message first.", "warn");
+      return;
+    }
+
+    setCommitCommitting(true);
+
+    try {
+      const result = await actions.commitWorkingTree({
+        cwd: activeWorkspaceCwd,
+        message: commitMessage,
+      });
+      setCommitMessage("");
+      refreshGitPanel();
+      pushToast(
+        result.stagedAll
+          ? "Staged all files and created the commit."
+          : "Created the commit.",
+        "ok",
+      );
+    } catch (error) {
+      pushToast(errorMessage(error, "Failed to create the commit."), "err");
+    } finally {
+      setCommitCommitting(false);
+    }
+  }, [
+    actions,
+    activeThread,
+    activeWorkspaceCwd,
+    commitCommitting,
+    commitGenerating,
+    commitMessage,
+    pushToast,
+    refreshGitPanel,
+  ]);
+
   const focusComposerEnd = useCallback((nextValue?: string) => {
     const desiredValue = nextValue;
     window.requestAnimationFrame(() => {
@@ -3599,6 +4035,41 @@ export function WorkspacePage() {
     await actions.compactThread(activeThreadId);
     pushToast("/compact — transcript summarized", "ok");
   }, [actions, activeThreadId, pushToast]);
+
+  const rollbackTurn = useCallback(async (turnId: string) => {
+    if (!activeThreadId) {
+      return;
+    }
+
+    if (activeTurn) {
+      pushToast("Wait for the current response to finish before rolling back.", "err");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Roll back from this prompt? This will remove this prompt and every later message, then undo the file changes from those turns.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await actions.rollbackToTurn(activeThreadId, turnId);
+      await refreshWorkspacePanelsAfterRollback();
+      pushToast("/rollback — reverted to selected prompt", "ok");
+    } catch (error) {
+      pushToast(
+        errorMessage(error, "Failed to roll back from the selected prompt."),
+        "err",
+      );
+    }
+  }, [
+    actions,
+    activeThreadId,
+    activeTurn,
+    pushToast,
+    refreshWorkspacePanelsAfterRollback,
+  ]);
 
   const selectModel = useCallback(
     async (modelId: string) => {
@@ -4673,6 +5144,24 @@ export function WorkspacePage() {
     if (panelTab === "graph") {
       return gitActivityGraph ? (
         <div className="graph-panel-stack">
+          <CommitComposerCard
+            branchLabel={gitCommitBranchLabel}
+            committing={commitCommitting}
+            dirty={commitDraftHasChanges}
+            generating={commitGenerating}
+            hasStagedChanges={gitHasStagedChanges}
+            message={commitMessage}
+            onCommit={() => void commitWorkingTreeDraft()}
+            onGenerate={() => void generateCommitDraft()}
+            onMessageChange={setCommitMessage}
+            onProviderChange={(providerId) => {
+              void updateCommitProvider(providerId);
+            }}
+            preferencesPath={commitPreferencesPath}
+            providers={snapshot.providers}
+            selectedProviderId={commitProviderId}
+            summary={gitWorkingTree?.summary ?? "Working tree clean"}
+          />
           {gitActivityGraph.source === "session" ? (
             <div className="panel-hint">
               {gitActivityGraphError
@@ -4818,36 +5307,9 @@ export function WorkspacePage() {
               ))}
             </div>
           ) : activeThread.review.length > 0 ? <div className="empty-panel">No review findings mapped to the selected file.</div> : null}
-          {activeThread.approvals.length > 0 ? (
+          {activePendingApprovals.length > 0 ? (
             <div className="panel-actions">
-              {activeThread.approvals.map((approval) => (
-                approval.kind === "question" ? (
-                  <QuestionRequestCard
-                    answers={questionAnswersByRequestId[approval.id] ?? {}}
-                    approval={approval}
-                    key={approval.id}
-                    onAnswerChange={(questionId, value) =>
-                      updateQuestionAnswer(approval.id, questionId, value)
-                    }
-                    onSubmit={() => void submitQuestionApproval(approval)}
-                  />
-                ) : (
-                  <div className="approval-inline" key={approval.id}>
-                    <div className="approval-inline-copy">
-                      <strong>{approval.title}</strong>
-                      <span>{approval.detail}</span>
-                    </div>
-                    <div className="appr-a">
-                      <button className="abtn yes" type="button" onClick={() => void actions.resolveApproval(approval.id, true)}>
-                        ✓ Apply
-                      </button>
-                      <button className="abtn no" type="button" onClick={() => void actions.resolveApproval(approval.id, false)}>
-                        ✗ Reject
-                      </button>
-                    </div>
-                  </div>
-                )
-              ))}
+              {activePendingApprovals.map((approval) => renderApprovalRequest(approval))}
             </div>
           ) : null}
         </div>
@@ -5220,6 +5682,7 @@ export function WorkspacePage() {
                   onFork={forkSession}
                   onOpenFile={handleTranscriptOpenFile}
                   onPlan={triggerPlan}
+                  onRollback={rollbackTurn}
                   onReview={handleTranscriptReview}
                   onSlash={triggerSlash}
                   providerId={snapshot.settings.provider}
@@ -5314,19 +5777,9 @@ export function WorkspacePage() {
                   />
                 ) : null}
 
-                {activeQuestionApprovals.length > 0 ? (
+                {activePendingApprovals.length > 0 ? (
                   <div className="question-request-stack">
-                    {activeQuestionApprovals.map((approval) => (
-                      <QuestionRequestCard
-                        answers={questionAnswersByRequestId[approval.id] ?? {}}
-                        approval={approval}
-                        key={approval.id}
-                        onAnswerChange={(questionId, value) =>
-                          updateQuestionAnswer(approval.id, questionId, value)
-                        }
-                        onSubmit={() => void submitQuestionApproval(approval)}
-                      />
-                    ))}
+                    {activePendingApprovals.map((approval) => renderApprovalRequest(approval))}
                   </div>
                 ) : null}
 

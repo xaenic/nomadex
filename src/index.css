@@ -1056,6 +1056,17 @@ code {
   outline: none;
 }
 
+.file-change-kind-add {
+  border-color: rgb(16 185 129 / 24%);
+  background: rgb(16 185 129 / 9%);
+}
+
+.file-change-kind-add:hover,
+.file-change-kind-add:focus-visible {
+  border-color: rgb(16 185 129 / 36%);
+  background: rgb(16 185 129 / 14%);
+}
+
 .file-change-summary-kind {
   flex-shrink: 0;
   min-width: 0;
@@ -1814,6 +1825,36 @@ code {
   color: var(--tx);
   border-color: var(--bdr2);
   outline: none;
+}
+
+.mact:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mact:disabled:hover,
+.mact:disabled:focus-visible {
+  color: var(--tx3);
+  border-color: var(--bdr);
+  outline: none;
+}
+
+.mact.rollback {
+  color: #f2b7b7;
+  border-color: rgb(239 68 68 / 22%);
+  background: rgb(239 68 68 / 8%);
+}
+
+.mact.rollback:hover,
+.mact.rollback:focus-visible {
+  color: #ffd8d8;
+  border-color: rgb(239 68 68 / 34%);
+}
+
+.mact.rollback:disabled {
+  color: #d5aaaa;
+  border-color: rgb(239 68 68 / 16%);
+  background: rgb(239 68 68 / 6%);
 }
 
 /* TYPING */
@@ -2898,6 +2939,10 @@ pre::-webkit-scrollbar-thumb {
   overflow: hidden;
 }
 
+.dw.new-file {
+  border-color: rgb(16 185 129 / 22%);
+}
+
 .dw.live {
   border-color: rgb(99 102 241 / 28%);
   box-shadow: 0 0 0 1px rgb(99 102 241 / 10%);
@@ -2911,6 +2956,10 @@ pre::-webkit-scrollbar-thumb {
   border-bottom: 1px solid var(--bdr);
   font-size: 11px;
   color: var(--tx2);
+}
+
+.dw.new-file .dh {
+  background: color-mix(in srgb, var(--bg4) 86%, rgb(16 185 129 / 22%) 14%);
 }
 
 .diff-head-actions {
@@ -2946,15 +2995,30 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .diff-new {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgb(16 185 129 / 24%);
+  background: rgb(16 185 129 / 12%);
   color: var(--gn);
+  text-transform: lowercase;
 }
 
 .diff-mod {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgb(245 158 11 / 24%);
+  background: rgb(245 158 11 / 10%);
   color: var(--yw);
+  text-transform: lowercase;
 }
 
 .diff-del {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgb(239 68 68 / 24%);
+  background: rgb(239 68 68 / 10%);
   color: var(--rd);
+  text-transform: lowercase;
 }
 
 .diff-status {
@@ -3610,6 +3674,11 @@ pre::-webkit-scrollbar-thumb {
   align-items: center;
 }
 
+.tbtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .tbtn:hover,
 .tbtn:focus-visible {
   background: var(--bg4);
@@ -3870,15 +3939,37 @@ pre::-webkit-scrollbar-thumb {
   left: 12px;
   right: 12px;
   bottom: calc(100% + 8px);
-  background: var(--bg3);
+  background: var(--panel-solid);
   border: 1px solid var(--bdr2);
   border-radius: var(--r2);
   padding: 4px;
   z-index: 310;
   max-height: 240px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ac) 22%, var(--tx3) 78%) color-mix(in srgb, var(--panel-solid-2) 86%, transparent);
   box-shadow: 0 10px 36px rgb(0 0 0 / 55%);
   animation: popIn 0.1s ease;
+}
+
+#slashpop::-webkit-scrollbar {
+  width: 10px;
+}
+
+#slashpop::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--panel-solid-2) 92%, transparent);
+}
+
+#slashpop::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ac) 20%, var(--tx3) 80%);
+  background-clip: padding-box;
+}
+
+#slashpop::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ac) 34%, var(--tx2) 66%);
+  background-clip: padding-box;
 }
 
 .spi {
@@ -3895,7 +3986,7 @@ pre::-webkit-scrollbar-thumb {
 
 .spi:hover,
 .spi.sel {
-  background: var(--bg4);
+  background: var(--panel-solid-2);
 }
 
 .sp-cmd {
@@ -4043,6 +4134,7 @@ pre::-webkit-scrollbar-thumb {
   min-height: 0;
 }
 
+.commit-composer-card,
 .git-activity-card {
   background: var(--panel-solid);
   border: 1px solid var(--bdr2);
@@ -4050,6 +4142,138 @@ pre::-webkit-scrollbar-thumb {
   padding: 8px;
   overflow: hidden;
   min-height: 0;
+}
+
+.commit-composer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.commit-composer-head,
+.commit-composer-toolbar,
+.commit-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.commit-composer-copy {
+  min-width: 0;
+}
+
+.commit-composer-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.commit-composer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--tx2);
+}
+
+.commit-provider-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 160px;
+}
+
+.commit-provider-field span {
+  font-size: 10px;
+  color: var(--tx3);
+}
+
+.commit-provider-select,
+.commit-message-input {
+  width: 100%;
+  border: 1px solid var(--bdr2);
+  border-radius: 8px;
+  background: var(--bg4);
+  color: var(--tx);
+  font: inherit;
+}
+
+.commit-provider-select {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.commit-provider-select:focus-visible,
+.commit-message-input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--ac) 35%, white 12%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ac) 22%, transparent);
+}
+
+.commit-provider-note {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.commit-provider-note strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.commit-provider-note span,
+.commit-composer-hint {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--tx3);
+}
+
+.commit-message-input {
+  min-height: 88px;
+  padding: 10px 11px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.commit-generate-button,
+.commit-submit-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bdr2);
+  background: var(--bg4);
+  color: var(--tx);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.commit-submit-button {
+  background: color-mix(in srgb, var(--ac) 18%, var(--bg4));
+  border-color: color-mix(in srgb, var(--ac) 28%, var(--bdr2));
+}
+
+.commit-generate-button:hover,
+.commit-generate-button:focus-visible,
+.commit-submit-button:hover,
+.commit-submit-button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--ac) 40%, white 12%);
+  background: color-mix(in srgb, var(--ac) 10%, var(--bg4));
+}
+
+.commit-generate-button:disabled,
+.commit-submit-button:disabled,
+.commit-provider-select:disabled,
+.commit-message-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .git-activity-toolbar {
@@ -4466,6 +4690,7 @@ pre::-webkit-scrollbar-thumb {
 }
 
 @media (max-width: 640px) {
+  .commit-composer-card,
   .git-activity-card {
     padding: 7px;
   }
@@ -4483,16 +4708,29 @@ pre::-webkit-scrollbar-thumb {
     border-bottom: 0;
   }
 
+  .commit-composer-head,
+  .commit-composer-toolbar,
+  .commit-composer-footer,
   .git-activity-toolbar {
     gap: 8px;
-    margin-bottom: 8px;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .git-activity-toolbar {
+    margin-bottom: 8px;
   }
 
   .git-activity-layout {
     grid-template-columns: 108px minmax(0, 1fr);
     gap: 8px;
+  }
+
+  .commit-provider-field,
+  .commit-provider-note,
+  .commit-generate-button,
+  .commit-submit-button {
+    width: 100%;
   }
 
   .git-activity-summary {
@@ -4567,22 +4805,198 @@ pre::-webkit-scrollbar-thumb {
   gap: 10px;
 }
 
-.approval-inline {
-  background: var(--bg3);
+.approval-request-card {
+  background: var(--bg2);
   border: 1px solid var(--bdr);
   border-radius: var(--r);
-  padding: 8px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
-.approval-inline-copy {
+.approval-request-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approval-request-copy {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 10.5px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approval-request-copy strong {
+  font-size: 12px;
+  color: var(--tx);
+}
+
+.approval-request-copy span {
+  font-size: 11px;
   color: var(--tx2);
+  line-height: 1.45;
+}
+
+.approval-request-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.approval-request-risk,
+.approval-request-state {
+  border: 1px solid var(--bdr2);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.approval-request-risk {
+  text-transform: capitalize;
+}
+
+.approval-request-risk.low {
+  color: var(--tx2);
+}
+
+.approval-request-risk.medium {
+  color: #d9b14c;
+}
+
+.approval-request-risk.high {
+  color: #e88383;
+}
+
+.approval-request-state {
+  color: var(--tx2);
+}
+
+.approval-request-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.approval-request-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.approval-request-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-request-label {
+  font-size: 10px;
+  color: var(--tx3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.approval-request-command,
+.approval-request-pre,
+.approval-request-textarea {
+  border: 1px solid var(--bdr);
+  background: var(--bg3);
+  border-radius: 10px;
+  color: var(--tx);
+  font: inherit;
+}
+
+.approval-request-command,
+.approval-request-pre {
+  display: block;
+  padding: 10px 11px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.approval-request-pre {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.approval-request-textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 10px 11px;
+  resize: vertical;
+}
+
+.approval-request-textarea:focus {
+  outline: none;
+  border-color: var(--ac);
+}
+
+.approval-request-value {
+  font-size: 11px;
+  color: var(--tx2);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.approval-request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.approval-request-item {
+  border: 1px solid var(--bdr);
+  background: var(--bg3);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--tx2);
+  word-break: break-word;
+}
+
+.approval-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.approval-request-button {
+  border: 1px solid var(--bdr);
+  background: var(--bg3);
+  color: var(--tx);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.approval-request-button.approve {
+  border-color: var(--ac);
+  background: color-mix(in srgb, var(--ac) 14%, var(--bg3) 86%);
+}
+
+.approval-request-button.danger {
+  border-color: color-mix(in srgb, #d05b5b 58%, var(--bdr) 42%);
+  color: #f1b2b2;
+}
+
+.approval-request-button.neutral {
+  color: var(--tx2);
+}
+
+.approval-request-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .question-request-card {
@@ -7218,6 +7632,45 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .turn-plan-card-step.is-inProgress .turn-plan-card-step-text {
+  color: var(--tx);
+}
+
+.steer-card {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--bdr2);
+  border-radius: 10px;
+  background: var(--panel-solid);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.steer-card.pending {
+  border-color: color-mix(in srgb, var(--ac) 32%, var(--bdr2));
+}
+
+.steer-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.steer-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tx2);
+}
+
+.steer-card-meta {
+  font-size: 10px;
+  color: var(--tx3);
+}
+
+.steer-card-body {
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--tx);
 }
 

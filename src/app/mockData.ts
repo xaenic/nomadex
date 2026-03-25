@@ -50,9 +50,11 @@ export type ApprovalRequest = {
   itemId?: string | null;
   method?: string;
   command?: string;
+  cwd?: string;
   files?: string[];
   serverName?: string;
-  availableDecisions?: string[];
+  availableDecisions?: ApprovalDecision[];
+  permissionsSummary?: string[];
   questions?: Array<{
     id: string;
     header: string;
@@ -66,6 +68,12 @@ export type ApprovalRequest = {
   }>;
   form?: string;
 };
+
+export type ApprovalDecision =
+  | "accept"
+  | "acceptForSession"
+  | "decline"
+  | "cancel";
 
 export type TerminalSession = {
   id: string;
@@ -203,9 +211,18 @@ export type StreamSpec = {
   speed: number;
 };
 
+export type SteerHistoryEntry = {
+  id: string;
+  turnId: string;
+  prompt: string;
+  createdAt: number;
+  status: "pending" | "applied";
+};
+
 export type ThreadRecord = {
   thread: Thread;
   plan: ThreadPlan | null;
+  steers?: SteerHistoryEntry[];
   steerSuggestions: string[];
   approvals: ApprovalRequest[];
   terminals: TerminalSession[];
@@ -1037,7 +1054,7 @@ const threads: Array<ThreadRecord> = [
       gitInfo: {
         sha: "cc92fe7",
         branch: "feature/codex-web-shell",
-        originUrl: "git@github.com:xaenic/codex-console.git",
+        originUrl: "git@github.com:xaenic/nomadex.git",
       },
       name: "Nomadex workspace",
       turns: uiShellTurns,
@@ -1187,7 +1204,7 @@ const threads: Array<ThreadRecord> = [
       gitInfo: {
         sha: "5ffb882",
         branch: "review/ui-shell",
-        originUrl: "git@github.com:xaenic/codex-console.git",
+        originUrl: "git@github.com:xaenic/nomadex.git",
       },
       name: "Review workspace shell",
       turns: reviewTurns,
@@ -1474,6 +1491,7 @@ export const createBlankThreadRecord = (
       { step: "Run the first turn", status: "pending" },
     ],
   },
+  steers: [],
   steerSuggestions: [
     "Keep the first answer brief and gather context fast.",
     "Prefer concrete file references over generic guidance.",

@@ -1,5 +1,6 @@
 import type { ThreadItem } from "../protocol/v2";
 import type {
+  ApprovalDecision,
   ComposerFile,
   ComposerImage,
   DashboardData,
@@ -9,6 +10,7 @@ import type {
   SkillCard,
   WorkspaceMode,
 } from "./mockData";
+import type { ProviderId } from "./services/providers";
 
 export type UiApprovalMode = "auto" | "ro" | "fa";
 export type UiThemeId =
@@ -129,6 +131,21 @@ export type WorkspaceActions = {
   saveFile: (path: string, content: string) => Promise<void>;
   readGitGraph: (cwd: string, limit?: number) => Promise<string>;
   readGitStatus: (cwd: string) => Promise<string>;
+  readWorkspaceCommitPreferences: (
+    cwd: string,
+  ) => Promise<{ provider: ProviderId; filePath: string }>;
+  writeWorkspaceCommitPreferences: (
+    cwd: string,
+    patch: { provider?: ProviderId },
+  ) => Promise<{ provider: ProviderId; filePath: string }>;
+  generateCommitMessage: (args: {
+    cwd: string;
+    providerId: ProviderId;
+  }) => Promise<string>;
+  commitWorkingTree: (args: {
+    cwd: string;
+    message: string;
+  }) => Promise<{ summary: string; sha: string | null; stagedAll: boolean }>;
   checkProviderSetup: (providerId?: SettingsState["provider"]) => Promise<void>;
   startProviderAuth: (
     providerId?: SettingsState["provider"],
@@ -157,7 +174,7 @@ export type WorkspaceActions = {
   startProjectTerminal: (threadId: string, cwd: string) => Promise<string>;
   sendTerminalInput: (threadId: string, terminalId: string, input: string) => Promise<void>;
   terminateTerminal: (threadId: string, terminalId: string) => Promise<void>;
-  resolveApproval: (requestId: string, approved: boolean) => Promise<void>;
+  resolveApproval: (requestId: string, decision: ApprovalDecision) => Promise<void>;
   submitQuestion: (
     requestId: string,
     answers: Record<string, string[]>,
@@ -167,6 +184,7 @@ export type WorkspaceActions = {
     action: "accept" | "decline" | "cancel",
     contentText: string,
   ) => Promise<void>;
+  rollbackToTurn: (threadId: string, targetTurnId: string) => Promise<void>;
   forkThread: (threadId: string) => Promise<string>;
   compactThread: (threadId: string) => Promise<void>;
 };
