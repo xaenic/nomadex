@@ -33,22 +33,9 @@ export function ConnectionLoadingState({
     rangeStart,
     Math.min(visibleRangeEnd ?? lastIndex, lastIndex),
   );
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(rangeStart);
   const [previousIndex, setPreviousIndex] = useState<number | null>(null);
   const [animating, setAnimating] = useState(false);
-
-  useEffect(() => {
-    setActiveIndex((current) => {
-      const safeCurrent = Math.max(0, Math.min(current, lastIndex));
-      if (safeCurrent >= rangeStart && safeCurrent <= rangeEnd) {
-        return safeCurrent;
-      }
-
-      setPreviousIndex(safeCurrent);
-      setAnimating(false);
-      return rangeStart;
-    });
-  }, [lastIndex, rangeEnd, rangeStart]);
 
   useEffect(() => {
     if (rangeEnd - rangeStart < 1) {
@@ -59,7 +46,7 @@ export function ConnectionLoadingState({
       setActiveIndex((current) => {
         const safeCurrent =
           current < rangeStart || current > rangeEnd ? rangeStart : current;
-        setPreviousIndex(current);
+        setPreviousIndex(safeCurrent);
         setAnimating(false);
         return safeCurrent >= rangeEnd ? rangeStart : safeCurrent + 1;
       });
@@ -89,9 +76,20 @@ export function ConnectionLoadingState({
     };
   }, [activeIndex, previousIndex]);
 
-  const activeMessage = safeMessages[activeIndex] ?? safeMessages[rangeStart];
+  const resolvedActiveIndex =
+    activeIndex < rangeStart || activeIndex > rangeEnd ? rangeStart : activeIndex;
+  const resolvedPreviousIndex =
+    previousIndex !== null &&
+    previousIndex >= rangeStart &&
+    previousIndex <= rangeEnd
+      ? previousIndex
+      : null;
+  const activeMessage =
+    safeMessages[resolvedActiveIndex] ?? safeMessages[rangeStart];
   const previousMessage =
-    previousIndex !== null ? safeMessages[previousIndex] ?? null : null;
+    resolvedPreviousIndex !== null
+      ? safeMessages[resolvedPreviousIndex] ?? null
+      : null;
 
   return (
     <div

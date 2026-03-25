@@ -352,7 +352,9 @@ const createSteerEntry = (
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const safeString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
-const stripAnsi = (value: string) => value.replace(/\x1B\[[0-9;]*m/gu, "");
+const ESCAPE_CHAR = String.fromCharCode(27);
+const ANSI_SGR_PATTERN = new RegExp(`${ESCAPE_CHAR}\\[[0-9;]*m`, "gu");
+const stripAnsi = (value: string) => value.replace(ANSI_SGR_PATTERN, "");
 const trimAuthBuffer = (value: string, maxLength = 12000) =>
   value.length > maxLength ? value.slice(-maxLength) : value;
 const APPROVAL_DECISIONS: Array<ApprovalDecision> = [
@@ -871,7 +873,10 @@ const splitOutput = (value: string | null) => {
   return value.split("\n");
 };
 
-const TERMINAL_ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const TERMINAL_ANSI_PATTERN = new RegExp(
+  `${ESCAPE_CHAR}(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])`,
+  "g",
+);
 
 const normalizeTerminalText = (value: string) =>
   value

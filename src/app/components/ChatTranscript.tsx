@@ -686,6 +686,24 @@ const MessageTextFlow = memo(function MessageTextFlow({
     () => (streaming ? [] : parseMessageBlocks(text, providerId)),
     [providerId, streaming, text],
   );
+  const blockRanges = blocks.reduce<{
+    entries: Array<{
+      block: (typeof blocks)[number];
+      start: number;
+    }>;
+    nextStart: number;
+  }>(
+    (state, block) => ({
+      entries: [...state.entries, { block, start: state.nextStart }],
+      nextStart:
+        state.nextStart +
+        (block.kind === "image" ? block.markdown.length : block.value.length),
+    }),
+    {
+      entries: [],
+      nextStart: 0,
+    },
+  ).entries;
 
   if (streaming) {
     const activeFx = textFx ?? null;
@@ -706,15 +724,9 @@ const MessageTextFlow = memo(function MessageTextFlow({
     );
   }
 
-  let blockCursor = 0;
-
   return (
     <div className="message-text-flow">
-      {blocks.map((block, index) => {
-        const blockStart = blockCursor;
-        const blockLength =
-          block.kind === "image" ? block.markdown.length : block.value.length;
-        blockCursor += blockLength;
+      {blockRanges.map(({ block, start: blockStart }, index) => {
 
         if (block.kind === "image") {
           return (

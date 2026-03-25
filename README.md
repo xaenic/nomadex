@@ -53,7 +53,7 @@ If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that
 | Composer | File attachments, image attachments, image paste, queueing, steer, and prompt tools |
 | Runtime controls | Approvals, question prompts, rollback support, and in-progress visibility |
 | Provider layer | Codex as the reference live path, plus OpenCode and Qwen Code integration work |
-| Launch flow | Packaged `npx nomadex` launcher with app-server startup, password gate, and update check |
+| Launch flow | Packaged `npx nomadexapp` launcher with app-server startup, password gate, and update check |
 
 ## 🤖 Providers
 
@@ -70,7 +70,7 @@ If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that
 ### 📦 Packaged launcher
 
 ```bash
-npx nomadex
+npx nomadexapp
 ```
 
 The packaged launcher:
@@ -112,7 +112,7 @@ Recommended flow:
 
 1. Install ZeroTier on the host machine and on your phone.
 2. Join both devices to the same ZeroTier network.
-3. Run `npx nomadex` on the host machine.
+3. Run `npx nomadexapp` on the host machine.
 4. Open `http://<host-zerotier-ip>:3784` on the remote device.
 
 Tailscale or SSH tunneling also work well. Avoid exposing the raw Nomadex port directly to the public internet without real network and auth controls in front of it.
@@ -120,7 +120,7 @@ Tailscale or SSH tunneling also work well. Avoid exposing the raw Nomadex port d
 ## 🧰 Common Commands
 
 ```bash
-npx nomadex
+npx nomadexapp
 npm run dev:live
 npm run app-server
 npm run build
@@ -183,6 +183,13 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Setup and launch: [docs/SETUP.md](docs/SETUP.md)
 - Architecture and extension points: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
+## 🚢 Publishing
+
+- `main` now has GitHub Actions for lint, build, and npm publish.
+- The publish workflow only releases when the version in `package.json` is not already on npm.
+- Add a repo secret named `NPM_TOKEN` before relying on automatic publish.
+- To ship an update, bump the package version, push to `main`, and GitHub Actions will publish `nomadexapp` automatically.
+
 ## 🤝 Contributing
 
 Contributions are welcome.
@@ -203,7 +210,7 @@ Open an issue or PR with a focused change. Small, well-scoped improvements are m
 - Uploaded assets currently land under `.codex-web/uploads` and `.codex-web/uploads/files`.
 - Codex is still the strongest live provider path today.
 - Set `NOMADEX_PASSWORD` if you want a stable password instead of the generated per-launch password.
-- `npm run preview` is useful for checking the built shell in the repo, while `npx nomadex` is the packaged launcher flow.
+- `npm run preview` is useful for checking the built shell in the repo, while `npx nomadexapp` is the packaged launcher flow.
 
 ## 🐛 Troubleshooting
 

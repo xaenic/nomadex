@@ -1,12 +1,10 @@
 {
-  "name": "nomadex",
+  "name": "nomadexapp",
   "version": "0.1.0",
   "description": "Remote browser workspace for local coding agents",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "nomadex": "./bin/nomadex.mjs"
-  },
+  "bin": "./bin/nomadex.mjs",
   "files": [
     "bin",
     "dist",

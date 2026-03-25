@@ -152,6 +152,8 @@ export const FileExplorerPanel = memo(function FileExplorerPanel({
   rootPath: string;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
+  // TanStack Virtual intentionally returns imperative helpers that React Compiler cannot memoize.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: directoryEntries.length,
     getScrollElement: () => listRef.current,

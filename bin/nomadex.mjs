@@ -116,8 +116,8 @@ if (options.help) {
   process.stdout.write(`Nomadex ${packageJson.version}
 
 Usage:
-  nomadex
-  nomadex --port 3784 --ws-url ws://127.0.0.1:3901
+  nomadexapp
+  nomadexapp --port 3784 --ws-url ws://127.0.0.1:3901
 
 Options:
   --host <host>                Host to bind the UI server (default: 0.0.0.0)
@@ -138,7 +138,7 @@ if (options.version) {
 }
 
 if (!Number.isInteger(options.uiPort) || options.uiPort <= 0) {
-  console.error("[nomadex] Invalid UI port.");
+  console.error("[nomadexapp] Invalid UI port.");
   process.exit(1);
 }
 
@@ -369,7 +369,7 @@ const promptForUpdate = async () => {
     }
 
     console.log(
-      `[nomadex] Update available: ${packageJson.version} -> ${latestVersion}`,
+      `[nomadexapp] Update available: ${packageJson.version} -> ${latestVersion}`,
     );
     const rl = createInterface({
       input: process.stdin,
@@ -399,7 +399,7 @@ const promptForUpdate = async () => {
 
     restart.once("error", (error) => {
       console.error(
-        `[nomadex] Failed to start updated package: ${
+        `[nomadexapp] Failed to start updated package: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -546,7 +546,7 @@ const ensureDistBuilt = () => {
 const ensureAppServer = async () => {
   if (await isPortOpen(wsHost, wsPort)) {
     if (await isCodexAppServerReady()) {
-      console.log(`[nomadex] Reusing Codex app-server at ${options.wsUrl}`);
+      console.log(`[nomadexapp] Reusing Codex app-server at ${options.wsUrl}`);
       return;
     }
 
@@ -556,7 +556,7 @@ const ensureAppServer = async () => {
   }
 
   const codexLaunch = getCodexLaunch();
-  console.log(`[nomadex] Starting Codex app-server at ${options.wsUrl}`);
+  console.log(`[nomadexapp] Starting Codex app-server at ${options.wsUrl}`);
   const appServer = spawn(
     codexLaunch.command,
     [...codexLaunch.args, "app-server", "--listen", options.wsUrl],
@@ -1010,17 +1010,17 @@ try {
   });
 
   const preferredIp = getPreferredIp();
-  console.log(`[nomadex] UI ready at http://127.0.0.1:${options.uiPort}`);
+  console.log(`[nomadexapp] UI ready at http://127.0.0.1:${options.uiPort}`);
   if (preferredIp) {
-    console.log(`[nomadex] LAN access: http://${preferredIp}:${options.uiPort}`);
+    console.log(`[nomadexapp] LAN access: http://${preferredIp}:${options.uiPort}`);
   }
   console.log(
-    `[nomadex] UI password (${passwordSource}): ${appPassword}`,
+    `[nomadexapp] UI password (${passwordSource}): ${appPassword}`,
   );
 } catch (error) {
   stopChildren();
   console.error(
-    `[nomadex] ${error instanceof Error ? error.message : String(error)}`,
+    `[nomadexapp] ${error instanceof Error ? error.message : String(error)}`,
   );
   process.exit(1);
 }

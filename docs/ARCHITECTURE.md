@@ -181,7 +181,7 @@ Mostly in-memory UI state:
 - Codex is still the most complete live provider path.
 - The UI is more provider-neutral than the transport layer.
 - Some names and paths still contain `codex` because they match the active bridge contract.
-- The packaged `nomadex` launcher now exists, but Codex is still the reference bridge contract it assumes by default.
+- The packaged `nomadexapp` launcher now exists, but Codex is still the reference bridge contract it assumes by default.
 
 ## Extension Direction
 

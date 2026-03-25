@@ -23,7 +23,7 @@ codex --version
 Normal use:
 
 ```bash
-npx nomadex
+npx nomadexapp
 ```
 
 Expected result:
@@ -32,7 +32,7 @@ Expected result:
 - Nomadex UI on `http://127.0.0.1:3784`
 - Browser websocket proxy on `/codex-ws`
 
-`npx nomadex` is the packaged launcher path. It:
+`npx nomadexapp` is the packaged launcher path. It:
 
 - it reuses an existing app-server only if `/readyz` succeeds
 - it starts the app-server if needed
@@ -67,7 +67,7 @@ Recommended flow:
 1. Install ZeroTier on the host machine.
 2. Install ZeroTier on your phone or remote laptop.
 3. Join both devices to the same ZeroTier network.
-4. Run `npx nomadex` on the host machine.
+4. Run `npx nomadexapp` on the host machine.
 5. Open `http://<host-zerotier-ip>:3784` from the remote device.
 
 Alternative options:
@@ -82,7 +82,7 @@ Do not expose the raw Nomadex dev server directly to the public internet.
 
 On the same local network:
 
-1. Run `npx nomadex` on the host machine.
+1. Run `npx nomadexapp` on the host machine.
 2. Or run `npm run dev:live` if you are using the repo development flow.
 3. Find the machine’s LAN IP.
 4. Open `http://<lan-ip>:3784` from your phone or tablet.
@@ -91,7 +91,7 @@ Because the websocket is proxied through the same origin, the browser should con
 
 ## 5. Repo Development And Manual Launch
 
-For normal installed usage, prefer `npx nomadex`.
+For normal installed usage, prefer `npx nomadexapp`.
 
 If you are working from the repo and want to manage the bridge yourself:
 
@@ -113,7 +113,7 @@ Main variables:
 - `NOMADEX_WS_URL`
   Websocket URL for the packaged launcher. Default: `ws://127.0.0.1:3901`
 - `NOMADEX_UI_PORT`
-  UI port used by `npx nomadex`. Default: `3784`
+  UI port used by `npx nomadexapp`. Default: `3784`
 - `NOMADEX_AUTH_RELAY_TARGET`
   HTTP target used by the packaged auth relay. Default: `http://127.0.0.1:1455`
 - `NOMADEX_PASSWORD`
@@ -128,9 +128,9 @@ Main variables:
 Examples:
 
 ```bash
-npx nomadex --port 4173
-npx nomadex --ws-url ws://127.0.0.1:3902
-NOMADEX_PASSWORD=my-secret npx nomadex
+npx nomadexapp --port 4173
+npx nomadexapp --ws-url ws://127.0.0.1:3902
+NOMADEX_PASSWORD=my-secret npx nomadexapp
 VITE_CODEX_UI_PORT=4173 npm run dev:live
 VITE_CODEX_WS_URL=ws://127.0.0.1:3902 npm run dev:live
 ```
@@ -149,9 +149,30 @@ Preview:
 npm run preview
 ```
 
-Use `preview` to inspect the built shell inside the repo. The normal packaged launch is `npx nomadex`.
+Use `preview` to inspect the built shell inside the repo. The normal packaged launch is `npx nomadexapp`.
 
-## 8. Files, Images, And Uploads
+## 8. GitHub Actions And npm Publish
+
+This repo now includes:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/publish.yml`
+
+Behavior:
+
+- pushes and pull requests run `npm ci`, `npm run lint`, and `npm run build`
+- pushes to `main` also check npm
+- if the current `package.json` version is not published yet, GitHub Actions runs `npm publish --access public --provenance`
+
+Required setup:
+
+1. Add a repository secret named `NPM_TOKEN`.
+2. Make sure that token has permission to publish the package.
+3. Bump `package.json` version before pushing a release to `main`.
+
+Without a new version, the publish workflow skips instead of failing on a duplicate publish.
+
+## 9. Files, Images, And Uploads
 
 Current behavior:
 
@@ -163,7 +184,7 @@ Current behavior:
 
 The runtime injects file mentions into the prompt manifest so the live agent can see attached file paths consistently.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 ### UI port is busy
 
@@ -198,7 +219,7 @@ Fix:
 
 Check:
 
-1. `npx nomadex` is still running, or `npm run dev:live` if you are in the repo
+1. `npx nomadexapp` is still running, or `npm run dev:live` if you are in the repo
 2. the UI URL is really the strict port you launched
 3. the app-server is reachable on the configured websocket target
 4. you hard refreshed after recent websocket changes
@@ -213,7 +234,7 @@ Fix:
 2. close the tab
 3. reopen the page
 
-## 10. Current Boundaries
+## 11. Current Boundaries
 
 - Codex is still the strongest live provider path.
 - The provider abstraction is ahead of full provider-runtime parity.

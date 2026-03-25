@@ -986,7 +986,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             return await runtime.readFile(path);
           },
           async () => {
-            const href = toBrowseUrl(path, snapshot.settings.provider);
+            const href = toBrowseUrl(path, snapshotRef.current.settings.provider);
             if (href === "#") {
               throw new Error("File preview is unavailable for this path.");
             }
@@ -1331,7 +1331,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         await withLiveFallback(
           async () => {
             const response = await fetch(
-              getProviderAdapter(snapshot.settings.provider).authCompletePath,
+              getProviderAdapter(snapshotRef.current.settings.provider).authCompletePath,
               {
                 method: "POST",
                 headers: {
@@ -2743,7 +2743,7 @@ export function WorkspacePage() {
           mcpContentText={mcpResponseByRequestId[approval.id] ?? ""}
           onMcpContentChange={(value) => updateMcpResponseDraft(approval.id, value)}
           onResolve={(decision) => void resolvePendingApproval(approval, decision)}
-          onSubmitMcp={(action, _contentText) => void submitMcpApproval(approval, action)}
+          onSubmitMcp={(action) => void submitMcpApproval(approval, action)}
         />
       ),
     [
@@ -4643,6 +4643,7 @@ export function WorkspacePage() {
     composer,
     composerMode,
     enqueueMessage,
+    getComposerInputValue,
     navigateToThread,
     pushToast,
     resetComposer,
@@ -4657,7 +4658,6 @@ export function WorkspacePage() {
     selectedSkills,
     effectiveComposerSettings,
     projectPickerPath,
-    toolbarShell,
   ]);
 
   const onComposerKeyDown = useCallback(
@@ -4854,7 +4854,7 @@ export function WorkspacePage() {
         prependQueuedMessage(getMaterializedThreadId(error) ?? activeThreadId, queuedMessage);
       }
     },
-    [activeThreadId, activeTurn, effectiveComposerSettings, prependQueuedMessage, pushToast, queuedByThreadId, removeQueuedMessage, sendComposerAndSyncThread],
+    [actions, activeThreadId, activeTurn, effectiveComposerSettings, prependQueuedMessage, pushToast, queuedByThreadId, removeQueuedMessage, sendComposerAndSyncThread],
   );
 
   const removeTab = useCallback(

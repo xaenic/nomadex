@@ -407,7 +407,10 @@ export const ConfigPanel = memo(function ConfigPanel({
   onOpenTheme: () => void;
 }) {
   const [mobileCallbackUrl, setMobileCallbackUrl] = useState("");
-  const [providerSecretInput, setProviderSecretInput] = useState("");
+  const [providerSecretState, setProviderSecretState] = useState({
+    key: "",
+    value: "",
+  });
   const activeThemeLabel =
     activeTheme.charAt(0).toUpperCase() + activeTheme.slice(1);
   const activeProvider =
@@ -483,6 +486,13 @@ export const ConfigPanel = memo(function ConfigPanel({
   const showProviderSecretInput =
     activeProvider?.id === "opencode" &&
     activeProviderAuth?.status === "waiting";
+  const providerSecretKey = `${activeProvider?.id ?? "none"}:${activeProviderAuth?.status ?? "idle"}`;
+  const providerSecretInput =
+    providerSecretState.key === providerSecretKey
+      ? providerSecretState.value
+      : "";
+  const activeProviderAuthUrl = activeProviderAuth?.authUrl ?? null;
+  const activeProviderAuthCode = activeProviderAuth?.userCode ?? null;
 
   useEffect(() => {
     if (
@@ -501,10 +511,6 @@ export const ConfigPanel = memo(function ConfigPanel({
     activeProviderSetup,
     providerUsesExternalCliAccount,
   ]);
-
-  useEffect(() => {
-    setProviderSecretInput("");
-  }, [activeProvider?.id, activeProviderAuth?.status]);
 
   const handleChatGptLogin = useCallback(async () => {
     try {
@@ -650,20 +656,20 @@ export const ConfigPanel = memo(function ConfigPanel({
   }, [actions, activeProvider, providerUsesExternalCliAccount, pushToast]);
 
   const handleOpenProviderAuthUrl = useCallback(() => {
-    if (!activeProviderAuth?.authUrl) {
+    if (!activeProviderAuthUrl) {
       return;
     }
 
-    window.open(activeProviderAuth.authUrl, "_blank", "noopener,noreferrer");
-  }, [activeProviderAuth?.authUrl]);
+    window.open(activeProviderAuthUrl, "_blank", "noopener,noreferrer");
+  }, [activeProviderAuthUrl]);
 
   const handleCopyProviderAuthCode = useCallback(async () => {
-    if (!activeProviderAuth?.userCode) {
+    if (!activeProviderAuthCode) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(activeProviderAuth.userCode);
+      await navigator.clipboard.writeText(activeProviderAuthCode);
       pushToast("Copied sign-in code", "ok");
     } catch (error) {
       pushToast(
@@ -671,7 +677,7 @@ export const ConfigPanel = memo(function ConfigPanel({
         "err",
       );
     }
-  }, [activeProviderAuth?.userCode, pushToast]);
+  }, [activeProviderAuthCode, pushToast]);
 
   const handleSubmitProviderSecret = useCallback(async () => {
     if (!activeProvider || !showProviderSecretInput) {
@@ -688,7 +694,10 @@ export const ConfigPanel = memo(function ConfigPanel({
         activeProvider.id,
         providerSecretInput.trim(),
       );
-      setProviderSecretInput("");
+      setProviderSecretState({
+        key: providerSecretKey,
+        value: "",
+      });
       pushToast("API key submitted to OpenCode", "ok");
     } catch (error) {
       pushToast(
@@ -701,6 +710,7 @@ export const ConfigPanel = memo(function ConfigPanel({
   }, [
     actions,
     activeProvider,
+    providerSecretKey,
     providerSecretInput,
     pushToast,
     showProviderSecretInput,
@@ -824,7 +834,10 @@ export const ConfigPanel = memo(function ConfigPanel({
                         type="password"
                         value={providerSecretInput}
                         onChange={(event) =>
-                          setProviderSecretInput(event.target.value)
+                          setProviderSecretState({
+                            key: providerSecretKey,
+                            value: event.target.value,
+                          })
                         }
                         placeholder="Paste OpenCode Zen API key"
                         autoComplete="off"
