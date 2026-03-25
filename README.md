@@ -25,17 +25,17 @@ The repo is built for the workflow where the real agent, repository, CLI tools, 
 
 If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that works well on mobile, that is the direction Nomadex is built for. The app layer is also being shaped to support future providers such as Claude Code and Antigravity without rebuilding the whole shell.
 
-## Screenshots
+## 🖼️ Screenshots
 
-### Desktop
+### 🖥️ Desktop
 
 ![Nomadex desktop UI](docs/ui-desktop.png)
 
-### Mobile
+### 📱 Mobile
 
 ![Nomadex mobile UI](docs/ui-mobile.png)
 
-## Why Nomadex
+## ✨ Why Nomadex
 
 - Keep the actual execution environment local and under your control.
 - Supervise long-running agent work from your phone or another machine.
@@ -43,7 +43,7 @@ If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that
 - Avoid exposing a raw local CLI session directly just to monitor progress remotely.
 - Use a UI that is shaped for remote, mobile, and browser-first workflows instead of a desktop-only shell.
 
-## Feature Highlights
+## 🚀 Feature Highlights
 
 | Area | What you get |
 | --- | --- |
@@ -55,7 +55,7 @@ If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that
 | Provider layer | Codex as the reference live path, plus OpenCode and Qwen Code integration work |
 | Launch flow | Packaged `npx nomadex` launcher with app-server startup, password gate, and update check |
 
-## Providers
+## 🤖 Providers
 
 | Provider | Status | Notes |
 | --- | --- | --- |
@@ -65,9 +65,9 @@ If you are looking for a Codex web UI, OpenCode web UI, or Qwen Code web UI that
 | Claude Code | Planned | Target provider for the shared shell architecture |
 | Antigravity | Planned | Scaffolded direction, not yet a complete live runtime |
 
-## Quick Start
+## ⚡ Quick Start
 
-### Packaged launcher
+### 📦 Packaged launcher
 
 ```bash
 npx nomadex
@@ -85,10 +85,10 @@ The packaged launcher:
 
 Open:
 
-- Local machine: `http://127.0.0.1:3784`
-- Another device on the same network: `http://<your-lan-ip>:3784`
+- 🏠 Local machine: `http://127.0.0.1:3784`
+- 🌐 Another device on the same network: `http://<your-lan-ip>:3784`
 
-### Repo development
+### 🛠️ Repo development
 
 ```bash
 npm install
@@ -97,7 +97,7 @@ npm run dev:live
 
 Use `dev:live` when you are developing Nomadex itself and want the Vite development workflow.
 
-## Remote Access
+## 🌍 Remote Access
 
 Preferred setup: ZeroTier.
 
@@ -117,7 +117,7 @@ Recommended flow:
 
 Tailscale or SSH tunneling also work well. Avoid exposing the raw Nomadex port directly to the public internet without real network and auth controls in front of it.
 
-## Common Commands
+## 🧰 Common Commands
 
 ```bash
 npx nomadex
@@ -127,7 +127,7 @@ npm run build
 npm run preview
 ```
 
-## Architecture
+## 🏗️ Architecture
 
 ```text
 Browser or phone
@@ -147,7 +147,7 @@ Main layers:
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## Use Cases
+## 🎯 Use Cases
 
 - Remote coding companion for a workstation you access over SSH
 - Phone-friendly control panel for long-running local agent sessions
@@ -156,9 +156,9 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Handling approvals and question prompts from mobile
 - Watching shell output and file edits on a private remote box or home lab machine
 
-## Status
+## 📌 Status
 
-### Done
+### ✅ Done
 
 - [x] Live threaded workspace over the local websocket bridge
 - [x] Mobile-friendly shell and long-thread transcript handling
@@ -169,7 +169,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [x] Local workspace browsing and uploaded asset handling
 - [x] Provider-aware launcher and app layer
 
-### Next
+### 🧭 Next
 
 - [ ] Publish the first public npm release
 - [ ] Harden the packaged launcher for more providers and remote auth flows
@@ -178,12 +178,12 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [ ] Tighten remote access hardening for internet-facing setups
 - [ ] Keep improving performance on very long mobile sessions
 
-## Documentation
+## 📚 Documentation
 
 - Setup and launch: [docs/SETUP.md](docs/SETUP.md)
 - Architecture and extension points: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are welcome.
 
@@ -198,14 +198,14 @@ Useful areas:
 
 Open an issue or PR with a focused change. Small, well-scoped improvements are much easier to review and land than broad refactors.
 
-## Notes
+## 📝 Notes
 
 - Uploaded assets currently land under `.codex-web/uploads` and `.codex-web/uploads/files`.
 - Codex is still the strongest live provider path today.
 - Set `NOMADEX_PASSWORD` if you want a stable password instead of the generated per-launch password.
 - `npm run preview` is useful for checking the built shell in the repo, while `npx nomadex` is the packaged launcher flow.
 
-## Troubleshooting
+## 🐛 Troubleshooting
 
 - `UI port 3784 is already in use`
   Stop the old Nomadex process or choose a different port.
