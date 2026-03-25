@@ -1,49 +1,113 @@
 <svg width="430" height="932" viewBox="0 0 430 932" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="mbg" x1="40" y1="20" x2="380" y2="920" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#111126"/>
-      <stop offset="1" stop-color="#060610"/>
-    </linearGradient>
-    <linearGradient id="macc" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#7C83FF"/>
-      <stop offset="1" stop-color="#A855F7"/>
-    </linearGradient>
-  </defs>
+  <rect width="430" height="932" rx="28" fill="#180D12"/>
+  <rect x="14" y="14" width="402" height="904" rx="22" fill="#1B0F14" stroke="#38242D"/>
 
-  <rect width="430" height="932" rx="34" fill="url(#mbg)"/>
-  <rect x="18" y="18" width="394" height="896" rx="30" fill="#090913" stroke="#1F2136"/>
+  <rect x="14" y="14" width="402" height="54" rx="22" fill="#19101A"/>
+  <rect x="24" y="24" width="24" height="24" rx="7" fill="#191E28" stroke="#2E3341"/>
+  <text x="32" y="40" fill="#AFB7CA" font-family="JetBrains Mono, monospace" font-size="12">=</text>
+  <rect x="58" y="24" width="26" height="24" rx="7" fill="#191E28" stroke="#2E3341"/>
+  <rect x="67" y="31" width="9" height="10" rx="2" fill="#557BFF"/>
+  <text x="95" y="40" fill="#F1EAF6" font-family="JetBrains Mono, monospace" font-size="15" font-weight="700">Nomadex</text>
+  <rect x="170" y="23" width="110" height="26" rx="13" fill="#163422" stroke="#2B6D4B"/>
+  <text x="193" y="40" fill="#9AE0A9" font-family="JetBrains Mono, monospace" font-size="13">Full Access</text>
+  <rect x="289" y="24" width="24" height="24" rx="7" fill="#191E28" stroke="#2E3341"/>
+  <text x="297" y="40" fill="#B8AFC5" font-family="JetBrains Mono, monospace" font-size="12">96</text>
+  <rect x="321" y="24" width="24" height="24" rx="7" fill="#191E28" stroke="#2E3341"/>
+  <text x="330" y="40" fill="#B8AFC5" font-family="JetBrains Mono, monospace" font-size="12">v</text>
+  <rect x="353" y="24" width="24" height="24" rx="7" fill="#191E28" stroke="#2E3341"/>
+  <circle cx="365" cy="36" r="5" stroke="#6E7484" stroke-width="1.5"/>
+  <rect x="385" y="24" width="24" height="24" rx="7" fill="#2A141B" stroke="#653242"/>
+  <circle cx="397" cy="36" r="5" fill="#FF5877"/>
 
-  <rect x="18" y="18" width="394" height="68" rx="30" fill="#0D0D1B"/>
-  <rect x="36" y="36" width="34" height="34" rx="11" fill="url(#macc)"/>
-  <text x="84" y="58" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700">Nomadex</text>
-  <rect x="184" y="34" width="118" height="36" rx="18" fill="#0B291F" stroke="#0F5E46"/>
-  <text x="209" y="58" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="14">Full Access</text>
+  <rect x="28" y="84" width="290" height="26" rx="8" fill="#18131A" stroke="#34212A"/>
+  <circle cx="38" cy="97" r="4" fill="#E6DFF0"/>
+  <text x="52" y="101" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="13">I'm making the ...</text>
+  <text x="292" y="101" fill="#8A8098" font-family="JetBrains Mono, monospace" font-size="13">+</text>
+  <rect x="30" y="112" width="198" height="2" rx="1" fill="#F0548D"/>
 
-  <rect x="32" y="104" width="366" height="42" rx="14" fill="#0F1020" stroke="#22243B"/>
-  <text x="50" y="130" fill="#EDEEFF" font-family="JetBrains Mono, monospace" font-size="14">💬 Mobile Codex session</text>
+  <circle cx="30" cy="150" r="10" fill="#B23A55"/>
+  <text x="52" y="154" fill="#BDB4C9" font-family="JetBrains Mono, monospace" font-size="13">Agent</text>
+  <text x="370" y="154" fill="#6E6879" font-family="JetBrains Mono, monospace" font-size="11">live</text>
 
-  <rect x="32" y="170" width="300" height="116" rx="22" fill="#111224" stroke="#1F2136"/>
-  <circle cx="60" cy="198" r="14" fill="url(#macc)"/>
-  <text x="82" y="203" fill="#C8CAEA" font-family="JetBrains Mono, monospace" font-size="14">Codex</text>
-  <text x="50" y="234" fill="#F7F7FF" font-family="JetBrains Mono, monospace" font-size="16">Live response stream, approvals,</text>
-  <text x="50" y="258" fill="#F7F7FF" font-family="JetBrains Mono, monospace" font-size="16">file mentions, and diff review</text>
+  <text x="42" y="190" fill="#F1EAF6" font-family="JetBrains Mono, monospace" font-size="16">I'm making the open path cancellable too, so a</text>
+  <text x="42" y="216" fill="#F1EAF6" font-family="JetBrains Mono, monospace" font-size="16">quick open-close tap on mobile doesn't leave a</text>
+  <text x="42" y="242" fill="#F1EAF6" font-family="JetBrains Mono, monospace" font-size="16">queued shell startup running after the panel is</text>
+  <text x="42" y="268" fill="#F1EAF6" font-family="JetBrains Mono, monospace" font-size="16">already gone.</text>
 
-  <rect x="98" y="310" width="300" height="84" rx="22" fill="url(#macc)"/>
-  <text x="122" y="360" fill="#FCFCFF" font-family="JetBrains Mono, monospace" font-size="18">Please review the last patch</text>
+  <rect x="40" y="298" width="10" height="20" rx="5" fill="#D4C7E8"/>
+  <rect x="42" y="336" width="84" height="20" rx="6" fill="#17141A" stroke="#32242D"/>
+  <text x="53" y="350" fill="#A59AB7" font-family="JetBrains Mono, monospace" font-size="11">/fork</text>
+  <rect x="134" y="336" width="68" height="20" rx="6" fill="#17141A" stroke="#32242D"/>
+  <text x="145" y="350" fill="#A59AB7" font-family="JetBrains Mono, monospace" font-size="11">/plan</text>
+  <rect x="210" y="336" width="22" height="20" rx="6" fill="#17141A" stroke="#32242D"/>
+  <text x="217" y="350" fill="#A59AB7" font-family="JetBrains Mono, monospace" font-size="11">[]</text>
 
-  <rect x="32" y="422" width="366" height="166" rx="22" fill="#111224" stroke="#1F2136"/>
-  <rect x="50" y="446" width="330" height="40" rx="12" fill="#171931" stroke="#2B2E49"/>
-  <text x="70" y="471" fill="#EDEEFF" font-family="JetBrains Mono, monospace" font-size="14">▶ npm run build</text>
-  <text x="268" y="471" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="14">✓ Completed</text>
-  <rect x="50" y="500" width="330" height="58" rx="12" fill="#171931" stroke="#2B2E49"/>
-  <text x="70" y="535" fill="#AEB2D8" font-family="JetBrains Mono, monospace" font-size="14">📄 CodexWorkspace.tsx  +142 / -37</text>
+  <rect x="28" y="388" width="374" height="90" rx="12" fill="#31191E" stroke="#5B2D38"/>
+  <circle cx="44" cy="406" r="6" fill="#FF6659"/>
+  <circle cx="62" cy="406" r="6" fill="#F3BF4E"/>
+  <circle cx="80" cy="406" r="6" fill="#36D074"/>
+  <text x="166" y="410" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="12">WorkspaceShell.tsx</text>
+  <rect x="324" y="396" width="62" height="16" rx="6" fill="#32483E"/>
+  <text x="334" y="407" fill="#A5DEB5" font-family="JetBrains Mono, monospace" font-size="10">COMPLETED</text>
+  <text x="42" y="444" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="13">sed -n '1,80p' src/app/WorkspaceShell.tsx</text>
+  <rect x="42" y="452" width="110" height="14" rx="6" fill="#20161B"/>
+  <text x="52" y="462" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">~/code-console</text>
+  <rect x="160" y="452" width="38" height="14" rx="6" fill="#20161B"/>
+  <text x="170" y="462" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">4132</text>
+  <rect x="204" y="452" width="26" height="14" rx="6" fill="#20161B"/>
+  <text x="212" y="462" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">0ms</text>
 
-  <rect x="32" y="646" width="366" height="222" rx="24" fill="#0E0F1D" stroke="#282B43"/>
-  <rect x="52" y="668" width="326" height="48" rx="16" fill="#14162A" stroke="#313452"/>
-  <text x="72" y="698" fill="#A2A6CC" font-family="JetBrains Mono, monospace" font-size="15">@ mention  ·  / command  ·  $ skills</text>
-  <rect x="52" y="734" width="236" height="92" rx="18" fill="#14162A" stroke="#313452"/>
-  <text x="72" y="785" fill="#9BA0C7" font-family="JetBrains Mono, monospace" font-size="16">Ask Codex…</text>
-  <rect x="308" y="748" width="70" height="70" rx="22" fill="url(#macc)"/>
-  <text x="334" y="790" fill="#FCFCFF" font-family="JetBrains Mono, monospace" font-size="26">↑</text>
-  <text x="54" y="850" fill="#6D7095" font-family="JetBrains Mono, monospace" font-size="12">gpt-5.4  ·  LAN live session  ·  mobile-first</text>
+  <rect x="28" y="494" width="374" height="90" rx="12" fill="#31191E" stroke="#5B2D38"/>
+  <circle cx="44" cy="512" r="6" fill="#FF6659"/>
+  <circle cx="62" cy="512" r="6" fill="#F3BF4E"/>
+  <circle cx="80" cy="512" r="6" fill="#36D074"/>
+  <text x="180" y="516" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="12">index.css</text>
+  <rect x="324" y="502" width="62" height="16" rx="6" fill="#32483E"/>
+  <text x="334" y="513" fill="#A5DEB5" font-family="JetBrains Mono, monospace" font-size="10">COMPLETED</text>
+  <text x="42" y="550" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="13">sed -n '4560,4625p' src/index.css</text>
+  <rect x="42" y="558" width="110" height="14" rx="6" fill="#20161B"/>
+  <text x="52" y="568" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">~/code-console</text>
+  <rect x="160" y="558" width="38" height="14" rx="6" fill="#20161B"/>
+  <text x="170" y="568" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">86510</text>
+  <rect x="204" y="558" width="26" height="14" rx="6" fill="#20161B"/>
+  <text x="212" y="568" fill="#A89CB5" font-family="JetBrains Mono, monospace" font-size="10">0ms</text>
+
+  <rect x="28" y="594" width="374" height="32" rx="8" fill="#17141A" stroke="#342731"/>
+  <text x="46" y="614" fill="#B3A9C4" font-family="JetBrains Mono, monospace" font-size="13">this video</text>
+
+  <text x="42" y="656" fill="#9487A5" font-family="JetBrains Mono, monospace" font-size="13">Writing response</text>
+  <rect x="32" y="646" width="12" height="12" rx="6" stroke="#6D5A86" stroke-width="1.5"/>
+
+  <rect x="28" y="688" width="374" height="86" rx="12" fill="#3A1A25" stroke="#6A3546"/>
+  <text x="40" y="710" fill="#D9CEDF" font-family="JetBrains Mono, monospace" font-size="14">Changing</text>
+  <text x="384" y="710" fill="#8E7D95" font-family="JetBrains Mono, monospace" font-size="13">2</text>
+  <rect x="42" y="728" width="104" height="28" rx="14" fill="#231923" stroke="#3B293A"/>
+  <text x="55" y="746" fill="#E7B642" font-family="JetBrains Mono, monospace" font-size="12">MOD</text>
+  <text x="94" y="746" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="12">index.css</text>
+  <rect x="156" y="728" width="164" height="28" rx="14" fill="#231923" stroke="#3B293A"/>
+  <text x="169" y="746" fill="#E7B642" font-family="JetBrains Mono, monospace" font-size="12">MOD</text>
+  <text x="208" y="746" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="12">WorkspaceShell.tsx</text>
+
+  <rect x="20" y="784" width="390" height="28" fill="#17141A"/>
+  <text x="30" y="802" fill="#7E748E" font-family="JetBrains Mono, monospace" font-size="11">Auto</text>
+  <text x="84" y="802" fill="#7E748E" font-family="JetBrains Mono, monospace" font-size="11">Plan</text>
+  <text x="140" y="802" fill="#7E748E" font-family="JetBrains Mono, monospace" font-size="11">Mention</text>
+  <text x="222" y="802" fill="#7E748E" font-family="JetBrains Mono, monospace" font-size="11">Files</text>
+  <text x="272" y="802" fill="#7E748E" font-family="JetBrains Mono, monospace" font-size="11">Image</text>
+  <text x="326" y="802" fill="#D3A2C3" font-family="JetBrains Mono, monospace" font-size="11">Shell</text>
+
+  <rect x="20" y="812" width="390" height="104" rx="10" fill="#17141A" stroke="#372B33"/>
+  <rect x="30" y="830" width="318" height="70" rx="8" fill="#1C171D" stroke="#473541"/>
+  <text x="42" y="870" fill="#6A6175" font-family="JetBrains Mono, monospace" font-size="14">Ask Nomadex... / for slash commands - @ mention...</text>
+  <rect x="362" y="838" width="30" height="54" rx="10" fill="#1F1419" stroke="#7B3348"/>
+  <text x="372" y="871" fill="#F6EAF3" font-family="JetBrains Mono, monospace" font-size="16">^</text>
+  <rect x="398" y="838" width="20" height="54" rx="10" fill="#2A141B" stroke="#A33A59"/>
+  <text x="404" y="871" fill="#FF6B89" font-family="JetBrains Mono, monospace" font-size="16">[]</text>
+
+  <text x="24" y="914" fill="#867A8C" font-family="JetBrains Mono, monospace" font-size="11">Shift+Enter</text>
+  <text x="132" y="914" fill="#867A8C" font-family="JetBrains Mono, monospace" font-size="11">Context 65.2k / 200k</text>
+  <rect x="316" y="902" width="44" height="18" rx="9" fill="#1F1B22" stroke="#393541"/>
+  <text x="324" y="914" fill="#A093A8" font-family="JetBrains Mono, monospace" font-size="10">5h 75%</text>
+  <rect x="364" y="902" width="50" height="18" rx="9" fill="#1F1B22" stroke="#393541"/>
+  <text x="371" y="914" fill="#A093A8" font-family="JetBrains Mono, monospace" font-size="10">Week 82%</text>
 </svg>

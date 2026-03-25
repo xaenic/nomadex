@@ -1,100 +1,190 @@
 <svg width="1600" height="960" viewBox="0 0 1600 960" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="180" y1="40" x2="1410" y2="900" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#111126"/>
-      <stop offset="1" stop-color="#060610"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#7C83FF"/>
-      <stop offset="1" stop-color="#A855F7"/>
-    </linearGradient>
-    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="#141428"/>
-      <stop offset="1" stop-color="#0C0C19"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000000" flood-opacity="0.35"/>
-    </filter>
-  </defs>
+  <rect width="1600" height="960" rx="24" fill="#120B16"/>
+  <rect x="20" y="20" width="1560" height="920" rx="18" fill="#130F19" stroke="#2B2232"/>
 
-  <rect width="1600" height="960" rx="32" fill="url(#bg)"/>
-  <circle cx="1380" cy="120" r="220" fill="#6D28D9" opacity="0.08"/>
-  <circle cx="190" cy="840" r="240" fill="#06B6D4" opacity="0.06"/>
+  <rect x="20" y="20" width="1560" height="52" rx="18" fill="#17111D"/>
+  <rect x="32" y="30" width="26" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <text x="41" y="47" fill="#B6BFD6" font-family="JetBrains Mono, monospace" font-size="13">+</text>
+  <rect x="68" y="30" width="36" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <rect x="80" y="37" width="13" height="10" rx="2" fill="#F0B34A"/>
+  <rect x="110" y="30" width="36" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <rect x="123" y="35" width="10" height="16" rx="2" fill="#E6D0B6"/>
+  <rect x="152" y="30" width="36" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <circle cx="170" cy="43" r="7" stroke="#6C7387" stroke-width="1.5"/>
+  <circle cx="224" cy="43" r="8" fill="#33D6BA"/>
+  <text x="240" y="48" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700">Nomadex</text>
 
-  <g filter="url(#shadow)">
-    <rect x="48" y="42" width="1504" height="876" rx="28" fill="#090913" stroke="#21213A"/>
-  </g>
+  <rect x="360" y="29" width="126" height="28" rx="14" fill="#14311F" stroke="#2D6A4D"/>
+  <text x="386" y="47" fill="#8DE2A7" font-family="JetBrains Mono, monospace" font-size="14">Full Access</text>
 
-  <rect x="48" y="42" width="1504" height="64" rx="28" fill="#0D0D1B"/>
-  <rect x="74" y="60" width="34" height="34" rx="10" fill="url(#accent)"/>
-  <text x="126" y="83" fill="#F3F4FF" font-family="JetBrains Mono, monospace" font-size="22" font-weight="700">Nomadex</text>
-  <rect x="352" y="60" width="160" height="34" rx="17" fill="#0B291F" stroke="#0F5E46"/>
-  <text x="384" y="82" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="18">Full Access</text>
-  <rect x="1326" y="58" width="182" height="38" rx="12" fill="#121224" stroke="#2A2A43"/>
-  <circle cx="1354" cy="77" r="6" fill="#10B981"/>
-  <text x="1372" y="84" fill="#B6B7D8" font-family="JetBrains Mono, monospace" font-size="18">gpt-5.4</text>
+  <rect x="501" y="30" width="28" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <text x="510" y="47" fill="#A9A0C3" font-family="JetBrains Mono, monospace" font-size="13">96</text>
+  <rect x="540" y="30" width="28" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <text x="549" y="47" fill="#A9A0C3" font-family="JetBrains Mono, monospace" font-size="13">v</text>
+  <rect x="579" y="30" width="28" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <rect x="588" y="36" width="11" height="12" rx="2" fill="#F1C456"/>
+  <rect x="618" y="30" width="28" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <rect x="627" y="35" width="10" height="16" rx="2" fill="#F1E6D7"/>
+  <rect x="657" y="30" width="28" height="26" rx="8" fill="#171C27" stroke="#2D3342"/>
+  <circle cx="671" cy="43" r="6" stroke="#667088" stroke-width="1.5"/>
+  <rect x="697" y="29" width="90" height="28" rx="14" fill="#23172B" stroke="#3A2947"/>
+  <circle cx="713" cy="43" r="5" fill="#8B60E6"/>
+  <text x="727" y="47" fill="#D7C7F5" font-family="JetBrains Mono, monospace" font-size="13">Plasma</text>
 
-  <rect x="48" y="106" width="296" height="812" fill="#0B0B16"/>
-  <text x="82" y="154" fill="#6366F1" font-family="JetBrains Mono, monospace" font-size="14">TODAY</text>
+  <rect x="1420" y="28" width="140" height="30" rx="12" fill="#171C27" stroke="#2D3342"/>
+  <circle cx="1437" cy="43" r="5" fill="#39D39A"/>
+  <text x="1450" y="47" fill="#B4B8CD" font-family="JetBrains Mono, monospace" font-size="14">gpt-5.4</text>
 
-  <rect x="72" y="176" width="248" height="66" rx="16" fill="#181832" stroke="#3B3B67"/>
-  <text x="94" y="206" fill="#F5F5FF" font-family="JetBrains Mono, monospace" font-size="18">💬 Refactor auth flow</text>
-  <text x="94" y="228" fill="#7E81B2" font-family="JetBrains Mono, monospace" font-size="14">latest streamed thread</text>
+  <rect x="20" y="72" width="250" height="868" fill="#141018"/>
+  <rect x="34" y="88" width="220" height="44" rx="8" fill="#18141C" stroke="#2E2432"/>
+  <text x="50" y="115" fill="#F2EDF6" font-family="JetBrains Mono, monospace" font-size="14">+ New Session</text>
 
-  <rect x="72" y="252" width="248" height="60" rx="14" fill="#101022"/>
-  <text x="94" y="286" fill="#A4A6C8" font-family="JetBrains Mono, monospace" font-size="17">💬 Review suppliers portal</text>
+  <text x="34" y="160" fill="#6E697C" font-family="JetBrains Mono, monospace" font-size="11">TODAY</text>
+  <circle cx="46" cy="186" r="5" fill="#E7DFF1"/>
+  <text x="60" y="191" fill="#F2EDF6" font-family="JetBrains Mono, monospace" font-size="13">it was slow because the first...</text>
+  <rect x="40" y="198" width="180" height="2" rx="1" fill="#3FE0D0"/>
 
-  <rect x="72" y="322" width="248" height="60" rx="14" fill="#101022"/>
-  <text x="94" y="356" fill="#A4A6C8" font-family="JetBrains Mono, monospace" font-size="17">⑂ Worker thread: mobile polish</text>
+  <circle cx="46" cy="224" r="5" fill="#E7DFF1"/>
+  <text x="60" y="229" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">fix this please</text>
+  <circle cx="46" cy="262" r="5" fill="#E7DFF1"/>
+  <text x="60" y="267" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">hi,i want you to make me a ui...</text>
+  <circle cx="46" cy="300" r="5" fill="#E7DFF1"/>
+  <text x="60" y="305" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">give me current project loca...</text>
 
-  <rect x="72" y="756" width="248" height="126" rx="18" fill="#121224" stroke="#23233C"/>
-  <text x="92" y="792" fill="#F5F5FF" font-family="JetBrains Mono, monospace" font-size="16">Use cases</text>
-  <text x="92" y="822" fill="#9DA0C8" font-family="JetBrains Mono, monospace" font-size="13">• mobile companion</text>
-  <text x="92" y="846" fill="#9DA0C8" font-family="JetBrains Mono, monospace" font-size="13">• diff supervision</text>
-  <text x="92" y="870" fill="#9DA0C8" font-family="JetBrains Mono, monospace" font-size="13">• LAN-access Codex shell</text>
+  <text x="34" y="352" fill="#6E697C" font-family="JetBrains Mono, monospace" font-size="11">YESTERDAY</text>
+  <circle cx="46" cy="378" r="5" fill="#E7DFF1"/>
+  <text x="60" y="383" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">this is a test</text>
+  <circle cx="46" cy="416" r="5" fill="#E7DFF1"/>
+  <text x="60" y="421" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">test</text>
+  <circle cx="46" cy="454" r="5" fill="#E7DFF1"/>
+  <text x="60" y="459" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">any latch briefly</text>
+  <circle cx="46" cy="492" r="5" fill="#E7DFF1"/>
+  <text x="60" y="497" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">hello</text>
 
-  <rect x="344" y="106" width="920" height="812" fill="#080811"/>
-  <rect x="372" y="128" width="864" height="46" rx="16" fill="#0F1020" stroke="#22243B"/>
-  <text x="398" y="157" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="18">💬 Refactor auth flow</text>
-  <text x="1114" y="157" fill="#71749D" font-family="JetBrains Mono, monospace" font-size="14">thread / chat</text>
+  <text x="34" y="548" fill="#6E697C" font-family="JetBrains Mono, monospace" font-size="11">EARLIER</text>
+  <circle cx="46" cy="574" r="5" fill="#E7DFF1"/>
+  <text x="60" y="579" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">hi</text>
+  <circle cx="46" cy="612" r="5" fill="#E7DFF1"/>
+  <text x="60" y="617" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">run the shell command "slmp"</text>
+  <circle cx="46" cy="650" r="5" fill="#E7DFF1"/>
+  <text x="60" y="655" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">can you create me a new ui st...</text>
+  <circle cx="46" cy="688" r="5" fill="#E7DFF1"/>
+  <text x="60" y="693" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">this is my staging repo://ta...</text>
+  <circle cx="46" cy="726" r="5" fill="#E7DFF1"/>
+  <text x="60" y="731" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">Add Discord bot and reset row</text>
+  <circle cx="46" cy="764" r="5" fill="#E7DFF1"/>
+  <text x="60" y="769" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">implement this please</text>
+  <circle cx="46" cy="802" r="5" fill="#E7DFF1"/>
+  <text x="60" y="807" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">https://github.com/fbuls2/com...</text>
 
-  <rect x="400" y="220" width="770" height="130" rx="24" fill="url(#panel)" stroke="#1F2136"/>
-  <circle cx="434" cy="254" r="18" fill="url(#accent)"/>
-  <text x="466" y="258" fill="#C8CAEA" font-family="JetBrains Mono, monospace" font-size="18">Codex</text>
-  <text x="466" y="296" fill="#F8F8FF" font-family="JetBrains Mono, monospace" font-size="22">I’m streaming the current turn, keeping approvals and diff review</text>
-  <text x="466" y="328" fill="#F8F8FF" font-family="JetBrains Mono, monospace" font-size="22">visible, and holding the active thread context across reloads.</text>
+  <text x="34" y="860" fill="#7B738A" font-family="JetBrains Mono, monospace" font-size="12">Command palette</text>
+  <rect x="182" y="846" width="38" height="20" rx="6" fill="#211A29" stroke="#342B3D"/>
+  <text x="194" y="860" fill="#A79FBD" font-family="JetBrains Mono, monospace" font-size="11">K</text>
+  <text x="34" y="892" fill="#B9B0C9" font-family="JetBrains Mono, monospace" font-size="12">/review working tree</text>
+  <text x="34" y="922" fill="#B9B0C9" font-family="JetBrains Mono, monospace" font-size="12">/fork session</text>
 
-  <rect x="602" y="382" width="568" height="90" rx="24" fill="url(#accent)"/>
-  <text x="638" y="437" fill="#FCFCFF" font-family="JetBrains Mono, monospace" font-size="24">Can you review the last diff and tighten mobile spacing?</text>
+  <rect x="270" y="72" width="960" height="868" fill="#11161C"/>
+  <rect x="270" y="72" width="960" height="34" fill="#121820"/>
+  <text x="292" y="94" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="13">it was slow because...</text>
+  <text x="523" y="94" fill="#7D728F" font-family="JetBrains Mono, monospace" font-size="13">fix this please</text>
+  <text x="678" y="94" fill="#7D728F" font-family="JetBrains Mono, monospace" font-size="13">+</text>
+  <rect x="294" y="104" width="230" height="3" rx="1.5" fill="#3FE0D0"/>
 
-  <rect x="400" y="510" width="770" height="172" rx="24" fill="#111224" stroke="#1E2035"/>
-  <rect x="430" y="542" width="710" height="44" rx="14" fill="#171931" stroke="#2B2E49"/>
-  <text x="458" y="570" fill="#EDEEFF" font-family="JetBrains Mono, monospace" font-size="18">▶ /bin/bash -lc "npm run build"</text>
-  <text x="1032" y="570" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="18">✓ Completed</text>
-  <rect x="430" y="598" width="710" height="56" rx="14" fill="#171931" stroke="#2B2E49"/>
-  <text x="458" y="632" fill="#AEB2D8" font-family="JetBrains Mono, monospace" font-size="18">📄 src/app/CodexWorkspace.tsx   +142 / -37</text>
+  <rect x="312" y="132" width="560" height="22" rx="6" fill="#16131A" stroke="#302633"/>
+  <rect x="326" y="137" width="118" height="12" rx="6" fill="#5F5D17"/>
+  <text x="337" y="146" fill="#E7E0AB" font-family="JetBrains Mono, monospace" font-size="10">index.css L17706</text>
+  <rect x="456" y="137" width="44" height="12" rx="6" fill="#231A2B"/>
+  <text x="470" y="146" fill="#B2A3C8" font-family="JetBrains Mono, monospace" font-size="10">DB</text>
 
-  <rect x="372" y="734" width="864" height="152" rx="22" fill="#0E0F1D" stroke="#282B43"/>
-  <rect x="398" y="764" width="674" height="54" rx="18" fill="#14162A" stroke="#313452"/>
-  <text x="426" y="797" fill="#A2A6CC" font-family="JetBrains Mono, monospace" font-size="20">Ask Codex…  @ mention  ·  / command  ·  $ skills</text>
-  <rect x="1092" y="762" width="116" height="58" rx="18" fill="url(#accent)"/>
-  <text x="1136" y="798" fill="#FCFCFF" font-family="JetBrains Mono, monospace" font-size="26">↑</text>
-  <text x="398" y="854" fill="#6D7095" font-family="JetBrains Mono, monospace" font-size="15">auto (default)   ·   gpt-5.4   ·   live transport connected</text>
+  <rect x="336" y="198" width="824" height="70" rx="10" fill="#6A5B7C" stroke="#8D7AA4"/>
+  <circle cx="362" cy="222" r="7" fill="#FF6659"/>
+  <circle cx="382" cy="222" r="7" fill="#F3BF4E"/>
+  <circle cx="402" cy="222" r="7" fill="#36D074"/>
+  <text x="735" y="226" fill="#EFEAF5" font-family="JetBrains Mono, monospace" font-size="13">index.css</text>
+  <rect x="1072" y="210" width="72" height="16" rx="6" fill="#30493E"/>
+  <text x="1083" y="221" fill="#A9E0B8" font-family="JetBrains Mono, monospace" font-size="10">COMPLETED</text>
+  <text x="354" y="252" fill="#E9E1F4" font-family="JetBrains Mono, monospace" font-size="13">rg -n "terminalDockReady|startBottomShell|workspace terminal dock loading|Opening terminal" src/app/WorkspaceShell.tsx src/index.css</text>
+  <rect x="354" y="258" width="126" height="14" rx="6" fill="#201924"/>
+  <text x="366" y="268" fill="#A79BB8" font-family="JetBrains Mono, monospace" font-size="10">~/trade-console</text>
+  <rect x="488" y="258" width="40" height="14" rx="6" fill="#201924"/>
+  <text x="499" y="268" fill="#A79BB8" font-family="JetBrains Mono, monospace" font-size="10">17706</text>
+  <rect x="535" y="258" width="30" height="14" rx="6" fill="#201924"/>
+  <text x="545" y="268" fill="#A79BB8" font-family="JetBrains Mono, monospace" font-size="10">0ms</text>
 
-  <rect x="1264" y="106" width="288" height="812" fill="#0A0A14"/>
-  <text x="1294" y="154" fill="#F5F5FF" font-family="JetBrains Mono, monospace" font-size="18">Panels</text>
-  <rect x="1290" y="178" width="236" height="112" rx="18" fill="#111224" stroke="#252741"/>
-  <text x="1312" y="210" fill="#9BA0C7" font-family="JetBrains Mono, monospace" font-size="15">Diff Review</text>
-  <text x="1312" y="242" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="17">3 changed files</text>
-  <text x="1312" y="266" fill="#34D399" font-family="JetBrains Mono, monospace" font-size="15">+182 / -61</text>
+  <circle cx="332" cy="318" r="10" fill="#7E61D6"/>
+  <text x="356" y="323" fill="#B9B1C8" font-family="JetBrains Mono, monospace" font-size="14">Agent</text>
+  <text x="1122" y="323" fill="#6F6A77" font-family="JetBrains Mono, monospace" font-size="12">completed</text>
+  <text x="330" y="366" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">It was slow because the first shell open was doing too much in one interaction:</text>
+  <text x="330" y="394" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">showing the dock, mounting the terminal UI, and starting the pty shell at the same time.</text>
+  <text x="330" y="422" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">I changed that in WorkspaceShell.tsx so the bottom dock paints first, the</text>
+  <text x="330" y="450" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">heavier terminal content mounts on the next frame, and the shell starts after that.</text>
+  <text x="330" y="478" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">I also added a lightweight Opening terminal placeholder in WorkspaceShell.tsx.</text>
+  <text x="330" y="532" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="16">npm run build passes. Hard refresh Nomadex and try the Shell button again.</text>
 
-  <rect x="1290" y="306" width="236" height="112" rx="18" fill="#111224" stroke="#252741"/>
-  <text x="1312" y="338" fill="#9BA0C7" font-family="JetBrains Mono, monospace" font-size="15">Background terminals</text>
-  <text x="1312" y="370" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="17">2 running</text>
-  <text x="1312" y="394" fill="#8B5CF6" font-family="JetBrains Mono, monospace" font-size="15">watching live logs</text>
+  <rect x="330" y="566" width="102" height="20" rx="6" fill="#17141A" stroke="#2E2432"/>
+  <text x="342" y="580" fill="#A89FBC" font-family="JetBrains Mono, monospace" font-size="11">/fork</text>
+  <rect x="440" y="566" width="68" height="20" rx="6" fill="#17141A" stroke="#2E2432"/>
+  <text x="451" y="580" fill="#A89FBC" font-family="JetBrains Mono, monospace" font-size="11">/plan</text>
+  <rect x="516" y="566" width="22" height="20" rx="6" fill="#17141A" stroke="#2E2432"/>
+  <text x="523" y="580" fill="#A89FBC" font-family="JetBrains Mono, monospace" font-size="11">[]</text>
 
-  <rect x="1290" y="434" width="236" height="112" rx="18" fill="#111224" stroke="#252741"/>
-  <text x="1312" y="466" fill="#9BA0C7" font-family="JetBrains Mono, monospace" font-size="15">Skills &amp; MCP</text>
-  <text x="1312" y="498" fill="#F4F4FF" font-family="JetBrains Mono, monospace" font-size="17">7 skills · 3 servers</text>
-  <text x="1312" y="522" fill="#06B6D4" font-family="JetBrains Mono, monospace" font-size="15">connected over LAN</text>
- </svg>
+  <rect x="330" y="636" width="620" height="54" rx="10" fill="#161A20" stroke="#2C313A"/>
+  <text x="346" y="667" fill="#B4ACC4" font-family="JetBrains Mono, monospace" font-size="13">this video</text>
+
+  <rect x="296" y="724" width="874" height="34" fill="#12171D"/>
+  <text x="306" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Auto</text>
+  <text x="372" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Plan</text>
+  <text x="440" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Mention</text>
+  <text x="526" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Files</text>
+  <text x="592" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Image</text>
+  <text x="660" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Shell</text>
+  <text x="730" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Web</text>
+  <text x="794" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Review</text>
+  <text x="876" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Agents</text>
+  <text x="958" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Trim</text>
+  <text x="1024" y="746" fill="#7B7486" font-family="JetBrains Mono, monospace" font-size="12">Editor</text>
+
+  <rect x="296" y="758" width="874" height="144" rx="10" fill="#12171D" stroke="#2A303A"/>
+  <rect x="330" y="796" width="732" height="80" rx="10" fill="#151A21" stroke="#343A45"/>
+  <text x="350" y="844" fill="#697487" font-family="JetBrains Mono, monospace" font-size="16">Ask Nomadex... / for slash commands - @ mention - $ skills - ! shell - Ctrl+G editor</text>
+  <rect x="1108" y="812" width="34" height="50" rx="10" fill="#1A1F28" stroke="#323845"/>
+  <text x="1120" y="844" fill="#EDE7F7" font-family="JetBrains Mono, monospace" font-size="20">^</text>
+
+  <text x="328" y="898" fill="#776F81" font-family="JetBrains Mono, monospace" font-size="12">Shift+Enter</text>
+  <text x="936" y="898" fill="#776F81" font-family="JetBrains Mono, monospace" font-size="12">Context 65.7k / 200k</text>
+  <rect x="1086" y="882" width="52" height="20" rx="10" fill="#1E232B" stroke="#343A45"/>
+  <text x="1098" y="896" fill="#938CA1" font-family="JetBrains Mono, monospace" font-size="11">5h 79%</text>
+  <rect x="1146" y="882" width="58" height="20" rx="10" fill="#1E232B" stroke="#343A45"/>
+  <text x="1158" y="896" fill="#938CA1" font-family="JetBrains Mono, monospace" font-size="11">Week 82%</text>
+
+  <rect x="1230" y="72" width="350" height="868" fill="#12161E"/>
+  <text x="1248" y="110" fill="#EEE7F7" font-family="JetBrains Mono, monospace" font-size="20" font-weight="700">Files</text>
+  <text x="1248" y="144" fill="#B2ACBD" font-family="JetBrains Mono, monospace" font-size="13">Files</text>
+  <text x="1314" y="144" fill="#6F6A77" font-family="JetBrains Mono, monospace" font-size="13">Branches</text>
+  <text x="1410" y="144" fill="#6F6A77" font-family="JetBrains Mono, monospace" font-size="13">Diff</text>
+  <text x="1462" y="144" fill="#6F6A77" font-family="JetBrains Mono, monospace" font-size="13">Agents</text>
+  <text x="1536" y="144" fill="#6F6A77" font-family="JetBrains Mono, monospace" font-size="13">Config</text>
+  <rect x="1248" y="154" width="54" height="2" rx="1" fill="#3FE0D0"/>
+
+  <rect x="1248" y="182" width="110" height="24" rx="12" fill="#182332" stroke="#2C3C52"/>
+  <text x="1266" y="198" fill="#A5C8FF" font-family="JetBrains Mono, monospace" font-size="12">~/xaenic/nomadex</text>
+  <text x="1248" y="224" fill="#7D778A" font-family="JetBrains Mono, monospace" font-size="12">codex-console - 10 modified</text>
+
+  <rect x="1258" y="252" width="116" height="24" rx="12" fill="#18263A" stroke="#30527B"/>
+  <text x="1276" y="268" fill="#9FC7FF" font-family="JetBrains Mono, monospace" font-size="12">codex-console</text>
+  <text x="1258" y="312" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">dist</text>
+  <text x="1258" y="350" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">docs</text>
+  <text x="1258" y="388" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">public</text>
+  <text x="1258" y="426" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">scripts</text>
+  <text x="1258" y="464" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">src</text>
+  <text x="1258" y="502" fill="#F0B34A" font-family="JetBrains Mono, monospace" font-size="16">test-results</text>
+  <text x="1258" y="540" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">.gitignore</text>
+  <text x="1258" y="578" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">eslint.config.js</text>
+  <text x="1258" y="616" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">index.html</text>
+  <text x="1258" y="654" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">package-lock.json</text>
+  <text x="1258" y="692" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">package.json</text>
+  <text x="1258" y="730" fill="#D6D0E1" font-family="JetBrains Mono, monospace" font-size="16">README.md</text>
+
+  <rect x="1560" y="162" width="6" height="742" rx="3" fill="#2D2B2F"/>
+  <rect x="1560" y="172" width="6" height="168" rx="3" fill="#AAA6B0"/>
+</svg>

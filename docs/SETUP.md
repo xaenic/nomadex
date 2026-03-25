@@ -1,14 +1,18 @@
 # Setup
 
-This document covers local launch, LAN/mobile access, manual bridge setup, and the main failure cases for Nomadex.
+This guide covers the practical Nomadex setup for the workflow it was built for:
+
+- the coding agent runs on your own machine
+- the repo and credentials stay on that machine
+- you open Nomadex from your phone, tablet, or another computer to monitor and steer the run remotely
 
 ## 1. Prerequisites
 
 - Node.js 20 or newer recommended
 - `npm`
-- `codex` CLI installed and reachable on `PATH`
+- `codex` CLI available on `PATH`
 
-Check the agent bridge binary first:
+Quick check:
 
 ```bash
 codex --version
@@ -16,16 +20,11 @@ codex --version
 
 ## 2. Recommended Launch
 
-From the repo root:
+Normal use:
 
 ```bash
-npm install
-npm run dev:live
+npx nomadex
 ```
-
-`npm install` includes the Codex CLI as a local development dependency for this
-project, so you do not need a separate global `codex` install just to launch
-Nomadex.
 
 Expected result:
 
@@ -33,15 +32,68 @@ Expected result:
 - Nomadex UI on `http://127.0.0.1:3784`
 - Browser websocket proxy on `/codex-ws`
 
-`dev:live` is the recommended path because it validates both sides:
+`npx nomadex` is the packaged launcher path. It:
 
-- It reuses an existing app-server only if `/readyz` succeeds.
-- It refuses to start if the UI port is already busy.
-- It binds the UI to `0.0.0.0`, which is useful for mobile/LAN access.
+- it reuses an existing app-server only if `/readyz` succeeds
+- it starts the app-server if needed
+- it fails if the UI port is already busy
+- it binds the UI to `0.0.0.0`, which is useful for LAN and phone access
+- it serves the built UI directly instead of running Vite dev mode
+- it prints a UI password in the terminal and blocks browser access until that password is entered
+- it can prompt for a newer npm package version before startup
 
-## 3. Manual Launch
+Repo development:
 
-If you want to manage the bridge yourself:
+```bash
+npm install
+npm run dev:live
+```
+
+Use `dev:live` when you are editing Nomadex itself and want the Vite development workflow.
+
+## 3. Preferred Remote Access
+
+Preferred setup: ZeroTier.
+
+Why ZeroTier is the preferred path for Nomadex:
+
+- it keeps the UI on a private overlay network
+- it is safer than exposing the raw dev server directly
+- it works well for phone access from anywhere
+- it preserves the model where the real agent stays local to your machine
+
+Recommended flow:
+
+1. Install ZeroTier on the host machine.
+2. Install ZeroTier on your phone or remote laptop.
+3. Join both devices to the same ZeroTier network.
+4. Run `npx nomadex` on the host machine.
+5. Open `http://<host-zerotier-ip>:3784` from the remote device.
+
+Alternative options:
+
+- Tailscale
+- SSH tunnel
+- reverse proxy with real auth in front of Nomadex
+
+Do not expose the raw Nomadex dev server directly to the public internet.
+
+## 4. LAN And Mobile Access
+
+On the same local network:
+
+1. Run `npx nomadex` on the host machine.
+2. Or run `npm run dev:live` if you are using the repo development flow.
+3. Find the machine’s LAN IP.
+4. Open `http://<lan-ip>:3784` from your phone or tablet.
+
+Because the websocket is proxied through the same origin, the browser should connect through the Nomadex host without needing a separate websocket URL.
+
+## 5. Repo Development And Manual Launch
+
+For normal installed usage, prefer `npx nomadex`.
+
+If you are working from the repo and want to manage the bridge yourself:
 
 ```bash
 npm run app-server
@@ -54,10 +106,18 @@ This is useful if:
 - you are debugging the app-server directly
 - you want to run the bridge separately from Vite
 
-## 4. Environment Variables
+## 6. Environment Variables
 
 Main variables:
 
+- `NOMADEX_WS_URL`
+  Websocket URL for the packaged launcher. Default: `ws://127.0.0.1:3901`
+- `NOMADEX_UI_PORT`
+  UI port used by `npx nomadex`. Default: `3784`
+- `NOMADEX_AUTH_RELAY_TARGET`
+  HTTP target used by the packaged auth relay. Default: `http://127.0.0.1:1455`
+- `NOMADEX_PASSWORD`
+  Stable UI password for the packaged launcher. If unset, Nomadex generates one on each launch and prints it in the terminal.
 - `VITE_CODEX_WS_URL`
   Websocket URL for the Codex app-server. Default: `ws://127.0.0.1:3901`
 - `VITE_CODEX_UI_PORT`
@@ -68,34 +128,12 @@ Main variables:
 Examples:
 
 ```bash
+npx nomadex --port 4173
+npx nomadex --ws-url ws://127.0.0.1:3902
+NOMADEX_PASSWORD=my-secret npx nomadex
 VITE_CODEX_UI_PORT=4173 npm run dev:live
 VITE_CODEX_WS_URL=ws://127.0.0.1:3902 npm run dev:live
 ```
-
-## 5. LAN And Mobile Access
-
-On the same network:
-
-1. Run `npm run dev:live` on your machine.
-2. Find your machine's LAN IP.
-3. Open `http://<lan-ip>:3784` from your phone or tablet.
-
-Because the websocket is proxied through the same origin, the browser should connect through the Nomadex host without needing a separate websocket URL in the device browser.
-
-## 6. Access From Outside Your Network
-
-Do not expose the raw Vite dev server directly to the internet.
-
-Safer options:
-
-- Tailscale or another private mesh VPN
-- SSH tunnel from your phone/laptop to the machine
-- Reverse proxy with real auth in front of Nomadex
-
-Practical rule:
-
-- Good: VPN, SSH forwarding, authenticated reverse proxy
-- Bad: open `3784` directly to the public internet
 
 ## 7. Build And Preview
 
@@ -111,19 +149,19 @@ Preview:
 npm run preview
 ```
 
-Use `preview` to inspect the production build shell. The main live development workflow is still `dev:live`.
+Use `preview` to inspect the built shell inside the repo. The normal packaged launch is `npx nomadex`.
 
-## 8. File And Image Uploads
+## 8. Files, Images, And Uploads
 
 Current behavior:
 
-- Images can be pasted into the composer
-- Non-image files go through `Attach`
-- Uploaded assets are written into the workspace under:
+- images can be pasted into the composer
+- non-image files go through `Attach`
+- uploaded assets are written into the workspace under:
   - `.codex-web/uploads`
   - `.codex-web/uploads/files`
 
-The runtime currently injects file mentions into the prompt manifest so the live agent can see attached file paths consistently.
+The runtime injects file mentions into the prompt manifest so the live agent can see attached file paths consistently.
 
 ## 9. Troubleshooting
 
@@ -137,11 +175,12 @@ UI port 3784 is already in use
 
 Fix:
 
-- stop the old process using `3784`, or
-- open the already-running UI, or
-- change `VITE_CODEX_UI_PORT`
+- stop the old process using `3784`
+- open the already-running UI
+- or change `NOMADEX_UI_PORT` for the packaged launcher
+- or change `VITE_CODEX_UI_PORT` for the repo dev launcher
 
-### Websocket bridge port is occupied by another process
+### Websocket bridge port is occupied
 
 Error:
 
@@ -151,17 +190,18 @@ Port 3901 on 127.0.0.1 is already in use, but it is not responding like a Codex 
 
 Fix:
 
-- stop the conflicting process, or
-- run the app-server on another port and set `VITE_CODEX_WS_URL`
+- stop the conflicting process
+- or run the app-server on another port and set `NOMADEX_WS_URL`
+- or set `VITE_CODEX_WS_URL` if you are using `dev:live`
 
 ### Browser shows websocket connection failures
 
 Check:
 
-1. `npm run dev:live` is still running
-2. the UI URL is really the strict port you launched, usually `3784`
+1. `npx nomadex` is still running, or `npm run dev:live` if you are in the repo
+2. the UI URL is really the strict port you launched
 3. the app-server is reachable on the configured websocket target
-4. you hard refreshed after recent websocket or theme changes
+4. you hard refreshed after recent websocket changes
 
 ### Old favicon or theme color still shows
 
@@ -175,6 +215,7 @@ Fix:
 
 ## 10. Current Boundaries
 
-- The UI has a provider abstraction layer, but the shipped live provider is still Codex.
-- Internet-safe deployment is not baked in. Add your own network boundary and auth if you expose it remotely.
-- Some runtime/storage paths still use Codex-specific names because they match the active provider contract.
+- Codex is still the strongest live provider path.
+- The provider abstraction is ahead of full provider-runtime parity.
+- Internet-safe deployment is not built in. Add your own network boundary and auth if you expose Nomadex remotely.
+- The packaged launcher currently assumes the Codex app-server contract as the reference bridge path.
