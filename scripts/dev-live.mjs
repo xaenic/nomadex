@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import net from "node:net";
 import process from "node:process";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -12,6 +14,7 @@ const host = url.hostname;
 const port = Number(url.port || (url.protocol === "wss:" ? 443 : 80));
 const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
 const children = [];
+const require = createRequire(import.meta.url);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -67,6 +70,58 @@ const ensureUiPortAvailable = async () => {
   );
 };
 
+const resolveLocalCodexLaunch = () => {
+  try {
+    const packageJsonPath = require.resolve("@openai/codex/package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    const relativeBin =
+      typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.codex;
+
+    if (!relativeBin) {
+      return null;
+    }
+
+    return {
+      command: process.execPath,
+      args: [path.resolve(path.dirname(packageJsonPath), relativeBin)],
+      shell: false,
+      source: "local dependency",
+    };
+  } catch {
+    return null;
+  }
+};
+
+const getCodexLaunch = () => {
+  const localLaunch = resolveLocalCodexLaunch();
+
+  if (localLaunch) {
+    return localLaunch;
+  }
+
+  return {
+    command: process.platform === "win32" ? "codex.cmd" : "codex",
+    args: [],
+    shell: false,
+    source: "global PATH",
+  };
+};
+
+const formatSpawnError = (error) => {
+  if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+    return (
+      "Could not find the Codex CLI. Run `npm install` in this repo to use the bundled " +
+      "dev dependency, or install `@openai/codex` globally."
+    );
+  }
+
+  if (error instanceof Error) {
+    return `Failed to start the Codex CLI: ${error.message}`;
+  }
+
+  return `Failed to start the Codex CLI: ${String(error)}`;
+};
+
 const stopChildren = () => {
   for (const child of children) {
     if (!child.killed) {
@@ -98,22 +153,39 @@ const ensureAppServer = async () => {
     );
   }
 
+  const codexLaunch = getCodexLaunch();
   console.log(`[nomadex] Starting Codex app-server at ${wsUrl}`);
-  const appServer = spawn("codex", ["app-server", "--listen", wsUrl], {
+  const appServer = spawn(
+    codexLaunch.command,
+    [...codexLaunch.args, "app-server", "--listen", wsUrl],
+    {
     cwd: projectRoot,
     stdio: "inherit",
     env: process.env,
+      shell: codexLaunch.shell,
+    },
+  );
+  let appServerError = null;
+
+  appServer.once("error", (error) => {
+    appServerError = error;
   });
 
   children.push(appServer);
 
   for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (appServerError) {
+      throw new Error(formatSpawnError(appServerError));
+    }
+
     if (await isCodexAppServerReady()) {
       return;
     }
 
     if (appServer.exitCode !== null) {
-      throw new Error(`Codex app-server exited with code ${appServer.exitCode}`);
+      throw new Error(
+        `Codex app-server exited with code ${appServer.exitCode} (${codexLaunch.source}).`,
+      );
     }
 
     await sleep(200);

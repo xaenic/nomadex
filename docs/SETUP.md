@@ -23,6 +23,10 @@ npm install
 npm run dev:live
 ```
 
+`npm install` includes the Codex CLI as a local development dependency for this
+project, so you do not need a separate global `codex` install just to launch
+Nomadex.
+
 Expected result:
 
 - Codex app-server on `ws://127.0.0.1:3901`
@@ -40,7 +44,7 @@ Expected result:
 If you want to manage the bridge yourself:
 
 ```bash
-codex app-server --listen ws://127.0.0.1:3901
+npm run app-server
 VITE_CODEX_WS_URL=ws://127.0.0.1:3901 npm run dev -- --host 0.0.0.0 --port 3784 --strictPort
 ```
 

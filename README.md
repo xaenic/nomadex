@@ -39,6 +39,9 @@ npm install
 npm run dev:live
 ```
 
+`npm install` now brings in the Codex CLI locally for this repo, so `dev:live`
+does not depend on a separate global `codex` install.
+
 Open:
 
 - Local machine: `http://127.0.0.1:3784`
