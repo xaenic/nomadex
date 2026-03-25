@@ -14,7 +14,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - name: Checkout
@@ -68,3 +68,28 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
+
+      - name: Check GitHub release
+        id: release_check
+        if: steps.npm_check.outputs.publish == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.pkg.outputs.version }}" >/dev/null 2>&1; then
+            echo "create=false" >> "$GITHUB_OUTPUT"
+            echo "GitHub release already exists. Skipping."
+          else
+            echo "create=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub release missing. Creating."
+          fi
+
+      - name: Create GitHub release
+        if: steps.npm_check.outputs.publish == 'true' && steps.release_check.outputs.create == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.pkg.outputs.version }}" \
+            --target "${GITHUB_SHA}" \
+            --title "v${{ steps.pkg.outputs.version }}" \
+            --notes "Published \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\` to npm." \
+            --generate-notes

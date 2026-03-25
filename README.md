@@ -83,6 +83,22 @@ The packaged launcher:
 6. prints a UI password and requires it before the browser can open the workspace
 7. checks whether a newer npm release is available and prompts before startup when appropriate
 
+### 📱 Termux
+
+Nomadex also works on Termux.
+
+Recommended Codex install on Termux:
+
+```bash
+npm install -g @mmmbuto/codex-cli-termux@latest
+```
+
+The launcher now prefers the host `codex` binary on Termux instead of forcing the bundled desktop `@openai/codex` dependency. If your Codex binary lives in a non-standard location, launch with:
+
+```bash
+NOMADEX_CODEX_CMD=/data/data/com.termux/files/usr/bin/codex npx nomadexapp
+```
+
 Open:
 
 - 🏠 Local machine: `http://127.0.0.1:3784`
@@ -168,10 +184,10 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [x] Theme picker, settings, skills library, and account/provider surfaces
 - [x] Local workspace browsing and uploaded asset handling
 - [x] Provider-aware launcher and app layer
+- [x] First public npm release of `nomadexapp`
 
 ### 🧭 Next
 
-- [ ] Publish the first public npm release
 - [ ] Harden the packaged launcher for more providers and remote auth flows
 - [ ] Extend provider parity beyond the current Codex-first runtime path
 - [ ] Improve durable cross-provider thread memory and reload persistence
@@ -186,6 +202,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 ## 🚢 Publishing
 
 - `main` now has GitHub Actions for lint, build, and npm publish.
+- successful npm publishes also create a matching GitHub Release
 - The publish workflow only releases when the version in `package.json` is not already on npm.
 - Add a repo secret named `NPM_TOKEN` before relying on automatic publish.
 - To ship an update, bump the package version, push to `main`, and GitHub Actions will publish `nomadexapp` automatically.

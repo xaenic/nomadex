@@ -18,6 +18,16 @@ Quick check:
 codex --version
 ```
 
+### Termux
+
+Recommended Codex install on Termux:
+
+```bash
+npm install -g @mmmbuto/codex-cli-termux@latest
+```
+
+Nomadex now prefers the host `codex` binary on Termux, so it does not need to rely on the bundled desktop `@openai/codex` package there.
+
 ## 2. Recommended Launch
 
 Normal use:
@@ -116,6 +126,8 @@ Main variables:
   UI port used by `npx nomadexapp`. Default: `3784`
 - `NOMADEX_AUTH_RELAY_TARGET`
   HTTP target used by the packaged auth relay. Default: `http://127.0.0.1:1455`
+- `NOMADEX_CODEX_CMD`
+  Codex CLI command or full path override for the packaged launcher. Useful on Termux or custom installs.
 - `NOMADEX_PASSWORD`
   Stable UI password for the packaged launcher. If unset, Nomadex generates one on each launch and prints it in the terminal.
 - `VITE_CODEX_WS_URL`
@@ -130,6 +142,7 @@ Examples:
 ```bash
 npx nomadexapp --port 4173
 npx nomadexapp --ws-url ws://127.0.0.1:3902
+NOMADEX_CODEX_CMD=/data/data/com.termux/files/usr/bin/codex npx nomadexapp
 NOMADEX_PASSWORD=my-secret npx nomadexapp
 VITE_CODEX_UI_PORT=4173 npm run dev:live
 VITE_CODEX_WS_URL=ws://127.0.0.1:3902 npm run dev:live
@@ -163,6 +176,7 @@ Behavior:
 - pushes and pull requests run `npm ci`, `npm run lint`, and `npm run build`
 - pushes to `main` also check npm
 - if the current `package.json` version is not published yet, GitHub Actions runs `npm publish --access public --provenance`
+- successful npm publishes also create a matching GitHub Release tag like `v0.1.0`
 
 Required setup:
 

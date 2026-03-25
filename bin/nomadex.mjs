@@ -59,6 +59,7 @@ const parseArgs = (argv) => {
       process.env.NOMADEX_AUTH_RELAY_TARGET ??
       process.env.VITE_CODEX_AUTH_RELAY_TARGET ??
       "http://127.0.0.1:1455",
+    codexCommand: process.env.NOMADEX_CODEX_CMD ?? "",
     password: process.env.NOMADEX_PASSWORD ?? "",
     updateCheck:
       process.env.NOMADEX_NO_UPDATE_CHECK === "1" ? false : true,
@@ -94,6 +95,11 @@ const parseArgs = (argv) => {
       index += 1;
       continue;
     }
+    if (arg === "--codex-cmd") {
+      options.codexCommand = argv[index + 1] ?? options.codexCommand;
+      index += 1;
+      continue;
+    }
     if (arg === "--password") {
       options.password = argv[index + 1] ?? options.password;
       index += 1;
@@ -124,6 +130,7 @@ Options:
   --port <port>                UI port (default: 3784)
   --ws-url <url>               App-server websocket target (default: ws://127.0.0.1:3901)
   --auth-relay-target <url>    Auth relay HTTP target (default: http://127.0.0.1:1455)
+  --codex-cmd <path>           Codex CLI command or absolute path override
   --password <value>           UI password (default: generated per launch)
   --no-update-check            Skip npm registry update prompt
   --help                       Show this help
@@ -428,6 +435,13 @@ const readyzUrl = (() => {
   return target;
 })();
 const authRelayTarget = options.authRelayTarget;
+const isTermuxEnvironment = () => {
+  const prefix = process.env.PREFIX ?? "";
+  return (
+    Boolean(process.env.TERMUX_VERSION) ||
+    prefix.startsWith("/data/data/com.termux/files/usr")
+  );
+};
 
 const resolveLocalNodePackageLaunch = (packageName, binName) => {
   try {
@@ -453,13 +467,73 @@ const resolveLocalNodePackageLaunch = (packageName, binName) => {
   }
 };
 
-const getCodexLaunch = () =>
-  resolveLocalNodePackageLaunch("@openai/codex", "codex") ?? {
+const resolveExecutableOnPath = (commandNames) => {
+  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+
+  for (const dir of pathDirs) {
+    for (const commandName of commandNames) {
+      const candidate = path.join(dir, commandName);
+      try {
+        if (statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return null;
+};
+
+const resolvePathCodexLaunch = () => {
+  const commandNames =
+    process.platform === "win32"
+      ? ["codex.cmd", "codex.exe", "codex.bat", "codex"]
+      : ["codex"];
+  const command = resolveExecutableOnPath(commandNames);
+  if (!command) {
+    return null;
+  }
+
+  return {
+    command,
+    args: [],
+    shell: false,
+    source: "PATH codex",
+  };
+};
+
+const getCodexLaunch = () => {
+  const explicitCommand = options.codexCommand.trim();
+  if (explicitCommand) {
+    return {
+      command: explicitCommand,
+      args: [],
+      shell: false,
+      source: "--codex-cmd / NOMADEX_CODEX_CMD",
+    };
+  }
+
+  const dependencyLaunch = resolveLocalNodePackageLaunch("@openai/codex", "codex");
+  const pathLaunch = resolvePathCodexLaunch();
+
+  if (isTermuxEnvironment()) {
+    return pathLaunch ?? dependencyLaunch ?? {
+      command: process.platform === "win32" ? "codex.cmd" : "codex",
+      args: [],
+      shell: false,
+      source: "global PATH",
+    };
+  }
+
+  return dependencyLaunch ?? pathLaunch ?? {
     command: process.platform === "win32" ? "codex.cmd" : "codex",
     args: [],
     shell: false,
     source: "global PATH",
   };
+};
 
 const isPortOpen = (targetHost, targetPort) =>
   new Promise((resolve) => {
@@ -508,6 +582,9 @@ const formatSpawnError = (error) => {
     "code" in error &&
     error.code === "ENOENT"
   ) {
+    if (isTermuxEnvironment()) {
+      return "Could not find a working Codex CLI. On Termux, install `@mmmbuto/codex-cli-termux@latest`, make sure `codex` is on PATH, or set `NOMADEX_CODEX_CMD`.";
+    }
     return "Could not find the Codex CLI. Install `@openai/codex` or use the bundled package dependency.";
   }
 
@@ -583,8 +660,12 @@ const ensureAppServer = async () => {
       return;
     }
     if (appServer.exitCode !== null) {
+      const termuxHint =
+        isTermuxEnvironment() && codexLaunch.source !== "PATH codex"
+          ? " Termux detected. Install `@mmmbuto/codex-cli-termux@latest`, ensure `codex` is on PATH, or launch Nomadex with `--codex-cmd codex`."
+          : "";
       throw new Error(
-        `Codex app-server exited with code ${appServer.exitCode} (${codexLaunch.source}).`,
+        `Codex app-server exited with code ${appServer.exitCode} (${codexLaunch.source}).${termuxHint}`,
       );
     }
     await sleep(200);
