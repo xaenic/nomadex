@@ -182,6 +182,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       {activeTurns.map((turn) => {
         const errorText = turnErrorText(turn);
         const turnFileChanges = summarizeTurnFileChanges(turn);
+        const latestTurnId = activeTurns[activeTurns.length - 1]?.id ?? null;
         const liveAgentMessageId =
           turn.status === "inProgress"
             ? [...turn.items].reverse().find((entry) => entry.type === "agentMessage")?.id ?? null
@@ -212,6 +213,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                     ? streamVisible[`${item.id}:text`]
                     : undefined
                 }
+                plan={turn.id === latestTurnId ? activeThread.plan : null}
                 turnStatus={turn.status}
               />
             ))}
@@ -742,8 +744,53 @@ const MessageTextFlow = memo(function MessageTextFlow({
   );
 });
 
+const TurnPlanCard = memo(function TurnPlanCard({
+  itemText,
+  plan,
+}: {
+  itemText: string;
+  plan: ThreadRecord["plan"] | null;
+}) {
+  const steps = plan?.steps ?? [];
+  const explanation = plan?.explanation?.trim() || itemText.trim();
+
+  if (steps.length === 0) {
+    return (
+      <div className="compact-bar">
+        <span className="compact-ico">Plan</span>
+        <span className="meta-glint">{explanation || itemText}</span>
+      </div>
+    );
+  }
+
+  const completedCount = steps.filter((step) => step.status === "completed").length;
+
+  return (
+    <div className="turn-plan-card">
+      <div className="turn-plan-card-head">
+        <span className="turn-plan-card-progress">
+          {completedCount} of {steps.length} tasks completed
+        </span>
+      </div>
+      {explanation ? (
+        <div className="turn-plan-card-summary">{explanation}</div>
+      ) : null}
+      <ol className="turn-plan-card-list">
+        {steps.map((step, index) => (
+          <li className={clsx("turn-plan-card-step", `is-${step.status}`)} key={`${index}-${step.step}`}>
+            <span className="turn-plan-card-step-marker" aria-hidden="true" />
+            <span className="turn-plan-card-step-index">{index + 1}.</span>
+            <span className="turn-plan-card-step-text">{step.step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+});
+
 const ThreadItemView = memo(function ThreadItemView({
   item,
+  plan,
   turnStatus,
   streaming = false,
   textVisible,
@@ -758,6 +805,7 @@ const ThreadItemView = memo(function ThreadItemView({
   providerId,
 }: {
   item: ThreadItem;
+  plan: ThreadRecord["plan"] | null;
   turnStatus: Turn["status"];
   streaming?: boolean;
   textVisible?: number;
@@ -1008,12 +1056,7 @@ const ThreadItemView = memo(function ThreadItemView({
   }
 
   if (item.type === "plan") {
-    return (
-      <div className="compact-bar">
-        <span className="compact-ico">📋</span>
-        <span className="meta-glint">{item.text}</span>
-      </div>
-    );
+    return <TurnPlanCard itemText={item.text} plan={plan} />;
   }
 
   if (item.type === "commandExecution") {

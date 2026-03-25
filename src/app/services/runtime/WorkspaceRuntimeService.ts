@@ -2419,8 +2419,18 @@ export class WorkspaceRuntimeService {
     const paths: string[] = [];
 
     for (const image of images) {
-      const response = await fetch(image.url);
-      const buffer = await response.arrayBuffer();
+      let buffer: ArrayBuffer;
+
+      if (image.file) {
+        buffer = await image.file.arrayBuffer();
+      } else {
+        const response = await fetch(image.url);
+        if (!response.ok) {
+          throw new Error(`Failed to read image attachment: ${image.name}`);
+        }
+        buffer = await response.arrayBuffer();
+      }
+
       const filename = `${Date.now()}-${sanitizeFilename(image.name)}`;
       const path = `${uploadDir}/${filename}`;
 
@@ -4290,7 +4300,10 @@ console.log(qwenRoot);
     });
   }
 
-  async submitQuestion(requestId: string, answers: string[]) {
+  async submitQuestion(
+    requestId: string,
+    answers: Record<string, string[]>,
+  ) {
     const request = this.approvalMap.get(requestId);
     if (!request) {
       return;
@@ -4308,6 +4321,10 @@ console.log(qwenRoot);
             ? {
                 ...approval,
                 state: "submitted",
+                detail: `${approval.detail} · ${Object.values(answers)
+                  .flat()
+                  .filter(Boolean)
+                  .join(", ")}`,
               }
             : approval,
         ),

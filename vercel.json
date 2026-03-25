@@ -1,0 +1,51 @@
+{
+  "redirects": [
+    {
+      "source": "/admin",
+      "destination": "/threads",
+      "permanent": false
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/threads",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/thread/:threadId",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/threads",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/threads/:path*",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    }
+  ]
+}

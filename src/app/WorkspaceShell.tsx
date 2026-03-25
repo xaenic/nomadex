@@ -41,6 +41,7 @@ import {
   type ComposerFile,
   type ComposerImage,
   type DashboardData,
+  type ApprovalRequest,
   type MentionAttachment,
   type SettingsState,
   type SkillCard,
@@ -90,6 +91,7 @@ import {
   threadDayGroup,
   threadLabel,
 } from "./workspaceHelpers";
+import { routeSectionToSegment, routeSegmentToSection } from "./workspaceTypes";
 import type {
   DiffReviewEntry,
   FilePreviewState,
@@ -110,6 +112,7 @@ import { BrandMark } from "./components/BrandMark";
 import { ConnectionLoadingState } from "./components/ConnectionLoadingState";
 import { FileChangeSummary } from "./components/FileChangeSummary";
 import { GitActivityGraph } from "./components/GitActivityGraph";
+import { QuestionRequestCard } from "./components/QuestionRequestCard";
 import {
   ConfigPanel,
   SkillsLibraryModal,
@@ -136,6 +139,17 @@ const getMaterializedThreadId = (error: unknown) => {
   const value = (error as Record<string, unknown>)[MATERIALIZED_THREAD_ID_FIELD];
   return typeof value === "string" ? value : null;
 };
+
+const buildQuestionAnswerPayload = (
+  approval: ApprovalRequest,
+  answers: Record<string, string>,
+) =>
+  Object.fromEntries(
+    (approval.questions ?? []).map((question) => [
+      question.id,
+      [(answers[question.id] ?? "").trim()].filter(Boolean),
+    ]),
+  );
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
@@ -1452,7 +1466,10 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
                     ? {
                         ...approval,
                         state: "submitted",
-                        detail: `${approval.detail} · ${answers.join(", ")}`,
+                        detail: `${approval.detail} · ${Object.values(answers)
+                          .flat()
+                          .filter(Boolean)
+                          .join(", ")}`,
                       }
                     : approval,
                 ),
@@ -1556,6 +1573,14 @@ export function WorkspacePage() {
     select: (state) => state.location,
   });
   const route = parseRoute(location.pathname);
+  const invalidThreadSection = useMemo(() => {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts[0] !== "threads" || !parts[1] || !parts[2]) {
+      return null;
+    }
+
+    return routeSegmentToSection(parts[2]) ? null : parts[2];
+  }, [location.pathname]);
   const routeSearch = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -1666,6 +1691,9 @@ export function WorkspacePage() {
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [visibleTurnStartByThreadId, setVisibleTurnStartByThreadId] = useState<Record<string, number>>({});
+  const [questionAnswersByRequestId, setQuestionAnswersByRequestId] = useState<
+    Record<string, Record<string, string>>
+  >({});
   const terminalDockPaintFrameRef = useRef<number | null>(null);
   const terminalDockLaunchFrameRef = useRef<number | null>(null);
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
@@ -1674,6 +1702,19 @@ export function WorkspacePage() {
   const [gitActivityGraphError, setGitActivityGraphError] = useState<string | null>(null);
   const [modelPickerPosition, setModelPickerPosition] = useState({ top: 52, right: 12 });
   const [composerSyncKey, setComposerSyncKey] = useState(0);
+
+  useEffect(() => {
+    if (!invalidThreadSection || !route.threadId) {
+      return;
+    }
+
+    void navigate({
+      to: "/threads/$threadId",
+      params: { threadId: route.threadId } as never,
+      replace: true,
+    });
+  }, [invalidThreadSection, navigate, route.threadId]);
+
   const [uiTheme, setUiTheme] = useState<UiThemeId>(() => {
     if (typeof window === "undefined") {
       return DEFAULT_UI_THEME_ID;
@@ -1848,6 +1889,13 @@ export function WorkspacePage() {
     () => activeThread?.approvals.filter((approval) => approval.state === "pending").length ?? 0,
     [activeThread?.approvals],
   );
+  const activeQuestionApprovals = useMemo(
+    () =>
+      activeThread?.approvals.filter(
+        (approval) => approval.kind === "question" && approval.state === "pending",
+      ) ?? [],
+    [activeThread?.approvals],
+  );
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
   const activeExplorerPath = useMemo(() => {
     const cwd = activeThread?.thread.cwd ?? null;
@@ -1868,6 +1916,28 @@ export function WorkspacePage() {
     }),
     [snapshot.settings, toolbarPlan],
   );
+
+  useEffect(() => {
+    const activeRequestIds = new Set(
+      snapshot.threads.flatMap((record) =>
+        record.approvals
+          .filter((approval) => approval.kind === "question" && approval.state === "pending")
+          .map((approval) => approval.id),
+      ),
+    );
+
+    setQuestionAnswersByRequestId((current) => {
+      const nextEntries = Object.entries(current).filter(([requestId]) =>
+        activeRequestIds.has(requestId),
+      );
+
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+  }, [snapshot.threads]);
 
   const groupedThreads = useMemo(() => {
     const groups: Record<string, Array<ThreadRecord>> = {
@@ -2353,7 +2423,10 @@ export function WorkspacePage() {
         } else {
           void navigate({
             to: "/threads/$threadId/$section",
-            params: { threadId: nextThreadId, section } as never,
+            params: {
+              threadId: nextThreadId,
+              section: routeSectionToSegment(section),
+            } as never,
           });
         }
       }
@@ -2382,6 +2455,40 @@ export function WorkspacePage() {
       }
     },
     [actions, syncMaterializedThreadId],
+  );
+
+  const updateQuestionAnswer = useCallback(
+    (requestId: string, questionId: string, value: string) => {
+      setQuestionAnswersByRequestId((current) => ({
+        ...current,
+        [requestId]: {
+          ...(current[requestId] ?? {}),
+          [questionId]: value,
+        },
+      }));
+    },
+    [],
+  );
+
+  const submitQuestionApproval = useCallback(
+    async (approval: ApprovalRequest) => {
+      const answers = buildQuestionAnswerPayload(
+        approval,
+        questionAnswersByRequestId[approval.id] ?? {},
+      );
+
+      await actions.submitQuestion(approval.id, answers);
+      setQuestionAnswersByRequestId((current) => {
+        if (!(approval.id in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[approval.id];
+        return next;
+      });
+    },
+    [actions, questionAnswersByRequestId],
   );
 
   useEffect(() => {
@@ -3188,7 +3295,10 @@ export function WorkspacePage() {
 
         void navigate({
           to: "/threads/$threadId/$section",
-          params: { threadId, section } as never,
+          params: {
+            threadId,
+            section: routeSectionToSegment(section),
+          } as never,
         });
       };
 
@@ -3272,7 +3382,10 @@ export function WorkspacePage() {
 
       void navigate({
         to: "/threads/$threadId/$section",
-        params: { threadId: activeThreadId, section: "editor" } as never,
+        params: {
+          threadId: activeThreadId,
+          section: routeSectionToSegment("editor"),
+        } as never,
         search: {
           path,
           line: nextLine ? String(nextLine) : undefined,
@@ -3333,7 +3446,10 @@ export function WorkspacePage() {
 
       void navigate({
         to: "/threads/$threadId/$section",
-        params: { threadId: activeThreadId, section: "review" } as never,
+        params: {
+          threadId: activeThreadId,
+          section: routeSectionToSegment("review"),
+        } as never,
         search: {
           diff: nextDiffId ?? undefined,
           from: source,
@@ -4131,6 +4247,7 @@ export function WorkspacePage() {
             name: file.name || `pasted-image-${timestamp}-${index + 1}.${mimeExtension}`,
             url: URL.createObjectURL(file),
             size: formatUploadSize(file.size),
+            file,
           };
         }),
       ]);
@@ -4704,20 +4821,32 @@ export function WorkspacePage() {
           {activeThread.approvals.length > 0 ? (
             <div className="panel-actions">
               {activeThread.approvals.map((approval) => (
-                <div className="approval-inline" key={approval.id}>
-                  <div className="approval-inline-copy">
-                    <strong>{approval.title}</strong>
-                    <span>{approval.detail}</span>
+                approval.kind === "question" ? (
+                  <QuestionRequestCard
+                    answers={questionAnswersByRequestId[approval.id] ?? {}}
+                    approval={approval}
+                    key={approval.id}
+                    onAnswerChange={(questionId, value) =>
+                      updateQuestionAnswer(approval.id, questionId, value)
+                    }
+                    onSubmit={() => void submitQuestionApproval(approval)}
+                  />
+                ) : (
+                  <div className="approval-inline" key={approval.id}>
+                    <div className="approval-inline-copy">
+                      <strong>{approval.title}</strong>
+                      <span>{approval.detail}</span>
+                    </div>
+                    <div className="appr-a">
+                      <button className="abtn yes" type="button" onClick={() => void actions.resolveApproval(approval.id, true)}>
+                        ✓ Apply
+                      </button>
+                      <button className="abtn no" type="button" onClick={() => void actions.resolveApproval(approval.id, false)}>
+                        ✗ Reject
+                      </button>
+                    </div>
                   </div>
-                  <div className="appr-a">
-                    <button className="abtn yes" type="button" onClick={() => void actions.resolveApproval(approval.id, true)}>
-                      ✓ Apply
-                    </button>
-                    <button className="abtn no" type="button" onClick={() => void actions.resolveApproval(approval.id, false)}>
-                      ✗ Reject
-                    </button>
-                  </div>
-                </div>
+                )
               ))}
             </div>
           ) : null}
@@ -5183,6 +5312,22 @@ export function WorkspacePage() {
                     title="Changing"
                     variant="live"
                   />
+                ) : null}
+
+                {activeQuestionApprovals.length > 0 ? (
+                  <div className="question-request-stack">
+                    {activeQuestionApprovals.map((approval) => (
+                      <QuestionRequestCard
+                        answers={questionAnswersByRequestId[approval.id] ?? {}}
+                        approval={approval}
+                        key={approval.id}
+                        onAnswerChange={(questionId, value) =>
+                          updateQuestionAnswer(approval.id, questionId, value)
+                        }
+                        onSubmit={() => void submitQuestionApproval(approval)}
+                      />
+                    ))}
+                  </div>
                 ) : null}
 
                 {(terminalDockPrimed || toolbarShell) && activeThread ? (

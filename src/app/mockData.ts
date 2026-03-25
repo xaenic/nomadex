@@ -257,6 +257,7 @@ export type ComposerImage = {
   name: string;
   url: string;
   size: string;
+  file?: File | null;
 };
 
 export type ComposerFile = {

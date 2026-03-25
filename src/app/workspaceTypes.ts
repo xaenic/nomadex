@@ -41,6 +41,49 @@ export type RouteSection =
   | "skills"
   | "mcp"
   | "settings";
+
+export const HIDDEN_ADMIN_ROUTE_SEGMENT = "@dm1n-acce$$";
+
+export const ROUTE_SECTION_SEGMENTS: Record<RouteSection, string> = {
+  chat: "chat",
+  editor: "editor",
+  ops: "ops",
+  agents: "agents",
+  review: "review",
+  skills: "skills",
+  mcp: "mcp",
+  settings: HIDDEN_ADMIN_ROUTE_SEGMENT,
+};
+
+export const ROUTE_SECTION_VALUES: Array<RouteSection> = [
+  "chat",
+  "editor",
+  "ops",
+  "agents",
+  "review",
+  "skills",
+  "mcp",
+  "settings",
+];
+
+export const isRouteSection = (value: string | null | undefined): value is RouteSection =>
+  typeof value === "string" && ROUTE_SECTION_VALUES.includes(value as RouteSection);
+
+export const routeSectionToSegment = (section: RouteSection) =>
+  ROUTE_SECTION_SEGMENTS[section];
+
+export const routeSegmentToSection = (
+  value: string | null | undefined,
+): RouteSection | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const matchedEntry = Object.entries(ROUTE_SECTION_SEGMENTS).find(
+    ([, segment]) => segment === value,
+  );
+  return (matchedEntry?.[0] as RouteSection | undefined) ?? null;
+};
 export type ToastTone = "" | "ok" | "warn" | "err";
 
 export type ToastItem = {
@@ -115,7 +158,10 @@ export type WorkspaceActions = {
   sendTerminalInput: (threadId: string, terminalId: string, input: string) => Promise<void>;
   terminateTerminal: (threadId: string, terminalId: string) => Promise<void>;
   resolveApproval: (requestId: string, approved: boolean) => Promise<void>;
-  submitQuestion: (requestId: string, answers: string[]) => Promise<void>;
+  submitQuestion: (
+    requestId: string,
+    answers: Record<string, string[]>,
+  ) => Promise<void>;
   submitMcp: (
     requestId: string,
     action: "accept" | "decline" | "cancel",

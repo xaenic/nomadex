@@ -14,6 +14,7 @@ import {
   type StreamSpec,
   type ThreadRecord,
 } from "./mockData";
+import { routeSegmentToSection } from "./workspaceTypes";
 import type {
   ComposerHighlightSegment,
   DiffReviewLine,
@@ -275,9 +276,10 @@ export const parseRoute = (pathname: string): ParsedRoute => {
   }
 
   if (parts[0] === "threads" && parts[1] && parts[2]) {
+    const parsedSection = routeSegmentToSection(parts[2]);
     return {
       threadId: parts[1],
-      section: parts[2] as RouteSection,
+      section: parsedSection ?? "chat",
     };
   }
 
