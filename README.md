@@ -12,11 +12,11 @@ Today, Codex is the most complete live provider path through the local app-serve
 
 ### Desktop
 
-![Desktop UI sample](docs/ui-desktop.svg)
+![Desktop UI sample](docs/ui-desktop.png)
 
 ### Mobile
 
-![Mobile UI sample](docs/ui-mobile.svg)
+![Mobile UI sample](docs/ui-mobile.png)
 
 ## Main Purpose
 
