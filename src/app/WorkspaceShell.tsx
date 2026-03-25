@@ -180,7 +180,6 @@ type CommandPaletteGroup = {
 
 const FALLBACK_DATA = createFallbackDashboardData();
 const ALL_MENTIONS = FALLBACK_DATA.mentionCatalog;
-const SESSION_PROJECT_ROOT = FALLBACK_DATA.directoryCatalogRoot || ".";
 const INITIAL_VISIBLE_TURNS = 18;
 const TURN_HISTORY_BATCH = 14;
 const STARTUP_CONNECTION_MESSAGES = [
@@ -375,6 +374,133 @@ const pathBaseName = (value: string | null | undefined) => {
 
   const parts = normalized.split("/").filter(Boolean);
   return parts.at(-1) ?? normalized;
+};
+
+const trimTrailingPathSeparators = (value: string) => {
+  if (value === "/") {
+    return "/";
+  }
+
+  if (/^[a-z]:[\\/]?$/iu.test(value)) {
+    return `${value.slice(0, 2)}\\`;
+  }
+
+  return value.replace(/[\\/]+$/u, "");
+};
+
+type PathSeparator = "/" | "\\";
+
+type SplitAbsolutePath = {
+  root: string;
+  separator: PathSeparator;
+  segments: Array<string>;
+};
+
+const splitAbsolutePath = (value: string): SplitAbsolutePath => {
+  const raw = value.trim();
+  if (!raw) {
+    return {
+      root: "",
+      separator: "/",
+      segments: [] as string[],
+    };
+  }
+
+  const separator: "/" | "\\" = raw.includes("\\") ? "\\" : "/";
+  const normalized = trimTrailingPathSeparators(raw);
+
+  if (/^[a-z]:\\$/iu.test(normalized)) {
+    return {
+      root: normalized,
+      separator: "\\",
+      segments: [] as string[],
+    };
+  }
+
+  if (/^[a-z]:/iu.test(normalized)) {
+    const root = `${normalized.slice(0, 2)}\\`;
+    const tail = normalized.slice(2).replace(/^[\\/]+/u, "");
+    return {
+      root,
+      separator: "\\",
+      segments: tail.split(/[\\/]+/u).filter(Boolean),
+    };
+  }
+
+  if (normalized.startsWith("/")) {
+    return {
+      root: "/",
+      separator: "/",
+      segments: normalized.slice(1).split("/").filter(Boolean),
+    };
+  }
+
+  return {
+    root: "",
+    separator,
+    segments: normalized.split(/[\\/]+/u).filter(Boolean),
+  };
+};
+
+const joinAbsolutePath = (
+  root: string,
+  separator: PathSeparator,
+  segments: Array<string>,
+) => {
+  if (root === "/") {
+    return segments.length > 0 ? `/${segments.join("/")}` : "/";
+  }
+
+  if (/^[a-z]:\\$/iu.test(root)) {
+    return segments.length > 0 ? `${root}${segments.join("\\")}` : root;
+  }
+
+  if (root) {
+    return segments.length > 0
+      ? `${root.replace(/[\\/]+$/u, separator)}${segments.join(separator)}`
+      : root;
+  }
+
+  return segments.join(separator);
+};
+
+const parentDirectoryPath = (value: string) => {
+  const { root, separator, segments } = splitAbsolutePath(value);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  return joinAbsolutePath(root, separator, segments.slice(0, -1)) || root || null;
+};
+
+const buildAbsolutePathBreadcrumbs = (value: string) => {
+  const { root, separator, segments } = splitAbsolutePath(value);
+  const breadcrumbs: Array<{ label: string; path: string }> = [];
+
+  if (root) {
+    breadcrumbs.push({
+      label: root === "/" ? "/" : root.replace(/[\\/]+$/u, ""),
+      path: root,
+    });
+  }
+
+  const accumulatedSegments: Array<string> = [];
+  segments.forEach((segment) => {
+    accumulatedSegments.push(segment);
+    breadcrumbs.push({
+      label: segment,
+      path: joinAbsolutePath(root, separator, accumulatedSegments),
+    });
+  });
+
+  if (breadcrumbs.length === 0) {
+    breadcrumbs.push({
+      label: value,
+      path: value,
+    });
+  }
+
+  return breadcrumbs;
 };
 
 const formatUsageWindowShortLabel = (
@@ -1775,8 +1901,9 @@ export function WorkspacePage() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [projectPickerStarting, setProjectPickerStarting] = useState(false);
-  const [projectPickerPath, setProjectPickerPath] =
-    useState(SESSION_PROJECT_ROOT);
+  const [projectPickerPath, setProjectPickerPath] = useState(
+    FALLBACK_DATA.directoryCatalogRoot || ".",
+  );
   const [composer, setComposer] = useState("");
   const [composerMode, setComposerMode] = useState<WorkspaceMode>("chat");
   const [toolbarAuto, setToolbarAuto] = useState(false);
@@ -1800,6 +1927,7 @@ export function WorkspacePage() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: ThreadItem | null } | null>(null);
   const [explorerPath, setExplorerPath] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
+  const [editorHasUnsavedChanges, setEditorHasUnsavedChanges] = useState(false);
   const [selectedDiffEntryId, setSelectedDiffEntryId] = useState<string | null>(null);
   const [visibleTurnStartByThreadId, setVisibleTurnStartByThreadId] = useState<Record<string, number>>({});
   const [questionAnswersByRequestId, setQuestionAnswersByRequestId] = useState<
@@ -1856,6 +1984,8 @@ export function WorkspacePage() {
   const latestComposerInputRef = useRef(composer);
   const gitActivityGraphCacheRef = useRef<Record<string, string>>({});
   const initialTransportConnectSeenRef = useRef(false);
+  const editorFileChangeActivityKeyRef = useRef("");
+  const editorTrackingTargetRef = useRef("");
   const pendingChatRestoreThreadIdRef = useRef<string | null>(null);
   const pendingHistoryPrependRef = useRef<{
     threadId: string;
@@ -1984,6 +2114,53 @@ export function WorkspacePage() {
     [activeTurns],
   );
   const activeTurn = [...activeTurns].reverse().find((turn) => turn.status === "inProgress") ?? null;
+  const normalizedEditorPath = useMemo(
+    () => (editorPath ? normalizeDiffPath(editorPath) : null),
+    [editorPath],
+  );
+  const normalizedEditorRelativePath = useMemo(() => {
+    if (!normalizedEditorPath) {
+      return null;
+    }
+
+    const cwd = activeThread?.thread.cwd
+      ? normalizeDiffPath(activeThread.thread.cwd).replace(/\/+$/u, "")
+      : null;
+    if (!cwd) {
+      return null;
+    }
+
+    return normalizedEditorPath.startsWith(`${cwd}/`)
+      ? normalizedEditorPath.slice(cwd.length + 1)
+      : null;
+  }, [activeThread?.thread.cwd, normalizedEditorPath]);
+  const editorFileChangeActivityKey = useMemo(() => {
+    if (route.section !== "editor" || !normalizedEditorPath) {
+      return "";
+    }
+
+    const trackedPaths = new Set(
+      [normalizedEditorPath, normalizedEditorRelativePath].filter(
+        (value): value is string => Boolean(value),
+      ),
+    );
+
+    return activeTurns
+      .flatMap((turn) =>
+        summarizeTurnFileChanges(turn)
+          .filter((entry) => trackedPaths.has(normalizeDiffPath(entry.path)))
+          .map(
+            (entry) =>
+              `${turn.id}:${entry.itemId}:${entry.path}:${entry.kind}:${entry.status}:${turn.status}`,
+          ),
+      )
+      .join("|");
+  }, [
+    activeTurns,
+    normalizedEditorPath,
+    normalizedEditorRelativePath,
+    route.section,
+  ]);
   const activeQueuedMessages = activeThreadId ? queuedByThreadId[activeThreadId] ?? [] : [];
   const liveOverlay = useMemo(() => deriveLiveOverlay(activeTurn), [activeTurn]);
   const activeTurnFileChanges = useMemo(() => summarizeTurnFileChanges(activeTurn), [activeTurn]);
@@ -2340,47 +2517,14 @@ export function WorkspacePage() {
         : [],
     [projectPickerPath, snapshot.directoryCatalog, snapshot.directoryCatalogRoot],
   );
-  const projectPickerParentPath = useMemo(() => {
-    if (projectPickerPath === SESSION_PROJECT_ROOT) {
-      return null;
-    }
-
-    const lastSlashIndex = projectPickerPath.lastIndexOf("/");
-    if (lastSlashIndex <= 0) {
-      return SESSION_PROJECT_ROOT;
-    }
-
-    return projectPickerPath.slice(0, lastSlashIndex) || SESSION_PROJECT_ROOT;
-  }, [projectPickerPath]);
-  const projectPickerBreadcrumbs = useMemo(() => {
-    const normalizedRoot = SESSION_PROJECT_ROOT.replace(/\/+$/u, "");
-    const normalizedPath = projectPickerPath.replace(/\/+$/u, "");
-    const relative =
-      normalizedPath === normalizedRoot
-        ? ""
-        : normalizedPath.slice(normalizedRoot.length).replace(/^\/+/u, "");
-
-    return [
-      {
-        label:
-          normalizedRoot.split("/").filter(Boolean).pop() ?? normalizedRoot,
-        path: normalizedRoot,
-      },
-      ...relative.split("/").filter(Boolean).reduce<
-        Array<{
-          label: string;
-          path: string;
-        }>
-      >((parts, segment) => {
-        const previous = parts.at(-1)?.path ?? normalizedRoot;
-        parts.push({
-          label: segment,
-          path: `${previous.replace(/\/+$/u, "")}/${segment}`,
-        });
-        return parts;
-      }, []),
-    ];
-  }, [projectPickerPath]);
+  const projectPickerParentPath = useMemo(
+    () => parentDirectoryPath(projectPickerPath),
+    [projectPickerPath],
+  );
+  const projectPickerBreadcrumbs = useMemo(
+    () => buildAbsolutePathBreadcrumbs(projectPickerPath),
+    [projectPickerPath],
+  );
 
   const agentCalls = useMemo(
     () =>
@@ -3084,6 +3228,112 @@ export function WorkspacePage() {
       cancelled = true;
     };
   }, [actions, editorLine, editorPath, filePreview, route.section]);
+
+  useEffect(() => {
+    if (route.section !== "editor" || !editorPath) {
+      editorTrackingTargetRef.current = "";
+      editorFileChangeActivityKeyRef.current = "";
+      setEditorHasUnsavedChanges(false);
+      return;
+    }
+
+    const trackingTarget = `${route.section}:${editorPath}`;
+    if (editorTrackingTargetRef.current === trackingTarget) {
+      return;
+    }
+
+    editorTrackingTargetRef.current = trackingTarget;
+    editorFileChangeActivityKeyRef.current = editorFileChangeActivityKey;
+    setEditorHasUnsavedChanges(false);
+  }, [editorFileChangeActivityKey, editorPath, route.section]);
+
+  useEffect(() => {
+    if (
+      route.section !== "editor" ||
+      !editorPath ||
+      !editorFileChangeActivityKey ||
+      editorHasUnsavedChanges ||
+      filePreview?.path !== editorPath ||
+      filePreview.loading
+    ) {
+      return;
+    }
+
+    if (editorFileChangeActivityKeyRef.current === editorFileChangeActivityKey) {
+      return;
+    }
+
+    editorFileChangeActivityKeyRef.current = editorFileChangeActivityKey;
+    const normalizedName =
+      editorPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ??
+      editorPath;
+    const previousContent = filePreview.content;
+    let cancelled = false;
+    let retryTimer: number | null = null;
+
+    const refreshOpenEditor = async (allowRetry: boolean) => {
+      try {
+        const nextContent = await actions.readFile(editorPath);
+        if (cancelled) {
+          return;
+        }
+
+        if (allowRetry && nextContent === previousContent) {
+          retryTimer = window.setTimeout(() => {
+            void refreshOpenEditor(false);
+          }, 160);
+          return;
+        }
+
+        startTransition(() => {
+          setFilePreview((current) =>
+            current?.path === editorPath
+              ? {
+                  ...current,
+                  content: nextContent,
+                  loading: false,
+                  error: null,
+                  line: editorLine,
+                }
+              : current,
+          );
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setFilePreview({
+          path: editorPath,
+          name: normalizedName,
+          content: previousContent,
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to refresh this file.",
+          line: editorLine,
+        });
+      }
+    };
+
+    void refreshOpenEditor(true);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [
+    actions,
+    editorFileChangeActivityKey,
+    editorHasUnsavedChanges,
+    editorLine,
+    editorPath,
+    filePreview,
+    route.section,
+  ]);
 
   useEffect(() => {
     const liveMode = snapshot.transport.mode === "live";
@@ -3801,16 +4051,18 @@ export function WorkspacePage() {
       }
 
       setFilePreview((current) =>
-        current?.path === path && !current.loading
+        current?.path === path
           ? {
               ...current,
+              loading: true,
+              error: null,
               line: nextLine,
             }
           : {
               path,
               name: normalizedName,
-              content: current?.path === path ? current.content : "",
-              loading: current?.path === path ? current.loading : true,
+              content: "",
+              loading: true,
               error: null,
               line: nextLine,
             },
@@ -3997,7 +4249,7 @@ export function WorkspacePage() {
         return current;
       }
 
-      return activeThread?.thread.cwd ?? SESSION_PROJECT_ROOT;
+      return activeThread?.thread.cwd ?? FALLBACK_DATA.directoryCatalogRoot ?? ".";
     });
     setProjectPickerOpen(true);
     setSidebarOpen(false);
@@ -4036,8 +4288,14 @@ export function WorkspacePage() {
     pushToast("/compact — transcript summarized", "ok");
   }, [actions, activeThreadId, pushToast]);
 
+  const [rollbackPendingTurnId, setRollbackPendingTurnId] = useState<string | null>(null);
+
   const rollbackTurn = useCallback(async (turnId: string) => {
     if (!activeThreadId) {
+      return;
+    }
+
+    if (rollbackPendingTurnId) {
       return;
     }
 
@@ -4053,22 +4311,47 @@ export function WorkspacePage() {
       return;
     }
 
+    const rollbackPrompt =
+      activeTurns
+        .find((turn) => turn.id === turnId)
+        ?.items.filter(
+          (
+            item,
+          ): item is Extract<ThreadItem, { type: "userMessage" }> =>
+            item.type === "userMessage",
+        )
+        .map((item) => getUserText(item, snapshot.settings.provider))
+        .find((value) => value.trim().length > 0) ?? "";
+
     try {
+      setRollbackPendingTurnId(turnId);
       await actions.rollbackToTurn(activeThreadId, turnId);
       await refreshWorkspacePanelsAfterRollback();
+      if (rollbackPrompt.trim().length > 0) {
+        setComposerMode("chat");
+        setComposerFromInput(rollbackPrompt);
+        focusComposerEnd(rollbackPrompt);
+      }
       pushToast("/rollback — reverted to selected prompt", "ok");
     } catch (error) {
       pushToast(
         errorMessage(error, "Failed to roll back from the selected prompt."),
         "err",
       );
+    } finally {
+      setRollbackPendingTurnId((current) => (current === turnId ? null : current));
     }
   }, [
     actions,
     activeThreadId,
     activeTurn,
+    activeTurns,
+    focusComposerEnd,
     pushToast,
+    rollbackPendingTurnId,
     refreshWorkspacePanelsAfterRollback,
+    setComposerFromInput,
+    snapshot.settings.provider,
   ]);
 
   const selectModel = useCallback(
@@ -5432,6 +5715,10 @@ export function WorkspacePage() {
   };
 
   const startupLoaderShowingConversation = showStartupConnectionLoader && activeConversationHydrationPending;
+  const fullPageConversationLoader =
+    !showStartupConnectionLoader &&
+    route.section === "chat" &&
+    existingThreadHistoryPending;
 
   if (showStartupConnectionLoader) {
     return (
@@ -5453,6 +5740,22 @@ export function WorkspacePage() {
               ? STARTUP_CONNECTION_MESSAGES.length
               : 0
           }
+        />
+      </main>
+    );
+  }
+
+  if (fullPageConversationLoader) {
+    return (
+      <main className="workspace-shell connection-loading-shell">
+        <ConnectionLoadingState
+          messages={[
+            "Opening conversation",
+            "Reattaching thread",
+            "Loading recent history",
+            "Syncing transcript",
+          ]}
+          metaText={`Restoring ${shorten(activeThreadLabel, 42)}`}
         />
       </main>
     );
@@ -5649,6 +5952,7 @@ export function WorkspacePage() {
                 <FileEditorPreview
                   backLabel={editorBackLabel}
                   onBack={closeEditor}
+                  onDirtyChange={setEditorHasUnsavedChanges}
                   onSave={saveEditorFile}
                   preview={editorPreviewState}
                   providerId={snapshot.settings.provider}
@@ -5675,6 +5979,7 @@ export function WorkspacePage() {
                   activeThreadLabel={activeThreadLabel}
                   activeTurns={renderedTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
+                  rollbackPendingTurnId={rollbackPendingTurnId}
                   onContext={openItemContextMenu}
                   onCopy={handleCopy}
                   onEdit={fillComposer}

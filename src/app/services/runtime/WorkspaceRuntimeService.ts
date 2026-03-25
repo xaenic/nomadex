@@ -2690,7 +2690,25 @@ export class WorkspaceRuntimeService {
 
     return await new Promise<TResult>((resolve, reject) => {
       this.pending.set(id, {
-        resolve: resolve as (value: unknown) => void,
+        resolve: (value: unknown) => {
+          if (
+            this.socket?.readyState === WebSocket.OPEN &&
+            (this.snapshot.transport.mode !== "live" ||
+              this.snapshot.transport.status !== "connected" ||
+              this.snapshot.transport.error !== null)
+          ) {
+            this.mutate((snapshot) => {
+              snapshot.transport = toRuntimeStatus(
+                "live",
+                "connected",
+                null,
+                this.getDefaultWsUrl(),
+              );
+            });
+          }
+
+          (resolve as (nextValue: unknown) => void)(value);
+        },
         reject,
       });
       this.socket?.send(JSON.stringify(payload));
@@ -2871,8 +2889,8 @@ export class WorkspaceRuntimeService {
 
     const firstThread = this.snapshot.threads[0]?.thread;
     if (firstThread) {
-      await this.resumeThread(firstThread.id);
-      await this.loadDirectory(firstThread.cwd);
+      await this.resumeThread(firstThread.id).catch(() => undefined);
+      await this.loadDirectory(firstThread.cwd).catch(() => undefined);
     }
   }
 

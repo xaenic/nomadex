@@ -137,6 +137,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeThreadLabel,
   activeTurns,
   existingThreadHistoryPending,
+  rollbackPendingTurnId,
   streamVisible,
   onReview,
   onRollback,
@@ -154,6 +155,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   activeThreadLabel: string;
   activeTurns: Array<Turn>;
   existingThreadHistoryPending: boolean;
+  rollbackPendingTurnId?: string | null;
   streamVisible: Record<string, number>;
   onReview: (diffId?: string) => void;
   onRollback: (turnId: string) => void;
@@ -180,7 +182,9 @@ export const ChatTranscript = memo(function ChatTranscript({
   }
 
   const latestTurnId = activeTurns[activeTurns.length - 1]?.id ?? null;
-  const rollbackDisabled = activeTurns.some((turn) => turn.status === "inProgress");
+  const rollbackDisabled =
+    activeTurns.some((turn) => turn.status === "inProgress") ||
+    rollbackPendingTurnId !== null;
 
   return (
     <>
@@ -227,6 +231,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                 onRollback={onRollback}
                 providerId={providerId}
                 onReview={onReview}
+                rollbackPending={rollbackPendingTurnId === turn.id}
                 rollbackDisabled={rollbackDisabled}
                 showRollback={item.type === "userMessage"}
                 turnId={turn.id}
@@ -892,6 +897,7 @@ const ThreadItemView = memo(function ThreadItemView({
   providerId,
   turnId,
   showRollback = false,
+  rollbackPending = false,
   rollbackDisabled = false,
 }: {
   item: ThreadItem;
@@ -911,6 +917,7 @@ const ThreadItemView = memo(function ThreadItemView({
   providerId?: ProviderId;
   turnId: string;
   showRollback?: boolean;
+  rollbackPending?: boolean;
   rollbackDisabled?: boolean;
 }) {
   const [commandExpanded, setCommandExpanded] = useState(
@@ -1088,17 +1095,26 @@ const ThreadItemView = memo(function ThreadItemView({
         <div className="macts">
           {showRollback ? (
             <button
-              className="mact rollback"
+              className={clsx("mact rollback", rollbackPending && "is-loading")}
               disabled={rollbackDisabled}
               title={
-                rollbackDisabled
+                rollbackPending
+                  ? "Rolling back from this prompt…"
+                  : rollbackDisabled
                   ? "Wait for the current response to finish before rolling back."
                   : "Remove this prompt and everything after it."
               }
               type="button"
               onClick={() => onRollback(turnId)}
             >
-              ↶ Rollback
+              {rollbackPending ? (
+                <>
+                  <span aria-hidden="true" className="mact-spinner" />
+                  Rolling back…
+                </>
+              ) : (
+                "↶ Rollback"
+              )}
             </button>
           ) : null}
           <button className="mact" type="button" onClick={() => onCopy(display.text)}>

@@ -732,6 +732,7 @@ export function FileEditorPreview({
   onBack,
   backLabel = "Back",
   onSave,
+  onDirtyChange,
   providerId,
 }: {
   preview: FilePreviewState;
@@ -739,6 +740,7 @@ export function FileEditorPreview({
   onBack?: () => void;
   backLabel?: string;
   onSave?: (path: string, content: string) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
   providerId?: ProviderId;
 }) {
   const browseHref = toBrowseUrl(preview.path, providerId);
@@ -750,6 +752,10 @@ export function FileEditorPreview({
   const [languageName, setLanguageName] = useState("Plain text");
   const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
   const isDirty = draft !== savedContent;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   useEffect(() => {
     setDraft(preview.content);
