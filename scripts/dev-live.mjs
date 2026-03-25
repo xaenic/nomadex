@@ -12,7 +12,6 @@ const uiPort = process.env.VITE_CODEX_UI_PORT ?? "3784";
 const url = new URL(wsUrl);
 const host = url.hostname;
 const port = Number(url.port || (url.protocol === "wss:" ? 443 : 80));
-const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
 const children = [];
 const require = createRequire(import.meta.url);
 
@@ -70,12 +69,12 @@ const ensureUiPortAvailable = async () => {
   );
 };
 
-const resolveLocalCodexLaunch = () => {
+const resolveLocalNodePackageLaunch = (packageName, binName) => {
   try {
-    const packageJsonPath = require.resolve("@openai/codex/package.json");
+    const packageJsonPath = require.resolve(`${packageName}/package.json`);
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
     const relativeBin =
-      typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.codex;
+      typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.[binName];
 
     if (!relativeBin) {
       return null;
@@ -85,12 +84,15 @@ const resolveLocalCodexLaunch = () => {
       command: process.execPath,
       args: [path.resolve(path.dirname(packageJsonPath), relativeBin)],
       shell: false,
-      source: "local dependency",
+      source: `${packageName} local dependency`,
     };
   } catch {
     return null;
   }
 };
+
+const resolveLocalCodexLaunch = () =>
+  resolveLocalNodePackageLaunch("@openai/codex", "codex");
 
 const getCodexLaunch = () => {
   const localLaunch = resolveLocalCodexLaunch();
@@ -104,6 +106,21 @@ const getCodexLaunch = () => {
     args: [],
     shell: false,
     source: "global PATH",
+  };
+};
+
+const getViteLaunch = () => {
+  const localLaunch = resolveLocalNodePackageLaunch("vite", "vite");
+
+  if (localLaunch) {
+    return localLaunch;
+  }
+
+  return {
+    command: process.platform === "win32" ? "npm.cmd" : "npm",
+    args: ["run", "dev", "--"],
+    shell: process.platform === "win32",
+    source: "npm fallback",
   };
 };
 
@@ -196,6 +213,7 @@ const ensureAppServer = async () => {
 
 const startVite = () => {
   console.log(`[nomadex] Starting Vite dev server on http://127.0.0.1:${uiPort}`);
+  const viteLaunch = getViteLaunch();
 
   const viteEnv = {
     ...process.env,
@@ -204,15 +222,38 @@ const startVite = () => {
 
   delete viteEnv.VITE_CODEX_WS_URL;
 
-  const vite = spawn(npmBin, ["run", "dev", "--", "--host", "0.0.0.0", "--port", uiPort, "--strictPort"], {
-    cwd: projectRoot,
-    stdio: "inherit",
-    env: viteEnv,
+  const vite = spawn(
+    viteLaunch.command,
+    [
+      ...viteLaunch.args,
+      "--host",
+      "0.0.0.0",
+      "--port",
+      uiPort,
+      "--strictPort",
+    ],
+    {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: viteEnv,
+      shell: viteLaunch.shell,
+    },
+  );
+  let viteError = null;
+
+  vite.once("error", (error) => {
+    viteError = error;
+    stopChildren();
+    console.error(`[nomadex] ${formatSpawnError(error)}`);
+    process.exit(1);
   });
 
   children.push(vite);
 
   vite.on("exit", (code) => {
+    if (viteError) {
+      return;
+    }
     stopChildren();
     process.exit(code ?? 0);
   });
