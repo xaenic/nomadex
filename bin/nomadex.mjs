@@ -427,6 +427,7 @@ const promptForUpdate = async () => {
 };
 
 const wsUrl = new URL(options.wsUrl);
+const formatWsBaseUrl = () => `${wsUrl.protocol}//${wsUrl.host}`;
 const getWsHost = () => wsUrl.hostname;
 const getWsPort = () =>
   Number(wsUrl.port || (wsUrl.protocol === "wss:" ? 443 : 80));
@@ -756,7 +757,9 @@ const ensureAppServer = async () => {
 
   if (await isPortOpen(probeHost, wsPort)) {
     if (await isCodexAppServerReady()) {
-      console.log(`[nomadexapp] Reusing Codex app-server at ${wsUrl}`);
+      console.log(
+        `[nomadexapp] Reusing Codex app-server at ${formatWsBaseUrl()}`,
+      );
       return;
     }
 
@@ -783,17 +786,19 @@ const ensureAppServer = async () => {
     }
 
     wsUrl.port = String(nextPort);
-    options.wsUrl = wsUrl.toString();
+    options.wsUrl = formatWsBaseUrl();
     console.log(
-      `[nomadexapp] App-server port ${wsPort} is busy. Using ${wsUrl} instead.`,
+      `[nomadexapp] App-server port ${wsPort} is busy. Using ${formatWsBaseUrl()} instead.`,
     );
   }
 
   const codexLaunch = getCodexLaunch();
-  console.log(`[nomadexapp] Starting Codex app-server at ${wsUrl}`);
+  console.log(
+    `[nomadexapp] Starting Codex app-server at ${formatWsBaseUrl()}`,
+  );
   const appServer = spawn(
     codexLaunch.command,
-    [...codexLaunch.args, "app-server", "--listen", wsUrl.toString()],
+    [...codexLaunch.args, "app-server", "--listen", formatWsBaseUrl()],
     {
       cwd: launchCwd,
       stdio: "inherit",
@@ -829,7 +834,9 @@ const ensureAppServer = async () => {
     await sleep(200);
   }
 
-  throw new Error(`Timed out waiting for Codex app-server at ${wsUrl}`);
+  throw new Error(
+    `Timed out waiting for Codex app-server at ${formatWsBaseUrl()}`,
+  );
 };
 
 const sendText = (res, statusCode, message) => {
