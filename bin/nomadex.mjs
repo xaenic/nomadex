@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { statSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { request as httpsRequest } from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -667,15 +668,63 @@ const confirmAlternatePort = async (message) => {
   }
 };
 
+const isCodexWebSocketReady = () =>
+  new Promise((resolve) => {
+    const request = wsUrl.protocol === "wss:" ? httpsRequest : httpRequest;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const requestOptions = {
+      protocol: wsUrl.protocol === "wss:" ? "https:" : "http:",
+      hostname: getWsHost(),
+      port: getWsPort(),
+      path: wsUrl.pathname || "/",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
+        "Sec-WebSocket-Version": "13",
+      },
+    };
+
+    const req = request(requestOptions);
+    req.setTimeout(500, () => {
+      req.destroy();
+      finish(false);
+    });
+    req.on("upgrade", (_response, socket) => {
+      socket.destroy();
+      finish(true);
+    });
+    req.on("response", (response) => {
+      response.resume();
+      finish(false);
+    });
+    req.on("error", () => {
+      finish(false);
+    });
+    req.end();
+  });
+
 const isCodexAppServerReady = async () => {
   try {
     const response = await fetch(getReadyzUrl(), {
       signal: AbortSignal.timeout(500),
     });
-    return response.ok;
+    if (response.ok) {
+      return true;
+    }
   } catch {
-    return false;
+    // Some Codex builds only expose the websocket endpoint, not /readyz.
   }
+
+  return isCodexWebSocketReady();
 };
 
 const ensureUiPortAvailable = async () => {
