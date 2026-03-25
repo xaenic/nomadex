@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createServer } from "node:http";
-import { statSync, readFileSync, existsSync } from "node:fs";
+import { statSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -443,6 +443,15 @@ const isTermuxEnvironment = () => {
   );
 };
 
+const isTransientNpxCodexPath = (candidate) => {
+  const normalized = candidate.replaceAll("\\", "/");
+  return (
+    normalized.includes("/.npm/_npx/") ||
+    normalized.includes("/node_modules/.bin/codex") ||
+    normalized.includes("/node_modules/@openai/codex/")
+  );
+};
+
 const resolveLocalNodePackageLaunch = (packageName, binName) => {
   try {
     const packageJsonPath = require.resolve(`${packageName}/package.json`);
@@ -467,14 +476,24 @@ const resolveLocalNodePackageLaunch = (packageName, binName) => {
   }
 };
 
-const resolveExecutableOnPath = (commandNames) => {
+const resolveExecutableOnPath = (commandNames, options = {}) => {
+  const { exclude } = options;
   const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
 
   for (const dir of pathDirs) {
     for (const commandName of commandNames) {
       const candidate = path.join(dir, commandName);
       try {
-        if (statSync(candidate).isFile()) {
+        if (!statSync(candidate).isFile()) {
+          continue;
+        }
+
+        const resolved = realpathSync(candidate);
+        if (exclude?.(candidate, resolved)) {
+          continue;
+        }
+
+        if (resolved) {
           return candidate;
         }
       } catch {
@@ -504,6 +523,49 @@ const resolvePathCodexLaunch = () => {
   };
 };
 
+const resolveTermuxCodexLaunch = () => {
+  const prefix = process.env.PREFIX?.trim() || "/data/data/com.termux/files/usr";
+  const directCandidates = [
+    path.join(prefix, "bin", "codex"),
+    "/data/data/com.termux/files/usr/bin/codex",
+  ];
+
+  for (const candidate of directCandidates) {
+    try {
+      if (statSync(candidate).isFile()) {
+        return {
+          command: candidate,
+          args: [],
+          shell: false,
+          source: "Termux codex",
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const commandNames =
+    process.platform === "win32"
+      ? ["codex.cmd", "codex.exe", "codex.bat", "codex"]
+      : ["codex"];
+  const command = resolveExecutableOnPath(commandNames, {
+    exclude: (candidate, resolved) =>
+      isTransientNpxCodexPath(candidate) || isTransientNpxCodexPath(resolved),
+  });
+
+  if (!command) {
+    return null;
+  }
+
+  return {
+    command,
+    args: [],
+    shell: false,
+    source: "Termux codex",
+  };
+};
+
 const getCodexLaunch = () => {
   const explicitCommand = options.codexCommand.trim();
   if (explicitCommand) {
@@ -516,7 +578,9 @@ const getCodexLaunch = () => {
   }
 
   const dependencyLaunch = resolveLocalNodePackageLaunch("@openai/codex", "codex");
-  const pathLaunch = resolvePathCodexLaunch();
+  const pathLaunch = isTermuxEnvironment()
+    ? resolveTermuxCodexLaunch()
+    : resolvePathCodexLaunch();
 
   if (isTermuxEnvironment()) {
     return pathLaunch ?? dependencyLaunch ?? {
