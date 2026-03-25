@@ -162,6 +162,9 @@ const parseVersion = (value) =>
     .split(".")
     .map((part) => Number.parseInt(part.replace(/[^0-9].*$/u, ""), 10) || 0);
 
+const isInteractivePromptAvailable = () =>
+  Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
 const compareVersions = (left, right) => {
   const maxLength = Math.max(left.length, right.length);
   for (let index = 0; index < maxLength; index += 1) {
@@ -345,7 +348,7 @@ const renderLoginPage = ({ errorMessage = "", nextPath = "/threads" } = {}) => {
 };
 
 const promptForUpdate = async () => {
-  if (!options.updateCheck || !process.stdin.isTTY || !process.stdout.isTTY) {
+  if (!options.updateCheck || !isInteractivePromptAvailable()) {
     return false;
   }
 
@@ -424,16 +427,17 @@ const promptForUpdate = async () => {
 };
 
 const wsUrl = new URL(options.wsUrl);
-const wsHost = wsUrl.hostname;
-const wsPort = Number(wsUrl.port || (wsUrl.protocol === "wss:" ? 443 : 80));
-const readyzUrl = (() => {
-  const target = new URL(options.wsUrl);
+const getWsHost = () => wsUrl.hostname;
+const getWsPort = () =>
+  Number(wsUrl.port || (wsUrl.protocol === "wss:" ? 443 : 80));
+const getReadyzUrl = () => {
+  const target = new URL(wsUrl);
   target.protocol = target.protocol === "wss:" ? "https:" : "http:";
   target.pathname = "/readyz";
   target.search = "";
   target.hash = "";
   return target;
-})();
+};
 const authRelayTarget = options.authRelayTarget;
 const isTermuxEnvironment = () => {
   const prefix = process.env.PREFIX ?? "";
@@ -441,6 +445,22 @@ const isTermuxEnvironment = () => {
     Boolean(process.env.TERMUX_VERSION) ||
     prefix.startsWith("/data/data/com.termux/files/usr")
   );
+};
+
+const isLocalHost = (host) =>
+  ["127.0.0.1", "0.0.0.0", "localhost", "::1", "[::1]"].includes(
+    host.toLowerCase(),
+  );
+
+const getPortProbeHost = (host) => {
+  const normalized = host.toLowerCase();
+  if (normalized === "localhost" || normalized === "0.0.0.0") {
+    return "127.0.0.1";
+  }
+  if (normalized === "[::1]") {
+    return "::1";
+  }
+  return host;
 };
 
 const isTransientNpxCodexPath = (candidate) => {
@@ -618,9 +638,37 @@ const isPortOpen = (targetHost, targetPort) =>
     socket.connect(targetPort, targetHost);
   });
 
+const findNextFreePort = async (targetHost, startPort, attempts = 20) => {
+  for (let port = startPort + 1; port < startPort + 1 + attempts; port += 1) {
+    if (!(await isPortOpen(targetHost, port))) {
+      return port;
+    }
+  }
+  return null;
+};
+
+const confirmAlternatePort = async (message) => {
+  if (!isInteractivePromptAvailable()) {
+    return true;
+  }
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question(`${message} [Y/n] `);
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "" || !["n", "no"].includes(normalized);
+  } finally {
+    rl.close();
+  }
+};
+
 const isCodexAppServerReady = async () => {
   try {
-    const response = await fetch(readyzUrl, {
+    const response = await fetch(getReadyzUrl(), {
       signal: AbortSignal.timeout(500),
     });
     return response.ok;
@@ -634,9 +682,26 @@ const ensureUiPortAvailable = async () => {
     return;
   }
 
-  throw new Error(
-    `UI port ${options.uiPort} is already in use. Open the existing UI at http://127.0.0.1:${options.uiPort} or choose another port with --port.`,
+  const nextPort = await findNextFreePort("127.0.0.1", options.uiPort);
+  if (nextPort === null) {
+    throw new Error(
+      `UI port ${options.uiPort} is already in use and no nearby free port was found. Open the existing UI at http://127.0.0.1:${options.uiPort} or choose another port with --port.`,
+    );
+  }
+
+  const useAlternatePort = await confirmAlternatePort(
+    `[nomadexapp] UI port ${options.uiPort} is already in use. Use ${nextPort} instead?`,
   );
+  if (!useAlternatePort) {
+    throw new Error(
+      `UI port ${options.uiPort} is already in use. Open the existing UI at http://127.0.0.1:${options.uiPort} or choose another port with --port.`,
+    );
+  }
+
+  console.log(
+    `[nomadexapp] UI port ${options.uiPort} is busy. Using ${nextPort} instead.`,
+  );
+  options.uiPort = nextPort;
 };
 
 const formatSpawnError = (error) => {
@@ -685,22 +750,50 @@ const ensureDistBuilt = () => {
 };
 
 const ensureAppServer = async () => {
-  if (await isPortOpen(wsHost, wsPort)) {
+  const wsHost = getWsHost();
+  const wsPort = getWsPort();
+  const probeHost = getPortProbeHost(wsHost);
+
+  if (await isPortOpen(probeHost, wsPort)) {
     if (await isCodexAppServerReady()) {
-      console.log(`[nomadexapp] Reusing Codex app-server at ${options.wsUrl}`);
+      console.log(`[nomadexapp] Reusing Codex app-server at ${wsUrl}`);
       return;
     }
 
-    throw new Error(
-      `Port ${wsPort} on ${wsHost} is already in use, but it is not responding like a Codex app-server.`,
+    if (!isLocalHost(wsHost)) {
+      throw new Error(
+        `Port ${wsPort} on ${wsHost} is already in use, but it is not responding like a Codex app-server.`,
+      );
+    }
+
+    const nextPort = await findNextFreePort(probeHost, wsPort);
+    if (nextPort === null) {
+      throw new Error(
+        `Port ${wsPort} on ${wsHost} is already in use, and no nearby free local app-server port was found.`,
+      );
+    }
+
+    const useAlternatePort = await confirmAlternatePort(
+      `[nomadexapp] App-server port ${wsPort} is in use by another process. Use ${nextPort} instead?`,
+    );
+    if (!useAlternatePort) {
+      throw new Error(
+        `Port ${wsPort} on ${wsHost} is already in use, but it is not responding like a Codex app-server.`,
+      );
+    }
+
+    wsUrl.port = String(nextPort);
+    options.wsUrl = wsUrl.toString();
+    console.log(
+      `[nomadexapp] App-server port ${wsPort} is busy. Using ${wsUrl} instead.`,
     );
   }
 
   const codexLaunch = getCodexLaunch();
-  console.log(`[nomadexapp] Starting Codex app-server at ${options.wsUrl}`);
+  console.log(`[nomadexapp] Starting Codex app-server at ${wsUrl}`);
   const appServer = spawn(
     codexLaunch.command,
-    [...codexLaunch.args, "app-server", "--listen", options.wsUrl],
+    [...codexLaunch.args, "app-server", "--listen", wsUrl.toString()],
     {
       cwd: launchCwd,
       stdio: "inherit",
@@ -725,7 +818,8 @@ const ensureAppServer = async () => {
     }
     if (appServer.exitCode !== null) {
       const termuxHint =
-        isTermuxEnvironment() && codexLaunch.source !== "PATH codex"
+        isTermuxEnvironment() &&
+        !["PATH codex", "Termux codex"].includes(codexLaunch.source)
           ? " Termux detected. Install `@mmmbuto/codex-cli-termux@latest`, ensure `codex` is on PATH, or launch Nomadex with `--codex-cmd codex`."
           : "";
       throw new Error(
@@ -735,7 +829,7 @@ const ensureAppServer = async () => {
     await sleep(200);
   }
 
-  throw new Error(`Timed out waiting for Codex app-server at ${options.wsUrl}`);
+  throw new Error(`Timed out waiting for Codex app-server at ${wsUrl}`);
 };
 
 const sendText = (res, statusCode, message) => {
@@ -903,7 +997,6 @@ const getPreferredIp = () => {
 };
 
 const wsProxy = httpProxy.createProxyServer({
-  target: options.wsUrl,
   ws: true,
   changeOrigin: true,
 });
@@ -1129,7 +1222,9 @@ server.on("upgrade", (req, socket, head) => {
         return;
       }
       req.url = "/";
-      wsProxy.ws(req, socket, head);
+      wsProxy.ws(req, socket, head, {
+        target: wsUrl.toString(),
+      });
       return;
     }
   } catch {
