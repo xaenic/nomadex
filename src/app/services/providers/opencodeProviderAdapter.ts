@@ -16,8 +16,8 @@ export const opencodeProviderAdapter: ProviderAdapter = {
   authCompletePath: "/codex-auth/complete",
   localImagePath: "/codex-local-image",
   localBrowsePath: "/codex-local-browse/",
-  uploadRootDirName: ".opencode-web/uploads",
-  uploadFilesDirName: ".opencode-web/uploads/files",
+  uploadRootDirName: "opencode/images",
+  uploadFilesDirName: "opencode/files",
   requestHeading: "# My request for OpenCode:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

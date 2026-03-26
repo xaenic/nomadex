@@ -15,8 +15,8 @@ export const geminiCliProviderAdapter: ProviderAdapter = {
   authCompletePath: "/gemini-cli-auth/complete",
   localImagePath: "/gemini-cli-local-image",
   localBrowsePath: "/gemini-cli-local-browse/",
-  uploadRootDirName: ".gemini-cli-web/uploads",
-  uploadFilesDirName: ".gemini-cli-web/uploads/files",
+  uploadRootDirName: "gemini-cli/images",
+  uploadFilesDirName: "gemini-cli/files",
   requestHeading: "# My request for Gemini CLI:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

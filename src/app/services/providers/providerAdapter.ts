@@ -57,15 +57,65 @@ const joinWorkspacePath = (cwd: string, relativePath: string) => {
   return `${root}${separator}${normalizedPath}`;
 };
 
+const detectWorkspaceHomeRoot = (cwd: string) => {
+  const root = trimWorkspaceRoot(cwd);
+  if (!root) {
+    return null;
+  }
+
+  const unixHomeMatch = root.match(
+    /^(\/home\/[^/]+|\/Users\/[^/]+|\/var\/home\/[^/]+|\/root|\/data\/data\/com\.termux\/files\/home)(?:\/|$)/u,
+  );
+  if (unixHomeMatch) {
+    return unixHomeMatch[1];
+  }
+
+  const normalizedWindows = root.replace(/\//gu, "\\");
+  const windowsHomeMatch = normalizedWindows.match(
+    /^([a-z]:\\(?:Users|Documents and Settings)\\[^\\]+)(?:\\|$)/iu,
+  );
+  if (windowsHomeMatch) {
+    return windowsHomeMatch[1];
+  }
+
+  return null;
+};
+
+const parentWorkspacePath = (cwd: string) => {
+  const root = trimWorkspaceRoot(cwd);
+  const useWindowsSeparator = isWindowsWorkspacePath(root);
+  const separator = useWindowsSeparator ? "\\" : "/";
+  const normalizedRoot = useWindowsSeparator
+    ? root.replace(/\//gu, "\\")
+    : root.replace(/\\/gu, "/");
+  const lastSeparatorIndex = normalizedRoot.lastIndexOf(separator);
+
+  if (lastSeparatorIndex <= 0) {
+    return normalizedRoot;
+  }
+
+  if (useWindowsSeparator && lastSeparatorIndex <= 2) {
+    return normalizedRoot;
+  }
+
+  return normalizedRoot.slice(0, lastSeparatorIndex);
+};
+
+const buildNomadexUploadStorageRoot = (cwd: string) => {
+  const outsideProjectRoot =
+    detectWorkspaceHomeRoot(cwd) ?? parentWorkspacePath(cwd);
+  return joinWorkspacePath(outsideProjectRoot, ".nomadex/uploads");
+};
+
 export const buildProviderUploadRoot = (
   adapter: ProviderAdapter,
   cwd: string,
-) => joinWorkspacePath(cwd, adapter.uploadRootDirName);
+) => joinWorkspacePath(buildNomadexUploadStorageRoot(cwd), adapter.uploadRootDirName);
 
 export const buildProviderFilesUploadRoot = (
   adapter: ProviderAdapter,
   cwd: string,
-) => joinWorkspacePath(cwd, adapter.uploadFilesDirName);
+) => joinWorkspacePath(buildNomadexUploadStorageRoot(cwd), adapter.uploadFilesDirName);
 
 export const buildProviderOptimisticUploadPath = (
   adapter: ProviderAdapter,

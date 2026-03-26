@@ -192,9 +192,9 @@ Current behavior:
 
 - images can be pasted into the composer
 - non-image files go through `Attach`
-- uploaded assets are written into the workspace under:
-  - `.codex-web/uploads`
-  - `.codex-web/uploads/files`
+- uploaded assets are written outside the active project under a dedicated Nomadex storage root such as:
+  - `~/.nomadex/uploads/codex/images`
+  - `~/.nomadex/uploads/codex/files`
 
 The runtime injects file mentions into the prompt manifest so the live agent can see attached file paths consistently.
 

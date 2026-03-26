@@ -16,8 +16,8 @@ export const qwenCodeProviderAdapter: ProviderAdapter = {
   authCompletePath: "/codex-auth/complete",
   localImagePath: "/codex-local-image",
   localBrowsePath: "/codex-local-browse/",
-  uploadRootDirName: ".qwen-code-web/uploads",
-  uploadFilesDirName: ".qwen-code-web/uploads/files",
+  uploadRootDirName: "qwen-code/images",
+  uploadFilesDirName: "qwen-code/files",
   requestHeading: "# My request for Qwen Code:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

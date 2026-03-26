@@ -15,8 +15,8 @@ export const githubCopilotProviderAdapter: ProviderAdapter = {
   authCompletePath: "/github-copilot-auth/complete",
   localImagePath: "/github-copilot-local-image",
   localBrowsePath: "/github-copilot-local-browse/",
-  uploadRootDirName: ".github-copilot-web/uploads",
-  uploadFilesDirName: ".github-copilot-web/uploads/files",
+  uploadRootDirName: "github-copilot/images",
+  uploadFilesDirName: "github-copilot/files",
   requestHeading: "# My request for GitHub Copilot:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

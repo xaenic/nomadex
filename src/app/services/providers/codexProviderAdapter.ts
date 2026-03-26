@@ -15,8 +15,8 @@ export const codexProviderAdapter: ProviderAdapter = {
   authCompletePath: "/codex-auth/complete",
   localImagePath: "/codex-local-image",
   localBrowsePath: "/codex-local-browse/",
-  uploadRootDirName: ".codex-web/uploads",
-  uploadFilesDirName: ".codex-web/uploads/files",
+  uploadRootDirName: "codex/images",
+  uploadFilesDirName: "codex/files",
   requestHeading: "# My request:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

@@ -15,8 +15,8 @@ export const antigravityProviderAdapter: ProviderAdapter = {
   authCompletePath: "/antigravity-auth/complete",
   localImagePath: "/antigravity-local-image",
   localBrowsePath: "/antigravity-local-browse/",
-  uploadRootDirName: ".antigravity-web/uploads",
-  uploadFilesDirName: ".antigravity-web/uploads/files",
+  uploadRootDirName: "antigravity/images",
+  uploadFilesDirName: "antigravity/files",
   requestHeading: "# My request for Antigravity:",
   requestMarkerPattern: GENERIC_REQUEST_MARKER_PATTERN,
 };

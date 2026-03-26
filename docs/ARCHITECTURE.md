@@ -164,9 +164,9 @@ Persisted locally:
 - selected provider in `localStorage`
 - app-owned steer history entries per thread in `localStorage`
 
-Stored in workspace:
+Stored on disk outside the active project:
 
-- uploads under provider-specific upload folders such as `.codex-web/uploads`
+- uploads under provider-specific Nomadex storage folders such as `~/.nomadex/uploads/codex/images`
 
 Mostly in-memory UI state:
 
