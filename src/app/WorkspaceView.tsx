@@ -618,7 +618,7 @@ export function DiffReviewPage({
         </div>
 
         {diffEntries.length === 0 ? (
-          <div className="empty-panel">No diff items in this thread yet.</div>
+          <div className="empty-panel">No diff items in the current turn yet.</div>
         ) : (
           <div className="diff-review-layout page">
             <div className="diff-review-sidebar">

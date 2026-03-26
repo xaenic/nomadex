@@ -2392,45 +2392,49 @@ export function WorkspacePage() {
       ),
     [activeTurns],
   );
+  const reviewFocusTurn = useMemo(
+    () => activeTurns[activeTurns.length - 1] ?? null,
+    [activeTurns],
+  );
 
   const diffEntries = useMemo<Array<DiffReviewEntry>>(
     () =>
-      activeTurns
-        .flatMap((turn) =>
-          turn.items.flatMap((item) => {
-            if (item.type !== "fileChange") {
-              return [];
-            }
+      reviewFocusTurn
+        ? reviewFocusTurn.items
+            .flatMap((item) => {
+              if (item.type !== "fileChange") {
+                return [];
+              }
 
-            const changes =
-              item.changes.length > 0
-                ? item.changes
-                : [
-                    {
-                      path: "Editing files",
-                      kind: { type: "update", move_path: null } as const,
-                      diff: "",
-                    },
-                  ];
+              const changes =
+                item.changes.length > 0
+                  ? item.changes
+                  : [
+                      {
+                        path: "Editing files",
+                        kind: { type: "update", move_path: null } as const,
+                        diff: "",
+                      },
+                    ];
 
-            return changes.map((change, index) => {
-              const stats = countDiffStats(change.diff);
-              return {
-                id: diffEntryId(item.id, index, change.path),
-                itemId: item.id,
-                path: change.path,
-                diff: change.diff,
-                kind: change.kind,
-                status: item.status,
-                additions: stats.additions,
-                removals: stats.removals,
-                hunks: stats.hunks,
-              };
-            });
-          }),
-        )
-        .reverse(),
-    [activeTurns],
+              return changes.map((change, index) => {
+                const stats = countDiffStats(change.diff);
+                return {
+                  id: diffEntryId(item.id, index, change.path),
+                  itemId: item.id,
+                  path: change.path,
+                  diff: change.diff,
+                  kind: change.kind,
+                  status: item.status,
+                  additions: stats.additions,
+                  removals: stats.removals,
+                  hunks: stats.hunks,
+                };
+              });
+            })
+            .reverse()
+        : [],
+    [reviewFocusTurn],
   );
 
   const relatedRepoThreads = useMemo(
@@ -2583,7 +2587,7 @@ export function WorkspacePage() {
     "current branch";
 
   const selectedDiffFindings = useMemo(() => {
-    if (!activeThread) {
+    if (!activeThread || diffEntries.length === 0) {
       return [];
     }
 
@@ -2596,7 +2600,7 @@ export function WorkspacePage() {
       const findingPath = normalizeDiffPath(finding.file);
       return findingPath === targetPath || findingPath.endsWith(`/${targetPath}`);
     });
-  }, [activeThread, selectedDiffEntry]);
+  }, [activeThread, diffEntries.length, selectedDiffEntry]);
   const projectPickerEntries = useMemo(
     () =>
       snapshot.directoryCatalogRoot === projectPickerPath
@@ -5703,7 +5707,7 @@ export function WorkspacePage() {
           <div className="panel-hint">
             Patch review · {diffEntries.length} changed file{diffEntries.length === 1 ? "" : "s"} · +{totalAdditions} / -{totalRemovals}
           </div>
-          {diffEntries.length === 0 ? <div className="empty-panel">No diff items in this thread yet.</div> : null}
+          {diffEntries.length === 0 ? <div className="empty-panel">No diff items in the current turn yet.</div> : null}
           {diffEntries.length > 0 ? (
             <div className="diff-review-layout">
               <div className="diff-review-sidebar">
@@ -5768,7 +5772,7 @@ export function WorkspacePage() {
                 </div>
               ))}
             </div>
-          ) : activeThread.review.length > 0 ? <div className="empty-panel">No review findings mapped to the selected file.</div> : null}
+          ) : diffEntries.length > 0 && activeThread.review.length > 0 ? <div className="empty-panel">No review findings mapped to the selected file.</div> : null}
           {activePendingApprovals.length > 0 ? (
             <div className="panel-actions">
               {activePendingApprovals.map((approval) => renderApprovalRequest(approval))}
