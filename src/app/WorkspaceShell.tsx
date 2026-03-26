@@ -133,6 +133,9 @@ import {
 } from "./WorkspaceView";
 
 const MATERIALIZED_THREAD_ID_FIELD = "materializedThreadId";
+const COMPOSER_DRAFT_STORAGE_KEY = "nomadex-composer-drafts";
+
+type ComposerDraftMap = Record<string, string>;
 
 const getMaterializedThreadId = (error: unknown) => {
   if (!error || typeof error !== "object") {
@@ -141,6 +144,45 @@ const getMaterializedThreadId = (error: unknown) => {
 
   const value = (error as Record<string, unknown>)[MATERIALIZED_THREAD_ID_FIELD];
   return typeof value === "string" ? value : null;
+};
+
+const readComposerDraftMap = (): ComposerDraftMap => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const writeComposerDraftMap = (value: ComposerDraftMap) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (Object.keys(value).length === 0) {
+    window.localStorage.removeItem(COMPOSER_DRAFT_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify(value));
 };
 
 const buildQuestionAnswerPayload = (
@@ -1994,6 +2036,7 @@ export function WorkspacePage() {
   const toastTimersRef = useRef<Record<string, number>>({});
   const composerInputFrameRef = useRef<number | null>(null);
   const latestComposerInputRef = useRef(composer);
+  const suppressComposerDraftPersistRef = useRef(false);
   const gitActivityGraphCacheRef = useRef<Record<string, string>>({});
   const initialTransportConnectSeenRef = useRef(false);
   const editorFileChangeActivityKeyRef = useRef("");
@@ -2017,6 +2060,39 @@ export function WorkspacePage() {
   useEffect(() => {
     latestComposerInputRef.current = composer;
   }, [composer]);
+
+  const composerDraftThreadKey = route.threadId ?? activeThreadId ?? "__default__";
+
+  useEffect(() => {
+    const storedDraft = readComposerDraftMap()[composerDraftThreadKey] ?? "";
+    suppressComposerDraftPersistRef.current = true;
+    setComposer(storedDraft);
+    setComposerSyncKey((current) => current + 1);
+  }, [composerDraftThreadKey]);
+
+  useEffect(() => {
+    if (suppressComposerDraftPersistRef.current) {
+      suppressComposerDraftPersistRef.current = false;
+      return;
+    }
+
+    const currentDrafts = readComposerDraftMap();
+    if (composer) {
+      writeComposerDraftMap({
+        ...currentDrafts,
+        [composerDraftThreadKey]: composer,
+      });
+      return;
+    }
+
+    if (!(composerDraftThreadKey in currentDrafts)) {
+      return;
+    }
+
+    const nextDrafts = { ...currentDrafts };
+    delete nextDrafts[composerDraftThreadKey];
+    writeComposerDraftMap(nextDrafts);
+  }, [composer, composerDraftThreadKey]);
 
   const [showStartupConnectionLoader, setShowStartupConnectionLoader] = useState(true);
 
