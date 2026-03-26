@@ -2039,6 +2039,8 @@ export function WorkspacePage() {
   const suppressComposerDraftPersistRef = useRef(false);
   const gitActivityGraphCacheRef = useRef<Record<string, string>>({});
   const initialTransportConnectSeenRef = useRef(false);
+  const transportConnectedOnceRef = useRef(false);
+  const previousTransportStatusRef = useRef(snapshot.transport.status);
   const editorFileChangeActivityKeyRef = useRef("");
   const editorTrackingTargetRef = useRef("");
   const pendingChatRestoreThreadIdRef = useRef<string | null>(null);
@@ -3879,6 +3881,35 @@ export function WorkspacePage() {
     toastTimersRef.current[id] = timer;
   }, []);
 
+  useEffect(() => {
+    const previousStatus = previousTransportStatusRef.current;
+    const nextStatus = snapshot.transport.status;
+
+    if (snapshot.transport.mode === "live") {
+      if (nextStatus === "connected") {
+        if (transportConnectedOnceRef.current && previousStatus !== "connected") {
+          pushToast("Connection restored.", "ok");
+        }
+        transportConnectedOnceRef.current = true;
+      } else if (
+        previousStatus === "connected" &&
+        transportConnectedOnceRef.current
+      ) {
+        pushToast(
+          snapshot.transport.error?.trim() || "Connection lost. Reconnecting…",
+          "warn",
+        );
+      }
+    }
+
+    previousTransportStatusRef.current = nextStatus;
+  }, [
+    pushToast,
+    snapshot.transport.error,
+    snapshot.transport.mode,
+    snapshot.transport.status,
+  ]);
+
   const refreshGitPanel = useCallback(() => {
     gitActivityGraphCacheRef.current = {};
     setGitActivityRefreshNonce((current) => current + 1);
@@ -5362,11 +5393,33 @@ export function WorkspacePage() {
     [snapshot.account.usageWindows],
   );
   const connectionLabel =
-    snapshot.transport.status === "connected" ? "Connected" : snapshot.transport.status;
+    snapshot.transport.status === "connected"
+      ? "Connected"
+      : snapshot.transport.status === "connecting"
+        ? "Connecting"
+        : snapshot.transport.status === "offline"
+          ? "Reconnecting"
+          : "Error";
   const projectStatusLabel = pathBaseName(activeThread?.thread.cwd);
   const branchStatusLabel = activeThread?.thread.gitInfo?.branch ?? "workspace";
   const accessStatusLabel = APPROVAL_LABELS[activeUiApproval].toLowerCase();
-  const activityStatusLabel = activeTurn ? "Streaming" : "Idle";
+  const activityStatusLabel =
+    snapshot.transport.status !== "connected"
+      ? activeTurn
+        ? "Waiting for reconnect"
+        : "Offline"
+      : activeTurn
+        ? "Streaming"
+        : "Idle";
+  const transportAlertMessage =
+    showStartupConnectionLoader ||
+    snapshot.transport.mode !== "live" ||
+    snapshot.transport.status === "connected"
+      ? null
+      : snapshot.transport.status === "connecting"
+        ? `Reconnecting to the ${activeProvider.transportLabel}…`
+        : snapshot.transport.error?.trim() ||
+          `Connection lost. Reconnecting to the ${activeProvider.transportLabel}…`;
   const shellTerminals = useMemo(
     () =>
       activeThread?.terminals.filter((terminal) => terminal.source === "shell") ?? [],
@@ -6277,6 +6330,18 @@ export function WorkspacePage() {
                     onDelete={(messageId) => activeThreadId && removeQueuedMessage(activeThreadId, messageId)}
                     onSteer={steerQueuedMessage}
                   />
+                ) : null}
+
+                {transportAlertMessage ? (
+                  <div
+                    className={clsx(
+                      "transport-alert",
+                      snapshot.transport.status === "error" && "err",
+                    )}
+                  >
+                    <span className="transport-alert-dot" />
+                    <span>{transportAlertMessage}</span>
+                  </div>
                 ) : null}
 
                 {activeTurnFileChanges.length > 0 ? (

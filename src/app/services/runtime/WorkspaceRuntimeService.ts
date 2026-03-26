@@ -2213,7 +2213,7 @@ export class WorkspaceRuntimeService {
     this.resumedThreads.clear();
   }
 
-  private handleSocketClose(socket: WebSocket) {
+  private failLiveConnection(socket: WebSocket, detail: string) {
     if (this.socket !== socket) {
       return;
     }
@@ -2230,10 +2230,30 @@ export class WorkspaceRuntimeService {
       snapshot.transport = toRuntimeStatus(
         snapshot.transport.mode,
         "offline",
-        snapshot.transport.error,
+        detail,
         this.getDefaultWsUrl(),
       );
     });
+  }
+
+  private handleSocketClose(socket: WebSocket, event?: CloseEvent) {
+    const detail =
+      event?.reason?.trim()
+        ? `Connection lost: ${event.reason.trim()}`
+        : event && event.code !== 1000
+          ? `Connection lost (${event.code}). Reconnecting…`
+          : "Connection lost. Reconnecting…";
+    this.failLiveConnection(socket, detail);
+  }
+
+  private handleSocketError(socket: WebSocket) {
+    this.failLiveConnection(socket, "Connection lost. Reconnecting…");
+
+    try {
+      socket.close();
+    } catch {
+      // Ignore cleanup errors for failed live sockets.
+    }
   }
 
   private async openSocket(url: string) {
@@ -2268,9 +2288,11 @@ export class WorkspaceRuntimeService {
 
         settled = true;
         socket.onmessage = this.onMessage;
-        socket.onerror = () => undefined;
-        socket.onclose = () => {
-          this.handleSocketClose(socket);
+        socket.onerror = () => {
+          this.handleSocketError(socket);
+        };
+        socket.onclose = (event) => {
+          this.handleSocketClose(socket, event);
         };
         resolve(socket);
       };

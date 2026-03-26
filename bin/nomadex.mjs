@@ -914,34 +914,6 @@ const isHttpResponse = (value) =>
   typeof value.setHeader === "function" &&
   typeof value.end === "function";
 
-const sendSocketText = (socket, statusCode, message) => {
-  if (!socket || socket.destroyed) {
-    return;
-  }
-
-  const body = Buffer.from(message, "utf8");
-
-  try {
-    if (socket.writable) {
-      socket.write(
-        `HTTP/1.1 ${statusCode} Bad Gateway\r\n` +
-          "Content-Type: text/plain; charset=utf-8\r\n" +
-          `Content-Length: ${body.length}\r\n` +
-          "Connection: close\r\n\r\n",
-      );
-      socket.write(body);
-    }
-  } catch {
-    // Ignore broken proxy upgrade sockets.
-  }
-
-  try {
-    socket.end();
-  } catch {
-    // Ignore broken proxy upgrade sockets.
-  }
-};
-
 const escapeHtml = (value) =>
   value
     .replaceAll("&", "&amp;")
@@ -1108,7 +1080,11 @@ wsProxy.on("error", (error, req, resOrSocket) => {
     return;
   }
 
-  sendSocketText(resOrSocket, 502, message);
+  try {
+    resOrSocket?.destroy?.();
+  } catch {
+    // Ignore broken proxy upgrade sockets.
+  }
 });
 
 const server = createServer(async (req, res) => {

@@ -7551,6 +7551,39 @@ pre::-webkit-scrollbar-thumb {
   color: var(--yw);
 }
 
+.transport-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 9px 12px;
+  border-radius: var(--r);
+  border: 1px solid color-mix(in srgb, var(--yw) 45%, var(--bdr2));
+  background: color-mix(in srgb, var(--bg3) 88%, var(--yw) 12%);
+  color: var(--tx);
+  font-size: 11.5px;
+  box-shadow: var(--shadow-md);
+}
+
+.transport-alert.err {
+  border-color: color-mix(in srgb, var(--rd) 55%, var(--bdr2));
+  background: color-mix(in srgb, var(--bg3) 84%, var(--rd) 16%);
+}
+
+.transport-alert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--yw);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yw) 16%, transparent);
+  flex: 0 0 auto;
+}
+
+.transport-alert.err .transport-alert-dot {
+  background: var(--rd);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rd) 16%, transparent);
+}
+
 /* EXTRA */
 .compact-bar {
   background: var(--bg3);
