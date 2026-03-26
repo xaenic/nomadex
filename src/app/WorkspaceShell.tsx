@@ -956,6 +956,18 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             fallbackOnLiveError: false,
           },
         ),
+      refreshThreads: async () =>
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.refreshThreads().catch(() => undefined);
+          },
+          async () => undefined,
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
+          },
+        ),
       resumeThread: async (threadId) =>
         await withLiveFallback(
           async () => {
@@ -1998,6 +2010,7 @@ export function WorkspacePage() {
   const streamVisibleRef = useRef<Record<string, number>>({});
   const [streamVisible, setStreamVisible] = useState<Record<string, number>>({});
   const [queueWakeSignal, setQueueWakeSignal] = useState(0);
+  const [initialThreadCatalogSettled, setInitialThreadCatalogSettled] = useState(false);
   const deferredComposer = useDeferredValue(composer);
   const deferredQuickQuery = useDeferredValue(quickQuery);
 
@@ -2659,7 +2672,6 @@ export function WorkspacePage() {
 
   const routeConversationLoaderPending = useMemo(() => {
     if (
-      route.section !== "chat" ||
       !route.threadId ||
       snapshot.transport.mode !== "live"
     ) {
@@ -2685,7 +2697,6 @@ export function WorkspacePage() {
   }, [
     activeThread,
     activeTurns,
-    route.section,
     route.threadId,
     snapshot.threads,
     snapshot.transport.mode,
@@ -2941,7 +2952,11 @@ export function WorkspacePage() {
       return;
     }
 
-    if (!activeThread || !isExistingThreadHistoryPending(activeThread, activeTurns)) {
+    if (
+      activeThread &&
+      activeThread.thread.id === route.threadId &&
+      !isExistingThreadHistoryPending(activeThread, activeTurns)
+    ) {
       return;
     }
 
@@ -2973,6 +2988,59 @@ export function WorkspacePage() {
     route.threadId,
     snapshot.transport.mode,
     snapshot.transport.status,
+  ]);
+
+  useEffect(() => {
+    if (
+      showStartupConnectionLoader ||
+      route.threadId ||
+      snapshot.transport.mode !== "live" ||
+      snapshot.transport.status !== "connected"
+    ) {
+      setInitialThreadCatalogSettled(false);
+      return;
+    }
+
+    if (uniqueThreads.length > 0) {
+      setInitialThreadCatalogSettled(true);
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer = 0;
+    let attempts = 0;
+
+    setInitialThreadCatalogSettled(false);
+
+    const refreshThreads = () => {
+      attempts += 1;
+      void actions.refreshThreads().finally(() => {
+        if (cancelled) {
+          return;
+        }
+
+        if (attempts >= 4) {
+          setInitialThreadCatalogSettled(true);
+          return;
+        }
+
+        retryTimer = window.setTimeout(refreshThreads, 700);
+      });
+    };
+
+    refreshThreads();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(retryTimer);
+    };
+  }, [
+    route.threadId,
+    actions,
+    showStartupConnectionLoader,
+    snapshot.transport.mode,
+    snapshot.transport.status,
+    uniqueThreads.length,
   ]);
 
   useEffect(() => {
@@ -5754,6 +5822,13 @@ export function WorkspacePage() {
   const fullPageConversationLoader =
     !showStartupConnectionLoader &&
     routeConversationLoaderPending;
+  const fullPageThreadCatalogLoader =
+    !showStartupConnectionLoader &&
+    !route.threadId &&
+    snapshot.transport.mode === "live" &&
+    snapshot.transport.status === "connected" &&
+    uniqueThreads.length === 0 &&
+    !initialThreadCatalogSettled;
 
   if (showStartupConnectionLoader) {
     return (
@@ -5791,6 +5866,22 @@ export function WorkspacePage() {
             "Syncing transcript",
           ]}
           metaText={`Restoring ${shorten(activeThreadLabel, 42)}`}
+        />
+      </main>
+    );
+  }
+
+  if (fullPageThreadCatalogLoader) {
+    return (
+      <main className="workspace-shell connection-loading-shell">
+        <ConnectionLoadingState
+          messages={[
+            "Loading sessions",
+            "Reading workspace state",
+            "Syncing sidebar",
+            "Preparing conversation",
+          ]}
+          metaText="Restoring recent workspace sessions"
         />
       </main>
     );

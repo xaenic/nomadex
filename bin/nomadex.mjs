@@ -382,6 +382,9 @@ const promptForUpdate = async () => {
     console.log(
       `[nomadexapp] Update available: ${packageJson.version} -> ${latestVersion}`,
     );
+    console.log(
+      "[nomadexapp] Restarting through `@latest` is more reliable than relying on a cached bare `npx` install.",
+    );
     const rl = createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -401,7 +404,7 @@ const promptForUpdate = async () => {
     const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
     const restart = spawn(
       npxCommand,
-      ["--yes", `${packageJson.name}@${latestVersion}`, ...process.argv.slice(2)],
+      ["--yes", `${packageJson.name}@latest`, ...process.argv.slice(2)],
       {
         stdio: "inherit",
         env: process.env,

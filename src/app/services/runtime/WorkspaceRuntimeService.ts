@@ -2894,6 +2894,24 @@ export class WorkspaceRuntimeService {
     }
   }
 
+  async refreshThreads(limit = 60) {
+    const response = await this.request<{ data: Array<Thread>; nextCursor: string | null }>(
+      "thread/list",
+      { limit },
+    );
+
+    this.mutate((snapshot) => {
+      snapshot.threads = sortThreads(
+        response.data.map((thread) =>
+          mergeThread(
+            thread,
+            snapshot.threads.find((entry) => entry.thread.id === thread.id),
+          ),
+        ),
+      );
+    });
+  }
+
   private async readConfigWithRecovery() {
     try {
       return await this.request<ConfigReadResponse>("config/read", {});

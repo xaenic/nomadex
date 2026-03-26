@@ -115,6 +115,7 @@ export type WorkspaceActions = {
       cwd?: string;
     },
   ) => Promise<string>;
+  refreshThreads: () => Promise<void>;
   resumeThread: (threadId: string) => Promise<void>;
   interruptTurn: (threadId: string) => Promise<boolean>;
   sendComposer: (
