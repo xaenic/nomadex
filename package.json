@@ -1,6 +1,6 @@
 {
   "name": "nomadexapp",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Remote browser workspace for local coding agents",
   "license": "MIT",
   "type": "module",
