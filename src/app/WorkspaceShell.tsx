@@ -2657,6 +2657,41 @@ export function WorkspacePage() {
     [activeThread, activeTurns, snapshot.transport.mode, snapshot.transport.status],
   );
 
+  const routeConversationLoaderPending = useMemo(() => {
+    if (
+      route.section !== "chat" ||
+      !route.threadId ||
+      snapshot.transport.mode !== "live"
+    ) {
+      return false;
+    }
+
+    if (snapshot.transport.status === "connecting") {
+      return true;
+    }
+
+    if (snapshot.transport.status !== "connected") {
+      return false;
+    }
+
+    if (!activeThread || activeThread.thread.id !== route.threadId) {
+      const routeThreadKnown = snapshot.threads.some(
+        (record) => record.thread.id === route.threadId,
+      );
+      return snapshot.threads.length === 0 || routeThreadKnown;
+    }
+
+    return isExistingThreadHistoryPending(activeThread, activeTurns);
+  }, [
+    activeThread,
+    activeTurns,
+    route.section,
+    route.threadId,
+    snapshot.threads,
+    snapshot.transport.mode,
+    snapshot.transport.status,
+  ]);
+
   const existingThreadHistoryPending = useMemo(
     () =>
       route.threadId === activeThread?.thread.id &&
@@ -2678,12 +2713,12 @@ export function WorkspacePage() {
       return;
     }
 
-    if (activeConversationHydrationPending) {
+    if (routeConversationLoaderPending) {
       return;
     }
 
     setShowStartupConnectionLoader(false);
-  }, [activeConversationHydrationPending, showStartupConnectionLoader, snapshot.transport.status]);
+  }, [routeConversationLoaderPending, showStartupConnectionLoader, snapshot.transport.status]);
 
   const requestQueuePump = useCallback(() => {
     setQueueWakeSignal((current) => current + 1);
@@ -5714,11 +5749,11 @@ export function WorkspacePage() {
     );
   };
 
-  const startupLoaderShowingConversation = showStartupConnectionLoader && activeConversationHydrationPending;
+  const startupLoaderShowingConversation =
+    showStartupConnectionLoader && routeConversationLoaderPending;
   const fullPageConversationLoader =
     !showStartupConnectionLoader &&
-    route.section === "chat" &&
-    existingThreadHistoryPending;
+    routeConversationLoaderPending;
 
   if (showStartupConnectionLoader) {
     return (
