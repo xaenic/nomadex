@@ -76,6 +76,7 @@ import {
 import {
   buildProviderFilesUploadRoot,
   buildProviderOptimisticFileUploadPath,
+  buildProviderOptimisticUploadPath,
   buildProviderUploadRoot,
   getProviderAdapter,
   isProviderId,
@@ -3104,7 +3105,11 @@ export class WorkspaceRuntimeService {
       }
 
       const filename = `${Date.now()}-${sanitizeFilename(image.name)}`;
-      const path = `${uploadDir}/${filename}`;
+      const path = buildProviderOptimisticUploadPath(
+        this.getActiveProviderAdapter(),
+        cwd,
+        filename,
+      );
 
       await this.request("fs/writeFile", {
         path,
@@ -3132,7 +3137,11 @@ export class WorkspaceRuntimeService {
 
     for (const file of files) {
       const filename = `${Date.now()}-${sanitizeFilename(file.name)}`;
-      const path = `${uploadDir}/${filename}`;
+      const path = buildProviderOptimisticFileUploadPath(
+        this.getActiveProviderAdapter(),
+        cwd,
+        filename,
+      );
       const buffer = await file.file.arrayBuffer();
 
       await this.request("fs/writeFile", {

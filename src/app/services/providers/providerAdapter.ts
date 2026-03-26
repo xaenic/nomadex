@@ -33,8 +33,29 @@ export const GENERIC_REQUEST_MARKER_PATTERN =
 
 const trimWorkspaceRoot = (cwd: string) => cwd.replace(/[\\/]+$/u, "");
 
-const joinWorkspacePath = (cwd: string, relativePath: string) =>
-  `${trimWorkspaceRoot(cwd)}/${relativePath.replace(/^\/+/u, "")}`;
+const isWindowsWorkspacePath = (value: string) =>
+  /^[a-z]:[\\/]/iu.test(value) || value.startsWith("\\\\");
+
+const normalizeRelativeWorkspacePath = (
+  relativePath: string,
+  useWindowsSeparator: boolean,
+) => {
+  const trimmed = relativePath.replace(/^[\\/]+/u, "");
+  return useWindowsSeparator
+    ? trimmed.replace(/[\\/]+/gu, "\\")
+    : trimmed.replace(/[\\/]+/gu, "/");
+};
+
+const joinWorkspacePath = (cwd: string, relativePath: string) => {
+  const root = trimWorkspaceRoot(cwd);
+  const useWindowsSeparator = isWindowsWorkspacePath(root);
+  const separator = useWindowsSeparator ? "\\" : "/";
+  const normalizedPath = normalizeRelativeWorkspacePath(
+    relativePath,
+    useWindowsSeparator,
+  );
+  return `${root}${separator}${normalizedPath}`;
+};
 
 export const buildProviderUploadRoot = (
   adapter: ProviderAdapter,
@@ -50,13 +71,13 @@ export const buildProviderOptimisticUploadPath = (
   adapter: ProviderAdapter,
   cwd: string,
   fileName: string,
-) => `${buildProviderUploadRoot(adapter, cwd)}/${fileName}`;
+) => joinWorkspacePath(buildProviderUploadRoot(adapter, cwd), fileName);
 
 export const buildProviderOptimisticFileUploadPath = (
   adapter: ProviderAdapter,
   cwd: string,
   fileName: string,
-) => `${buildProviderFilesUploadRoot(adapter, cwd)}/${fileName}`;
+) => joinWorkspacePath(buildProviderFilesUploadRoot(adapter, cwd), fileName);
 
 export const buildProviderImageUrl = (
   adapter: ProviderAdapter,
