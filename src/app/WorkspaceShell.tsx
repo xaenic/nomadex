@@ -702,6 +702,14 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       void runtime.connect().catch(() => undefined);
     };
 
+    const ensureForegroundBridge = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      void runtime.ensureLiveBridge().catch(() => undefined);
+    };
+
     reconnect();
 
     const reconnectTimer = window.setInterval(() => {
@@ -710,17 +718,18 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
+        ensureForegroundBridge();
         reconnect();
       }
     };
 
-    window.addEventListener("focus", reconnect);
+    window.addEventListener("focus", ensureForegroundBridge);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       unsubscribe();
       window.clearInterval(reconnectTimer);
-      window.removeEventListener("focus", reconnect);
+      window.removeEventListener("focus", ensureForegroundBridge);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       runtime.disconnect();
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
@@ -2041,6 +2050,7 @@ export function WorkspacePage() {
   const initialTransportConnectSeenRef = useRef(false);
   const transportConnectedOnceRef = useRef(false);
   const previousTransportStatusRef = useRef(snapshot.transport.status);
+  const previousTransportResyncStatusRef = useRef(snapshot.transport.status);
   const editorFileChangeActivityKeyRef = useRef("");
   const editorTrackingTargetRef = useRef("");
   const pendingChatRestoreThreadIdRef = useRef<string | null>(null);
@@ -3880,6 +3890,29 @@ export function WorkspacePage() {
 
     toastTimersRef.current[id] = timer;
   }, []);
+
+  useEffect(() => {
+    const previousStatus = previousTransportResyncStatusRef.current;
+    const currentStatus = snapshot.transport.status;
+    const restored =
+      snapshot.transport.mode === "live" &&
+      previousStatus !== "connected" &&
+      currentStatus === "connected";
+
+    if (restored) {
+      void actions.refreshThreads().catch(() => undefined);
+      if (route.threadId) {
+        void actions.resumeThread(route.threadId).catch(() => undefined);
+      }
+    }
+
+    previousTransportResyncStatusRef.current = currentStatus;
+  }, [
+    actions,
+    route.threadId,
+    snapshot.transport.mode,
+    snapshot.transport.status,
+  ]);
 
   useEffect(() => {
     const previousStatus = previousTransportStatusRef.current;

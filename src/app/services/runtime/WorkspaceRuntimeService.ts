@@ -95,6 +95,12 @@ type PendingRequest = {
   reject: (error: unknown) => void;
 };
 
+type RequestOptions = {
+  timeoutMs?: number;
+  timeoutError?: string;
+  closeSocketOnTimeout?: boolean;
+};
+
 type ServerEnvelope = {
   id?: string | number;
   method?: string;
@@ -2703,7 +2709,11 @@ export class WorkspaceRuntimeService {
     }
   };
 
-  private async request<TResult>(method: string, params: unknown): Promise<TResult> {
+  private async request<TResult>(
+    method: string,
+    params: unknown,
+    options?: RequestOptions,
+  ): Promise<TResult> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("Local agent bridge is not connected.");
     }
@@ -2712,6 +2722,31 @@ export class WorkspaceRuntimeService {
     const payload = { id, method, params };
 
     return await new Promise<TResult>((resolve, reject) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const finishResolve = (value: TResult) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+        resolve(value);
+      };
+      const finishReject = (error: unknown) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+        reject(error);
+      };
+
       this.pending.set(id, {
         resolve: (value: unknown) => {
           if (
@@ -2730,11 +2765,37 @@ export class WorkspaceRuntimeService {
             });
           }
 
-          (resolve as (nextValue: unknown) => void)(value);
+          finishResolve(value as TResult);
         },
-        reject,
+        reject: (error) => {
+          finishReject(error);
+        },
       });
-      this.socket?.send(JSON.stringify(payload));
+
+      if (typeof options?.timeoutMs === "number" && options.timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          this.pending.delete(id);
+          finishReject(
+            new Error(
+              options.timeoutError?.trim() || `${method} timed out.`,
+            ),
+          );
+          if (options.closeSocketOnTimeout && this.socket?.readyState === WebSocket.OPEN) {
+            try {
+              this.socket.close();
+            } catch {
+              // Ignore cleanup errors for timed-out live sockets.
+            }
+          }
+        }, options.timeoutMs);
+      }
+
+      try {
+        this.socket?.send(JSON.stringify(payload));
+      } catch (error) {
+        this.pending.delete(id);
+        finishReject(error);
+      }
     });
   }
 
@@ -2827,6 +2888,40 @@ export class WorkspaceRuntimeService {
         this.connectPromise = null;
       }
     }
+  }
+
+  async ensureLiveBridge() {
+    const currentSocket = this.socket;
+    const healthySocket =
+      currentSocket?.readyState === WebSocket.OPEN &&
+      this.snapshot.transport.mode === "live" &&
+      this.snapshot.transport.status === "connected";
+
+    if (healthySocket) {
+      try {
+        await this.request(
+          "thread/list",
+          { limit: 1 },
+          {
+            timeoutMs: 2500,
+            timeoutError: "Connection lost. Reconnecting…",
+            closeSocketOnTimeout: true,
+          },
+        );
+        return;
+      } catch {
+        if (currentSocket && this.socket === currentSocket) {
+          this.failLiveConnection(currentSocket, "Connection lost. Reconnecting…");
+          try {
+            currentSocket.close();
+          } catch {
+            // Ignore cleanup errors for failed live sockets.
+          }
+        }
+      }
+    }
+
+    await this.connect();
   }
 
   private async bootstrap() {
