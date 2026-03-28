@@ -45,6 +45,117 @@ const CONTENT_TYPES = {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const ansiEnabled = Boolean(
+  process.stdout.isTTY &&
+    process.env.TERM !== "dumb" &&
+    process.env.NO_COLOR === undefined,
+);
+
+const ansi = {
+  bold: "\u001B[1m",
+  dim: "\u001B[2m",
+  reset: "\u001B[0m",
+};
+
+const colorRgb = (red, green, blue) =>
+  `\u001B[38;2;${red};${green};${blue}m`;
+
+const paint = (text, ...styles) => {
+  if (!ansiEnabled || styles.length === 0) {
+    return text;
+  }
+  return `${styles.join("")}${text}${ansi.reset}`;
+};
+
+const interpolateColor = (from, to, t) =>
+  from.map((start, index) =>
+    Math.round(start + (to[index] - start) * Math.min(1, Math.max(0, t))),
+  );
+
+const gradientText = (text, from, to, ...styles) => {
+  if (!ansiEnabled) {
+    return text;
+  }
+
+  const steps = Math.max(1, text.length - 1);
+  let output = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const [red, green, blue] = interpolateColor(from, to, index / steps);
+    output += `${styles.join("")}${colorRgb(red, green, blue)}${text[index]}`;
+  }
+  return `${output}${ansi.reset}`;
+};
+
+const centerText = (text, width) => {
+  if (text.length >= width) {
+    return text;
+  }
+  const leftPadding = Math.floor((width - text.length) / 2);
+  const rightPadding = width - text.length - leftPadding;
+  return `${" ".repeat(leftPadding)}${text}${" ".repeat(rightPadding)}`;
+};
+
+const printStartupBanner = () => {
+  const innerWidth = 66;
+  const accentStart = [94, 235, 255];
+  const accentEnd = [220, 128, 255];
+  const borderColor = [82, 105, 138];
+  const bannerLines = [
+    { color: [94, 235, 255], text: " _   _   ___   __  __    _    ____   _____  __  __" },
+    { color: [106, 218, 255], text: "| \\ | | / _ \\ |  \\/  |  / \\  |  _ \\ | ____| \\ \\/ /" },
+    { color: [131, 194, 255], text: "|  \\| || | | || |\\/| | / _ \\ | | | ||  _|    \\  / " },
+    { color: [170, 160, 255], text: "| |\\  || |_| || |  | |/ ___ \\| |_| || |___   /  \\ " },
+    { color: [220, 128, 255], text: "|_| \\_| \\___/ |_|  |_/_/   \\_\\____/ |_____| /_/\\_\\" },
+  ];
+  const metaLine = "remote workspace for local coding agents";
+  const providerLine = "codex  opencode  qwen code  claude code  antigravity";
+  const topBorder = gradientText(
+    `+${"-".repeat(innerWidth + 2)}+`,
+    accentStart,
+    accentEnd,
+    ansi.dim,
+  );
+  const bottomBorder = gradientText(
+    `+${"-".repeat(innerWidth + 2)}+`,
+    accentEnd,
+    accentStart,
+    ansi.dim,
+  );
+  const frameLine = (content, render = (value) => value) => {
+    const left = paint("|", ansi.dim, colorRgb(...borderColor));
+    const right = paint("|", ansi.dim, colorRgb(...borderColor));
+    return `${left} ${render(content.padEnd(innerWidth, " "))} ${right}`;
+  };
+
+  process.stdout.write("\n");
+  process.stdout.write(`${topBorder}\n`);
+  process.stdout.write(
+    `${frameLine(centerText("NOMADEX CLI", innerWidth), (value) =>
+      gradientText(value, accentStart, accentEnd, ansi.bold),
+    )}\n`,
+  );
+  process.stdout.write(`${frameLine(" ")}\n`);
+  for (const { color, text } of bannerLines) {
+    process.stdout.write(
+      `${frameLine(centerText(text, innerWidth), (value) =>
+        gradientText(value, color, accentEnd, ansi.bold),
+      )}\n`,
+    );
+  }
+  process.stdout.write(`${frameLine(" ")}\n`);
+  process.stdout.write(
+    `${frameLine(centerText(metaLine, innerWidth), (value) =>
+      paint(value, ansi.dim, colorRgb(149, 168, 194)),
+    )}\n`,
+  );
+  process.stdout.write(
+    `${frameLine(centerText(providerLine, innerWidth), (value) =>
+      paint(value, ansi.dim, colorRgb(103, 215, 208)),
+    )}\n`,
+  );
+  process.stdout.write(`${bottomBorder}\n\n`);
+};
+
 const parseArgs = (argv) => {
   const options = {
     host: process.env.NOMADEX_HOST ?? "0.0.0.0",
@@ -1304,6 +1415,7 @@ try {
     process.exit(0);
   }
 
+  printStartupBanner();
   ensureDistBuilt();
   await ensureAppServer();
   await ensureUiPortAvailable();
