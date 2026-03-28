@@ -1104,6 +1104,10 @@ const updateThreadRecord = (
   snapshot.threads = snapshot.threads.map((record) => (record.thread.id === threadId ? updater(record) : record));
 };
 
+const removeThreadRecord = (snapshot: DashboardData, threadId: string) => {
+  snapshot.threads = snapshot.threads.filter((record) => record.thread.id !== threadId);
+};
+
 const sortThreads = (threads: Array<ThreadRecord>) => [...threads].sort((left, right) => right.thread.updatedAt - left.thread.updatedAt);
 
 const upsertThreadRecord = (snapshot: DashboardData, record: ThreadRecord) => {
@@ -3027,6 +3031,77 @@ export class WorkspaceRuntimeService {
           ),
         ),
       );
+    });
+  }
+
+  private forgetThreadState(threadId: string) {
+    this.loadingThreads.delete(threadId);
+    this.resumedThreads.delete(threadId);
+
+    for (const [processId, meta] of this.standaloneTerminalMeta.entries()) {
+      if (meta.threadId === threadId) {
+        this.standaloneTerminalMeta.delete(processId);
+      }
+    }
+  }
+
+  async renameThread(threadId: string, name: string) {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      throw new Error("Thread name cannot be empty.");
+    }
+
+    const updatedAt = Math.floor(Date.now() / 1000);
+
+    if (isLocalProviderThreadId(threadId)) {
+      this.mutate((snapshot) => {
+        updateThreadRecord(snapshot, threadId, (record) => ({
+          ...record,
+          thread: {
+            ...record.thread,
+            name: normalizedName,
+            updatedAt,
+          },
+        }));
+        snapshot.threads = sortThreads(snapshot.threads);
+      });
+      return;
+    }
+
+    await this.request("thread/name/set", {
+      threadId,
+      name: normalizedName,
+    });
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, threadId, (record) => ({
+        ...record,
+        thread: {
+          ...record.thread,
+          name: normalizedName,
+          updatedAt,
+        },
+      }));
+      snapshot.threads = sortThreads(snapshot.threads);
+    });
+  }
+
+  async deleteThread(threadId: string) {
+    if (isLocalProviderThreadId(threadId)) {
+      this.forgetThreadState(threadId);
+      this.mutate((snapshot) => {
+        removeThreadRecord(snapshot, threadId);
+        snapshot.streams = snapshot.streams.filter((entry) => entry.threadId !== threadId);
+      });
+      return;
+    }
+
+    await this.request("thread/archive", { threadId });
+
+    this.forgetThreadState(threadId);
+    this.mutate((snapshot) => {
+      removeThreadRecord(snapshot, threadId);
+      snapshot.streams = snapshot.streams.filter((entry) => entry.threadId !== threadId);
     });
   }
 
@@ -6209,6 +6284,22 @@ console.log(qwenRoot);
             },
           }));
         });
+        return;
+      }
+
+      case "thread/archived":
+      case "thread/closed": {
+        const threadId = safeString(params.threadId);
+        this.forgetThreadState(threadId);
+        this.mutate((snapshot) => {
+          removeThreadRecord(snapshot, threadId);
+          snapshot.streams = snapshot.streams.filter((entry) => entry.threadId !== threadId);
+        });
+        return;
+      }
+
+      case "thread/unarchived": {
+        void this.refreshThreads().catch(() => undefined);
         return;
       }
 

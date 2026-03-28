@@ -117,6 +117,8 @@ export type WorkspaceActions = {
   ) => Promise<string>;
   refreshThreads: () => Promise<void>;
   resumeThread: (threadId: string) => Promise<void>;
+  renameThread: (threadId: string, name: string) => Promise<void>;
+  deleteThread: (threadId: string) => Promise<void>;
   interruptTurn: (threadId: string) => Promise<boolean>;
   sendComposer: (
     args: ComposerPayload & {

@@ -622,6 +622,30 @@ const copyText = async (value: string) => {
   textarea.remove();
 };
 
+const selectedTextWithin = (scope?: HTMLElement | null) => {
+  if (typeof window === "undefined" || !scope) {
+    return "";
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) {
+    return "";
+  }
+
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+  if (!anchorNode || !focusNode) {
+    return "";
+  }
+
+  if (!scope.contains(anchorNode) || !scope.contains(focusNode)) {
+    return "";
+  }
+
+  const text = selection.toString();
+  return text.trim() ? text : "";
+};
+
 const waitFor = (ms: number) =>
   new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
@@ -1032,6 +1056,65 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             fallbackOnLiveError: false,
           },
         ),
+      renameThread: async (threadId, name) => {
+        const preferLive = snapshotRef.current.transport.mode === "live";
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.renameThread(threadId, name);
+          },
+          async () => {
+            const normalizedName = name.trim();
+            if (!normalizedName) {
+              throw new Error("Thread name cannot be empty.");
+            }
+
+            mutateLocal((draft) => {
+              draft.threads = sortThreads(
+                draft.threads.map((record) =>
+                  record.thread.id === threadId
+                    ? {
+                        ...record,
+                        thread: {
+                          ...record.thread,
+                          name: normalizedName,
+                          updatedAt: Math.floor(Date.now() / 1000),
+                        },
+                      }
+                    : record,
+                ),
+              );
+            });
+          },
+          {
+            preferLive,
+            fallbackOnLiveError: false,
+          },
+        );
+      },
+      deleteThread: async (threadId) => {
+        const preferLive = snapshotRef.current.transport.mode === "live";
+        await withLiveFallback(
+          async () => {
+            const runtime = runtimeRef.current!;
+            await runtime.deleteThread(threadId);
+          },
+          async () => {
+            mutateLocal((draft) => {
+              draft.threads = draft.threads.filter(
+                (record) => record.thread.id !== threadId,
+              );
+              draft.streams = draft.streams.filter(
+                (entry) => entry.threadId !== threadId,
+              );
+            });
+          },
+          {
+            preferLive,
+            fallbackOnLiveError: false,
+          },
+        );
+      },
       interruptTurn: async (threadId) =>
         await withLiveFallback(
           async () => {
@@ -1987,7 +2070,7 @@ export function WorkspacePage() {
   const [quickIndex, setQuickIndex] = useState(0);
   const [queuedByThreadId, setQueuedByThreadId] = useState<Record<string, Array<QueuedComposerMessage>>>({});
   const [toasts, setToasts] = useState<Array<ToastItem>>([]);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: ThreadItem | null } | null>(null);
+  const [threadMenu, setThreadMenu] = useState<{ x: number; y: number; threadId: string } | null>(null);
   const [explorerPath, setExplorerPath] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
   const [editorHasUnsavedChanges, setEditorHasUnsavedChanges] = useState(false);
@@ -4247,6 +4330,7 @@ export function WorkspacePage() {
   );
 
   const openThreadFromSidebar = useCallback((threadId: string) => {
+    setThreadMenu(null);
     pendingChatRestoreThreadIdRef.current = null;
     pendingHistoryPrependRef.current = null;
     hydratedScrollKeyRef.current = null;
@@ -4271,6 +4355,37 @@ export function WorkspacePage() {
       });
     }
   }, [activeThreadId, navigateToThread, scrollChatToBottom]);
+
+  const clearThreadClientState = useCallback((threadId: string) => {
+    setQueuedByThreadId((current) => {
+      if (!(threadId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+    setVisibleTurnStartByThreadId((current) => {
+      if (!(threadId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+    setTabIds((current) => current.filter((entry) => entry !== threadId));
+    delete queueProcessingRef.current[threadId];
+    delete queueAwaitingIdleRef.current[threadId];
+    delete chatScrollStateRef.current[threadId];
+
+    const draftMap = readComposerDraftMap();
+    if (threadId in draftMap) {
+      delete draftMap[threadId];
+      writeComposerDraftMap(draftMap);
+    }
+  }, []);
 
   const openThreadFile = useCallback(
     (
@@ -4655,7 +4770,7 @@ export function WorkspacePage() {
         setModelPickerOpen(false);
         setThemePickerOpen(false);
         setProjectPickerOpen(false);
-        setContextMenu(null);
+        setThreadMenu(null);
         closeQuickPicker();
       }
     };
@@ -4671,8 +4786,8 @@ export function WorkspacePage() {
         return;
       }
 
-      if (!target.closest("#ctxmenu")) {
-        setContextMenu(null);
+      if (!target.closest("#threadmenu") && !target.closest(".si-more")) {
+        setThreadMenu(null);
       }
 
       if (!target.closest("#hmodel") && !target.closest("#mpicker")) {
@@ -5559,10 +5674,97 @@ export function WorkspacePage() {
     setToolbarShell(false);
   }, []);
   const handleCopy = useCallback(
-    (value: string) => {
-      void copyText(value).then(() => pushToast("Copied!", "ok"));
+    (value: string, scope?: HTMLElement | null) => {
+      const selected = selectedTextWithin(scope);
+      void copyText(selected || value).then(() => pushToast("Copied!", "ok"));
     },
     [pushToast],
+  );
+  const openThreadMenu = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, threadId: string) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const width = 154;
+      const left = Math.max(
+        8,
+        Math.min(rect.right - width, window.innerWidth - width - 8),
+      );
+      const top = Math.min(rect.bottom + 6, window.innerHeight - 8);
+
+      setThreadMenu((current) =>
+        current?.threadId === threadId ? null : { threadId, x: left, y: top },
+      );
+    },
+    [],
+  );
+  const renameThreadFromSidebar = useCallback(
+    async (threadId: string) => {
+      setThreadMenu(null);
+      const currentLabel =
+        threadLabelById[threadId] ??
+        uniqueThreads.find((entry) => entry.thread.id === threadId)?.thread.name ??
+        "Session";
+      const nextName = window.prompt("Rename session", currentLabel);
+      if (nextName === null) {
+        return;
+      }
+
+      const normalizedName = nextName.trim();
+      if (!normalizedName || normalizedName === currentLabel.trim()) {
+        return;
+      }
+
+      try {
+        await actions.renameThread(threadId, normalizedName);
+        pushToast("Session renamed", "ok");
+      } catch (error) {
+        pushToast(errorMessage(error, "Failed to rename session."), "err");
+      }
+    },
+    [actions, pushToast, threadLabelById, uniqueThreads],
+  );
+  const deleteThreadFromSidebar = useCallback(
+    async (threadId: string) => {
+      setThreadMenu(null);
+      const label = threadLabelById[threadId] ?? "this session";
+      const confirmed = window.confirm(
+        `Delete "${label}"? This archives the thread and removes it from the session list.`,
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const nextThreadId =
+        uniqueThreads.find((entry) => entry.thread.id !== threadId)?.thread.id ?? null;
+
+      try {
+        await actions.deleteThread(threadId);
+        clearThreadClientState(threadId);
+        if (threadId === activeThreadId) {
+          setSidebarOpen(false);
+          if (nextThreadId) {
+            navigateToThread(nextThreadId, "chat", { immediate: true });
+          } else {
+            void navigate({ to: "/threads" });
+          }
+        }
+        pushToast("Session deleted", "ok");
+      } catch (error) {
+        pushToast(errorMessage(error, "Failed to delete session."), "err");
+      }
+    },
+    [
+      actions,
+      activeThreadId,
+      clearThreadClientState,
+      navigate,
+      navigateToThread,
+      pushToast,
+      threadLabelById,
+      uniqueThreads,
+    ],
   );
   const handleTranscriptOpenFile = useCallback(
     (path: string, line?: number | null) => {
@@ -5597,14 +5799,6 @@ export function WorkspacePage() {
   const triggerSlash = useCallback((value: string) => {
     void runSlash(value);
   }, [runSlash]);
-  const openItemContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => {
-    event.preventDefault();
-    setContextMenu({
-      x: Math.min(event.clientX, window.innerWidth - 172),
-      y: Math.min(event.clientY, window.innerHeight - 212),
-      item,
-    });
-  }, []);
   const closeEditor = useCallback(() => {
     if (!activeThreadId) {
       return;
@@ -6149,15 +6343,26 @@ export function WorkspacePage() {
                 <div key={group}>
                   <div className="sgl">{group}</div>
                   {groupedThreads[group].map((entry) => (
-                    <button
-                      className={clsx("si", entry.thread.id === activeThreadId && "active")}
-                      key={entry.thread.id}
-                      type="button"
-                      onClick={() => openThreadFromSidebar(entry.thread.id)}
-                    >
-                      <span>{entry.thread.agentNickname ? "⑂" : "💬"}</span>
-                      <span className="si-t">{threadLabelById[entry.thread.id] ?? threadLabel(entry.thread)}</span>
-                    </button>
+                    <div className="si-row" key={entry.thread.id}>
+                      <button
+                        className={clsx("si", entry.thread.id === activeThreadId && "active")}
+                        type="button"
+                        onClick={() => openThreadFromSidebar(entry.thread.id)}
+                      >
+                        <span>{entry.thread.agentNickname ? "⑂" : "💬"}</span>
+                        <span className="si-t">{threadLabelById[entry.thread.id] ?? threadLabel(entry.thread)}</span>
+                      </button>
+                      <button
+                        aria-expanded={threadMenu?.threadId === entry.thread.id}
+                        aria-haspopup="menu"
+                        aria-label={`More actions for ${threadLabelById[entry.thread.id] ?? threadLabel(entry.thread)}`}
+                        className="si-more"
+                        type="button"
+                        onClick={(event) => openThreadMenu(event, entry.thread.id)}
+                      >
+                        ⋯
+                      </button>
+                    </div>
                   ))}
                 </div>
               ) : null,
@@ -6272,7 +6477,6 @@ export function WorkspacePage() {
                   activeTurns={renderedTurns}
                   existingThreadHistoryPending={existingThreadHistoryPending}
                   rollbackPendingTurnId={rollbackPendingTurnId}
-                  onContext={openItemContextMenu}
                   onCopy={handleCopy}
                   onEdit={fillComposer}
                   onFill={fillComposer}
@@ -6747,80 +6951,30 @@ export function WorkspacePage() {
         </div>
       ) : null}
 
-      {contextMenu ? (
+      {threadMenu ? (
         <div
-          id="ctxmenu"
+          id="threadmenu"
           className="show"
-          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          style={{ left: `${threadMenu.x}px`, top: `${threadMenu.y}px` }}
         >
           <button
             className="ctxi"
             type="button"
             onClick={() => {
-              const item = contextMenu.item;
-              if (item?.type === "agentMessage") {
-                void copyText(item.text).then(() => pushToast("Copied", "ok"));
-              }
-              if (item?.type === "userMessage") {
-                void copyText(
-                  getUserText(item, snapshot.settings.provider),
-                ).then(() => pushToast("Copied", "ok"));
-              }
-              setContextMenu(null);
+              void renameThreadFromSidebar(threadMenu.threadId);
             }}
           >
-            📋 Copy message
+            Rename session
           </button>
+          <div className="ctxs" />
           <button
-            className="ctxi"
+            className="ctxi danger"
             type="button"
             onClick={() => {
-              const item = contextMenu.item;
-              if (item?.type === "agentMessage") {
-                fillComposer(item.text);
-              }
-              if (item?.type === "userMessage") {
-                fillComposer(getUserText(item, snapshot.settings.provider));
-              }
-              setContextMenu(null);
+              void deleteThreadFromSidebar(threadMenu.threadId);
             }}
           >
-            ✏ Edit &amp; resend
-          </button>
-          <button className="ctxi" type="button" onClick={() => {
-            if (latestAgentMessage) {
-              fillComposer(latestAgentMessage.text);
-            }
-            setContextMenu(null);
-          }}>
-            🔄 Regenerate
-          </button>
-          <div className="ctxs" />
-          <button className="ctxi" type="button" onClick={() => {
-            void forkSession();
-            setContextMenu(null);
-          }}>
-            ⑂ /fork from here
-          </button>
-          <button className="ctxi" type="button" onClick={() => {
-            void runSlash("/plan");
-            setContextMenu(null);
-          }}>
-            📋 /plan from here
-          </button>
-          <button className="ctxi" type="button" onClick={() => {
-            setQuickMode("mention");
-            setQuickQuery("");
-            setContextMenu(null);
-          }}>
-            📎 /mention file
-          </button>
-          <div className="ctxs" />
-          <button className="ctxi danger" type="button" onClick={() => {
-            pushToast("Deleted", "");
-            setContextMenu(null);
-          }}>
-            🗑 Delete
+            Delete session
           </button>
         </div>
       ) : null}

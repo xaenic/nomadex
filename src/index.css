@@ -804,6 +804,13 @@ code {
   text-align: left;
 }
 
+.si-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
 .si:hover,
 .si:focus-visible {
   background: var(--bg3);
@@ -832,6 +839,29 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
+}
+
+.si-more {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: var(--tx3);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.si-row:hover .si-more,
+.si-row:focus-within .si-more,
+.si-more[aria-expanded="true"] {
+  color: var(--tx);
+}
+
+.si-more:hover,
+.si-more:focus-visible {
+  background: var(--bg3);
+  color: var(--tx);
+  outline: none;
 }
 
 .sbot {
@@ -1567,14 +1597,26 @@ code {
   font-size: 12.5px;
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .message-markdown {
   gap: 12px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .message-markdown-streaming {
   contain: content;
+}
+
+.message-markdown *,
+.message-code-block,
+.message-code-block *,
+.message-inline-code {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .message-markdown > * {
@@ -1830,6 +1872,16 @@ code {
 .mact:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .macts {
+    opacity: 1;
+  }
+
+  .msg.assistant .mact-aux {
+    display: none;
+  }
 }
 
 .mact:disabled:hover,
@@ -7383,6 +7435,17 @@ pre::-webkit-scrollbar-thumb {
 
 #ctxmenu.show {
   display: block;
+}
+
+#threadmenu {
+  position: fixed;
+  background: var(--panel-solid);
+  border: 1px solid var(--bdr2);
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 500;
+  min-width: 156px;
+  box-shadow: var(--shadow-lg);
 }
 
 .ctxi {

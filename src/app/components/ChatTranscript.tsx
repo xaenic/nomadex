@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import clsx from "clsx";
@@ -147,7 +146,6 @@ export const ChatTranscript = memo(function ChatTranscript({
   onFork,
   onPlan,
   onEdit,
-  onContext,
   onOpenFile,
   providerId,
 }: {
@@ -161,11 +159,10 @@ export const ChatTranscript = memo(function ChatTranscript({
   onRollback: (turnId: string) => void;
   onFill: (value: string) => void;
   onSlash: (value: string) => void;
-  onCopy: (value: string) => void;
+  onCopy: (value: string, scope?: HTMLElement | null) => void;
   onFork: () => void;
   onPlan: () => void;
   onEdit: (value: string) => void;
-  onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
   onOpenFile: (path: string, line?: number | null) => void;
   providerId?: ProviderId;
 }) {
@@ -222,7 +219,6 @@ export const ChatTranscript = memo(function ChatTranscript({
               <ThreadItemView
                 item={item}
                 key={item.id}
-                onContext={onContext}
                 onCopy={onCopy}
                 onEdit={onEdit}
                 onFork={onFork}
@@ -892,7 +888,6 @@ const ThreadItemView = memo(function ThreadItemView({
   onRollback,
   onReview,
   onEdit,
-  onContext,
   onOpenFile,
   providerId,
   turnId,
@@ -906,13 +901,12 @@ const ThreadItemView = memo(function ThreadItemView({
   streaming?: boolean;
   textVisible?: number;
   outputVisible?: number;
-  onCopy: (value: string) => void;
+  onCopy: (value: string, scope?: HTMLElement | null) => void;
   onFork: () => void;
   onPlan: () => void;
   onRollback: (turnId: string) => void;
   onReview: (diffId?: string) => void;
   onEdit: (value: string) => void;
-  onContext: (event: ReactMouseEvent<HTMLElement>, item: ThreadItem) => void;
   onOpenFile: (path: string, line?: number | null) => void;
   providerId?: ProviderId;
   turnId: string;
@@ -934,6 +928,7 @@ const ThreadItemView = memo(function ThreadItemView({
   const previousCommandStatusRef = useRef<string | null>(
     item.type === "commandExecution" ? item.status : null,
   );
+  const messageBodyRef = useRef<HTMLDivElement | null>(null);
 
   const commandStatus = item.type === "commandExecution" ? item.status : null;
 
@@ -996,8 +991,8 @@ const ThreadItemView = memo(function ThreadItemView({
     );
 
     return (
-      <div className="msg user" onContextMenu={(event) => onContext(event, item)}>
-        <div className="mb">
+      <div className="msg user">
+        <div className="mb" ref={messageBodyRef}>
           {display.images.length > 0 ? (
             <div className="message-image-list">
               {display.images.map((imageUrl, index) => {
@@ -1117,7 +1112,12 @@ const ThreadItemView = memo(function ThreadItemView({
               )}
             </button>
           ) : null}
-          <button className="mact" type="button" onClick={() => onCopy(display.text)}>
+          <button
+            className="mact"
+            type="button"
+            onClick={() => onCopy(display.text, messageBodyRef.current)}
+            onMouseDown={(event) => event.preventDefault()}
+          >
             📋 Copy
           </button>
           <button className="mact" type="button" onClick={() => onEdit(display.text)}>
@@ -1135,14 +1135,13 @@ const ThreadItemView = memo(function ThreadItemView({
     return (
       <div
         className={clsx("msg assistant", streaming && "streaming")}
-        onContextMenu={(event) => onContext(event, item)}
       >
         <div className="mh">
           <div className="mav a">⬡</div>
           <span className="mn">{ASSISTANT_LABEL}</span>
           <span className="mt">{turnStatus === "inProgress" ? "live" : turnStatus}</span>
         </div>
-        <div className="mb">
+        <div className="mb" ref={messageBodyRef}>
           {text ? (
             streaming ? (
               <MessageMarkdownFlow
@@ -1162,13 +1161,18 @@ const ThreadItemView = memo(function ThreadItemView({
           ) : null}
         </div>
         <div className="macts">
-          <button className="mact" type="button" onClick={() => onFork()}>
+          <button className="mact mact-aux" type="button" onClick={() => onFork()}>
             ⑂ /fork
           </button>
-          <button className="mact" type="button" onClick={() => onPlan()}>
+          <button className="mact mact-aux" type="button" onClick={() => onPlan()}>
             📋 /plan
           </button>
-          <button className="mact" type="button" onClick={() => onCopy(item.text)}>
+          <button
+            className="mact"
+            type="button"
+            onClick={() => onCopy(item.text, messageBodyRef.current)}
+            onMouseDown={(event) => event.preventDefault()}
+          >
             📋
           </button>
         </div>
