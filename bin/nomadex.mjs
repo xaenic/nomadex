@@ -95,20 +95,59 @@ const centerText = (text, width) => {
   return `${" ".repeat(leftPadding)}${text}${" ".repeat(rightPadding)}`;
 };
 
+const wrapText = (text, width) => {
+  const words = text.trim().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) {
+    return [];
+  }
+
+  const lines = [];
+  let current = words[0];
+
+  for (let index = 1; index < words.length; index += 1) {
+    const nextWord = words[index];
+    if (`${current} ${nextWord}`.length <= width) {
+      current = `${current} ${nextWord}`;
+      continue;
+    }
+
+    lines.push(current);
+    current = nextWord;
+  }
+
+  lines.push(current);
+  return lines;
+};
+
 const printStartupBanner = () => {
-  const innerWidth = 66;
+  const terminalWidth =
+    typeof process.stdout.columns === "number" && process.stdout.columns > 0
+      ? process.stdout.columns
+      : 80;
+  const innerWidth = Math.max(28, Math.min(66, terminalWidth - 4));
   const accentStart = [94, 235, 255];
   const accentEnd = [220, 128, 255];
   const borderColor = [82, 105, 138];
-  const bannerLines = [
+  const wideBannerLines = [
     { color: [94, 235, 255], text: " _   _   ___   __  __    _    ____   _____  __  __" },
     { color: [106, 218, 255], text: "| \\ | | / _ \\ |  \\/  |  / \\  |  _ \\ | ____| \\ \\/ /" },
     { color: [131, 194, 255], text: "|  \\| || | | || |\\/| | / _ \\ | | | ||  _|    \\  / " },
     { color: [170, 160, 255], text: "| |\\  || |_| || |  | |/ ___ \\| |_| || |___   /  \\ " },
     { color: [220, 128, 255], text: "|_| \\_| \\___/ |_|  |_/_/   \\_\\____/ |_____| /_/\\_\\" },
   ];
+  const compactBannerLines = [
+    { color: [94, 235, 255], text: " _  _  ___  __  __   _   ___  _____ " },
+    { color: [120, 205, 255], text: "| \\| |/ _ \\|  \\/  | /_\\ |   \\| __|" },
+    { color: [166, 164, 255], text: "| .` | (_) | |\\/| |/ _ \\| |) | _| " },
+    { color: [220, 128, 255], text: "|_|\\_|\\___/|_|  |_/_/ \\_\\___/|___|" },
+  ];
   const metaLine = "remote workspace for local coding agents";
   const providerLine = "codex  opencode  qwen code  claude code  antigravity";
+  const bannerLines = wideBannerLines.every((line) => line.text.length <= innerWidth)
+    ? wideBannerLines
+    : compactBannerLines.every((line) => line.text.length <= innerWidth)
+      ? compactBannerLines
+      : [];
   const topBorder = gradientText(
     `+${"-".repeat(innerWidth + 2)}+`,
     accentStart,
@@ -142,17 +181,24 @@ const printStartupBanner = () => {
       )}\n`,
     );
   }
+  if (bannerLines.length > 0) {
+    process.stdout.write(`${frameLine(" ")}\n`);
+  }
+  for (const line of wrapText(metaLine, innerWidth)) {
+    process.stdout.write(
+      `${frameLine(centerText(line, innerWidth), (value) =>
+        paint(value, ansi.dim, colorRgb(149, 168, 194)),
+      )}\n`,
+    );
+  }
   process.stdout.write(`${frameLine(" ")}\n`);
-  process.stdout.write(
-    `${frameLine(centerText(metaLine, innerWidth), (value) =>
-      paint(value, ansi.dim, colorRgb(149, 168, 194)),
-    )}\n`,
-  );
-  process.stdout.write(
-    `${frameLine(centerText(providerLine, innerWidth), (value) =>
-      paint(value, ansi.dim, colorRgb(103, 215, 208)),
-    )}\n`,
-  );
+  for (const line of wrapText(providerLine, innerWidth)) {
+    process.stdout.write(
+      `${frameLine(centerText(line, innerWidth), (value) =>
+        paint(value, ansi.dim, colorRgb(103, 215, 208)),
+      )}\n`,
+    );
+  }
   process.stdout.write(`${bottomBorder}\n\n`);
 };
 
