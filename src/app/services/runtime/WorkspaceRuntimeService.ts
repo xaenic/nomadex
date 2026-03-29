@@ -1,6 +1,7 @@
 import type { Personality } from "../../../protocol/Personality";
 import type { FuzzyFileSearchResult } from "../../../protocol/FuzzyFileSearchResult";
 import type { CollaborationMode } from "../../../protocol/CollaborationMode";
+import type { RequestId } from "../../../protocol/RequestId";
 import type {
   AdditionalPermissionProfile,
   CollaborationModeListResponse,
@@ -87,6 +88,7 @@ import {
   type ProviderId,
 } from "../providers";
 import { getUserMessageDisplay } from "../presentation/workspacePresentationService";
+import type { QuestionAnswerPayload } from "../../workspaceTypes";
 
 type EventListener = (snapshot: DashboardData) => void;
 
@@ -146,6 +148,7 @@ const providerUnavailableMessage = (adapter: ProviderAdapter) =>
   `${adapter.displayName} is scaffolded in Nomadex but its transport is not wired yet.`;
 
 const THREAD_STEER_STORAGE_KEY = "nomadex-thread-steers";
+const PENDING_QUESTION_ANSWERS_STORAGE_KEY = "nomadex-pending-question-answers";
 const MAX_STEER_HISTORY_PER_THREAD = 24;
 
 const LOCAL_PROVIDER_THREAD_PREFIX = "local-provider:";
@@ -177,6 +180,232 @@ const relativeNow = () => "just now";
 
 const canUseWindowStorage = () =>
   typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+
+const normalizeStoredQuestionAnswerPayload = (value: unknown): QuestionAnswerPayload | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).flatMap(([questionId, answerValue]) => {
+    if (!answerValue || typeof answerValue !== "object") {
+      return [];
+    }
+
+    const answers = Array.isArray((answerValue as Record<string, unknown>).answers)
+      ? ((answerValue as Record<string, unknown>).answers as Array<unknown>)
+          .map((entry) => safeString(entry))
+          .filter(Boolean)
+      : [];
+
+    return questionId.trim() ? [[questionId, { answers }]] : [];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+};
+
+const readStoredPendingQuestionAnswers = (): Record<string, QuestionAnswerPayload> => {
+  if (!canUseWindowStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PENDING_QUESTION_ANSWERS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).flatMap(([key, payload]) => {
+        const normalized = normalizeStoredQuestionAnswerPayload(payload);
+        return normalized ? [[key, normalized]] : [];
+      }),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const writeStoredPendingQuestionAnswers = (
+  key: string,
+  payload: QuestionAnswerPayload | null,
+) => {
+  if (!canUseWindowStorage()) {
+    return;
+  }
+
+  try {
+    const nextMap = readStoredPendingQuestionAnswers();
+    if (!payload || Object.keys(payload).length === 0) {
+      delete nextMap[key];
+    } else {
+      nextMap[key] = payload;
+    }
+
+    if (Object.keys(nextMap).length === 0) {
+      window.localStorage.removeItem(PENDING_QUESTION_ANSWERS_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(
+      PENDING_QUESTION_ANSWERS_STORAGE_KEY,
+      JSON.stringify(nextMap),
+    );
+  } catch {
+    // Ignore storage failures; the live in-memory submit path still runs.
+  }
+};
+
+const buildPendingQuestionStorageKey = (
+  threadId: string,
+  turnId: string | null | undefined,
+  itemId: string | null | undefined,
+  requestId: string,
+) => `${threadId}:${turnId || itemId || requestId}`;
+
+const buildQuestionRequestSignature = (
+  threadId: string,
+  turnId: string | null | undefined,
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isSecret: boolean;
+    isOther: boolean;
+    options: Array<{
+      label: string;
+      description: string;
+    }>;
+  }> | undefined,
+) =>
+  JSON.stringify({
+    threadId,
+    turnId: turnId || "",
+    questions: (questions ?? []).map((question) => ({
+      id: question.id,
+      header: question.header,
+      question: question.question,
+      isSecret: question.isSecret,
+      isOther: question.isOther,
+      options: question.options.map((option) => ({
+        label: option.label,
+        description: option.description,
+      })),
+    })),
+  });
+
+const normalizeQuestionStorageQuestions = (
+  value: unknown,
+): Array<{
+  id: string;
+  header: string;
+  question: string;
+  isSecret: boolean;
+  isOther: boolean;
+  options: Array<{
+    label: string;
+    description: string;
+  }>;
+}> =>
+  Array.isArray(value)
+    ? value.map((question) => {
+        const questionRecord = question as Record<string, unknown>;
+        return {
+          id: safeString(questionRecord.id),
+          header: safeString(questionRecord.header),
+          question: safeString(questionRecord.question),
+          isSecret: Boolean(questionRecord.isSecret),
+          isOther: Boolean(questionRecord.isOther),
+          options: Array.isArray(questionRecord.options)
+            ? questionRecord.options.map((option) => ({
+                label: safeString((option as Record<string, unknown>).label),
+                description: safeString((option as Record<string, unknown>).description),
+              }))
+            : [],
+        };
+      })
+    : [];
+
+const buildPendingQuestionStorageKeys = (args: {
+  threadId: string;
+  turnId?: string | null;
+  itemId?: string | null;
+  requestId: string;
+  questions?: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isSecret: boolean;
+    isOther: boolean;
+    options: Array<{
+      label: string;
+      description: string;
+    }>;
+  }>;
+}) => {
+  const keys = new Set<string>();
+  const threadId = args.threadId.trim();
+  if (!threadId) {
+    return [];
+  }
+
+  const turnId = args.turnId?.trim() || null;
+  const itemId = args.itemId?.trim() || null;
+  const requestId = args.requestId.trim();
+
+  if (turnId && args.questions && args.questions.length > 0) {
+    keys.add(
+      `${threadId}:signature:${buildQuestionRequestSignature(threadId, turnId, args.questions)}`,
+    );
+  }
+
+  if (turnId && itemId) {
+    keys.add(`${threadId}:turn-item:${turnId}:${itemId}`);
+  }
+
+  if (itemId) {
+    keys.add(`${threadId}:item:${itemId}`);
+  }
+
+  if (turnId) {
+    keys.add(`${threadId}:turn:${turnId}`);
+  }
+
+  keys.add(buildPendingQuestionStorageKey(threadId, turnId, itemId, requestId));
+
+  return [...keys];
+};
+
+const readStoredPendingQuestionAnswerByKeys = (
+  keys: Array<string>,
+): QuestionAnswerPayload | null => {
+  if (keys.length === 0) {
+    return null;
+  }
+
+  const stored = readStoredPendingQuestionAnswers();
+  for (const key of keys) {
+    const payload = stored[key];
+    if (payload && Object.keys(payload).length > 0) {
+      return payload;
+    }
+  }
+
+  return null;
+};
+
+const writeStoredPendingQuestionAnswersForKeys = (
+  keys: Array<string>,
+  payload: QuestionAnswerPayload | null,
+) => {
+  for (const key of [...new Set(keys)].filter(Boolean)) {
+    writeStoredPendingQuestionAnswers(key, payload);
+  }
+};
 
 const normalizeStoredSteerEntry = (entry: unknown): SteerHistoryEntry | null => {
   if (!entry || typeof entry !== "object") {
@@ -1141,12 +1370,20 @@ const mergeThread = (thread: Thread, current?: ThreadRecord): ThreadRecord => {
         turns: mergedTurns,
       };
 
+  const preservePendingApprovals =
+    mergedThread.status.type === "active" &&
+    mergedThread.status.activeFlags.some(
+      (flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput",
+    );
+
   return {
     thread: mergedThread,
     plan: current?.plan ?? createDefaultPlan(mergedThread),
     steers: mergeSteerHistory(current?.steers, readStoredThreadSteers(thread.id)),
     steerSuggestions: current?.steerSuggestions ?? DEFAULT_STEER_SUGGESTIONS,
-    approvals: current?.approvals ?? [],
+    approvals: preservePendingApprovals
+      ? (current?.approvals ?? []).filter((approval) => approval.state === "pending")
+      : [],
     terminals: mergeTerminalsForThread(mergedThread, current?.terminals),
     reroutes: current?.reroutes ?? [],
     review: parseReviewFindings(mergedThread),
@@ -2137,7 +2374,15 @@ export class WorkspaceRuntimeService {
   private pending = new Map<string, PendingRequest>();
   private loadingThreads = new Set<string>();
   private resumedThreads = new Set<string>();
-  private approvalMap = new Map<string, { requestId: string; method: string; params: Record<string, unknown> }>();
+  private approvalMap = new Map<
+    string,
+    {
+      rawRequestId: RequestId;
+      method: string;
+      params: Record<string, unknown>;
+      responded?: boolean;
+    }
+  >();
   private standaloneTerminalMeta = new Map<
     string,
     { threadId: string; cwd: string; command: string; title: string }
@@ -2704,7 +2949,12 @@ export class WorkspaceRuntimeService {
     }
 
     if (message.method && message.id !== undefined) {
-      this.handleServerRequest(String(message.id), message.method, message.params ?? {});
+      this.handleServerRequest(
+        String(message.id),
+        message.id,
+        message.method,
+        message.params ?? {},
+      );
       return;
     }
 
@@ -2803,8 +3053,12 @@ export class WorkspaceRuntimeService {
     });
   }
 
-  private respond(requestId: string, result: unknown) {
-    this.socket?.send(JSON.stringify({ id: requestId, result }));
+  private respond(requestId: RequestId, result: unknown) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Local agent bridge is not connected.");
+    }
+
+    this.socket.send(JSON.stringify({ id: requestId, result }));
   }
 
   async connect() {
@@ -5944,19 +6198,19 @@ console.log(qwenRoot);
     }
 
     if (request.method === "item/commandExecution/requestApproval") {
-      this.respond(request.requestId, {
+      this.respond(request.rawRequestId, {
         decision,
       });
     }
 
     if (request.method === "item/fileChange/requestApproval") {
-      this.respond(request.requestId, {
+      this.respond(request.rawRequestId, {
         decision,
       });
     }
 
     if (request.method === "item/permissions/requestApproval") {
-      this.respond(request.requestId, {
+      this.respond(request.rawRequestId, {
         permissions:
           decision === "accept" || decision === "acceptForSession"
             ? (request.params.permissions ?? {})
@@ -5966,7 +6220,7 @@ console.log(qwenRoot);
     }
 
     if (request.method === "execCommandApproval" || request.method === "applyPatchApproval") {
-      this.respond(request.requestId, {
+      this.respond(request.rawRequestId, {
         decision: legacyReviewDecisionFromApprovalDecision(decision),
       });
     }
@@ -5994,34 +6248,66 @@ console.log(qwenRoot);
 
   async submitQuestion(
     requestId: string,
-    answers: Record<string, string[]>,
+    answers: QuestionAnswerPayload,
   ) {
     const request = this.approvalMap.get(requestId);
     if (!request) {
       return;
     }
 
-    this.respond(request.requestId, {
+    const threadId = safeString(request.params.threadId);
+    const storageKeys = buildPendingQuestionStorageKeys({
+      threadId,
+      turnId: safeString(request.params.turnId) || null,
+      itemId: safeString(request.params.itemId) || null,
+      requestId,
+      questions: normalizeQuestionStorageQuestions(request.params.questions),
+    });
+
+    writeStoredPendingQuestionAnswersForKeys(
+      storageKeys,
+      Object.keys(answers).length > 0 ? answers : null,
+    );
+
+    this.respond(request.rawRequestId, {
       answers,
     });
 
-    this.mutate((snapshot) => {
-      updateThreadRecord(snapshot, safeString(request.params.threadId), (record) => ({
-        ...record,
-        approvals: record.approvals.map((approval) =>
-          approval.id === requestId
-            ? {
-                ...approval,
-                state: "submitted",
-                detail: `${approval.detail} · ${Object.values(answers)
-                  .flat()
-                  .filter(Boolean)
-                  .join(", ")}`,
-              }
-            : approval,
-        ),
-      }));
+    this.approvalMap.set(requestId, {
+      ...request,
+      responded: true,
     });
+
+    this.mutate((snapshot) => {
+      updateThreadRecord(snapshot, threadId, (record) => {
+        const approvals = record.approvals.filter((approval) => approval.id !== requestId);
+        const hasPendingApprovals = approvals.some((approval) => approval.state === "pending");
+        const nextStatus =
+          record.thread.status.type === "active" && !hasPendingApprovals
+            ? {
+                ...record.thread.status,
+                activeFlags: record.thread.status.activeFlags.filter(
+                  (flag) => flag !== "waitingOnApproval" && flag !== "waitingOnUserInput",
+                ),
+              }
+            : record.thread.status;
+
+        return {
+          ...record,
+          approvals,
+          thread: {
+            ...record.thread,
+            status: nextStatus,
+          },
+        };
+      });
+    });
+
+    if (threadId && !isLocalProviderThreadId(threadId)) {
+      globalThis.setTimeout(() => {
+        void this.resumeThread(threadId, true).catch(() => undefined);
+      }, 400);
+    }
   }
 
   async submitMcp(requestId: string, action: "accept" | "decline" | "cancel", contentText: string) {
@@ -6039,7 +6325,7 @@ console.log(qwenRoot);
       }
     }
 
-    this.respond(request.requestId, {
+    this.respond(request.rawRequestId, {
       action,
       content,
       _meta: null,
@@ -6244,13 +6530,41 @@ console.log(qwenRoot);
     return null;
   }
 
-  private handleServerRequest(requestId: string, method: string, params: Record<string, unknown>) {
+  private handleServerRequest(
+    requestId: string,
+    rawRequestId: RequestId,
+    method: string,
+    params: Record<string, unknown>,
+  ) {
     const approval = this.buildApproval(requestId, method, params);
     if (!approval || !approval.threadId) {
       return;
     }
 
-    this.approvalMap.set(approval.id, { requestId, method, params });
+    this.approvalMap.set(approval.id, {
+      rawRequestId,
+      method,
+      params,
+      responded: false,
+    });
+
+    if (method === "item/tool/requestUserInput") {
+      const storedAnswers = readStoredPendingQuestionAnswerByKeys(
+        buildPendingQuestionStorageKeys({
+          threadId: approval.threadId,
+          turnId: approval.turnId,
+          itemId: approval.itemId,
+          requestId,
+          questions: approval.questions,
+        }),
+      );
+      if (storedAnswers) {
+        globalThis.setTimeout(() => {
+          void this.submitQuestion(requestId, storedAnswers).catch(() => undefined);
+        }, 0);
+        return;
+      }
+    }
 
     this.mutate((snapshot) => {
       updateThreadRecord(snapshot, approval.threadId!, (record) => ({
@@ -6258,7 +6572,14 @@ console.log(qwenRoot);
         approvals: [approval, ...record.approvals.filter((entry) => entry.id !== approval.id)],
         thread: {
           ...record.thread,
-          status: { type: "active", activeFlags: ["waitingOnApproval"] },
+          status: {
+            type: "active",
+            activeFlags: [
+              method === "item/tool/requestUserInput"
+                ? "waitingOnUserInput"
+                : "waitingOnApproval",
+            ],
+          },
         },
       }));
     });
@@ -6305,13 +6626,47 @@ console.log(qwenRoot);
 
       case "thread/status/changed": {
         this.mutate((snapshot) => {
-          updateThreadRecord(snapshot, safeString(params.threadId), (record) => ({
-            ...record,
-            thread: {
-              ...record.thread,
-              status: params.status as Thread["status"],
-            },
-          }));
+          updateThreadRecord(snapshot, safeString(params.threadId), (record) => {
+            const incomingStatus = params.status as Thread["status"];
+            const waitingFlags =
+              incomingStatus.type === "active"
+                ? incomingStatus.activeFlags.filter(
+                    (flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput",
+                  )
+                : [];
+            const hasVisiblePendingApprovals = record.approvals.some(
+              (approval) => approval.state === "pending",
+            );
+            const hasUnansweredServerRequests =
+              waitingFlags.length > 0 &&
+              [...this.approvalMap.values()].some(
+                (request) =>
+                  safeString(request.params.threadId) === record.thread.id &&
+                  request.responded !== true,
+              );
+
+            const nextStatus =
+              incomingStatus.type === "active" &&
+              waitingFlags.length > 0 &&
+              !hasVisiblePendingApprovals &&
+              !hasUnansweredServerRequests
+                ? {
+                    ...incomingStatus,
+                    activeFlags: incomingStatus.activeFlags.filter(
+                      (flag) =>
+                        flag !== "waitingOnApproval" && flag !== "waitingOnUserInput",
+                    ),
+                  }
+                : incomingStatus;
+
+            return {
+              ...record,
+              thread: {
+                ...record.thread,
+                status: nextStatus,
+              },
+            };
+          });
         });
         return;
       }
@@ -6930,12 +7285,43 @@ console.log(qwenRoot);
 
       case "serverRequest/resolved": {
         const requestId = safeString(params.requestId);
+        const request = this.approvalMap.get(requestId);
+        if (request && request.method === "item/tool/requestUserInput") {
+          writeStoredPendingQuestionAnswersForKeys(
+            buildPendingQuestionStorageKeys({
+              threadId: safeString(request.params.threadId),
+              turnId: safeString(request.params.turnId) || null,
+              itemId: safeString(request.params.itemId) || null,
+              requestId,
+              questions: normalizeQuestionStorageQuestions(request.params.questions),
+            }),
+            null,
+          );
+        }
         this.approvalMap.delete(requestId);
         this.mutate((snapshot) => {
-          updateThreadRecord(snapshot, safeString(params.threadId), (record) => ({
-            ...record,
-            approvals: record.approvals.filter((approval) => approval.id !== requestId),
-          }));
+          updateThreadRecord(snapshot, safeString(params.threadId), (record) => {
+            const approvals = record.approvals.filter((approval) => approval.id !== requestId);
+            const hasPendingApprovals = approvals.some((approval) => approval.state === "pending");
+            const nextStatus =
+              record.thread.status.type === "active" && !hasPendingApprovals
+                ? {
+                    ...record.thread.status,
+                    activeFlags: record.thread.status.activeFlags.filter(
+                      (flag) => flag !== "waitingOnApproval" && flag !== "waitingOnUserInput",
+                    ),
+                  }
+                : record.thread.status;
+
+            return {
+              ...record,
+              approvals,
+              thread: {
+                ...record.thread,
+                status: nextStatus,
+              },
+            };
+          });
         });
         return;
       }

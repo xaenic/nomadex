@@ -98,6 +98,7 @@ import type {
   FilePreviewState,
   GitActivityGraphModel,
   PanelTab,
+  QuestionAnswerPayload,
   QuickEntry,
   QuickMode,
   QueuedComposerMessage,
@@ -188,11 +189,13 @@ const writeComposerDraftMap = (value: ComposerDraftMap) => {
 const buildQuestionAnswerPayload = (
   approval: ApprovalRequest,
   answers: Record<string, string>,
-) =>
+): QuestionAnswerPayload =>
   Object.fromEntries(
     (approval.questions ?? []).map((question) => [
       question.id,
-      [(answers[question.id] ?? "").trim()].filter(Boolean),
+      {
+        answers: [(answers[question.id] ?? "").trim()].filter(Boolean),
+      },
     ]),
   );
 
@@ -1785,23 +1788,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
             await runtime.submitQuestion(requestId, answers);
           },
           async () => {
-            mutateLocal((draft) => {
-              draft.threads = draft.threads.map((record) => ({
-                ...record,
-                approvals: record.approvals.map((approval) =>
-                  approval.id === requestId
-                    ? {
-                        ...approval,
-                        state: "submitted",
-                        detail: `${approval.detail} · ${Object.values(answers)
-                          .flat()
-                          .filter(Boolean)
-                          .join(", ")}`,
-                      }
-                    : approval,
-                ),
-              }));
-            });
+            throw new Error("Structured question answers require a live workspace connection.");
+          },
+          {
+            preferLive: true,
+            fallbackOnLiveError: false,
           },
         ),
       submitMcp: async (requestId, action, contentText) =>
@@ -2079,6 +2070,7 @@ export function WorkspacePage() {
   const [questionAnswersByRequestId, setQuestionAnswersByRequestId] = useState<
     Record<string, Record<string, string>>
   >({});
+  const [questionPreviewApproval, setQuestionPreviewApproval] = useState<ApprovalRequest | null>(null);
   const [mcpResponseByRequestId, setMcpResponseByRequestId] = useState<Record<string, string>>({});
   const terminalDockPaintFrameRef = useRef<number | null>(null);
   const terminalDockLaunchFrameRef = useRef<number | null>(null);
@@ -2364,14 +2356,17 @@ export function WorkspacePage() {
     themePickerOpen ||
     projectPickerOpen ||
     skillsModalOpen;
-  const pendingApprovalsCount = useMemo(
-    () => activeThread?.approvals.filter((approval) => approval.state === "pending").length ?? 0,
-    [activeThread?.approvals],
-  );
-  const activePendingApprovals = useMemo(
-    () => activeThread?.approvals.filter((approval) => approval.state === "pending") ?? [],
-    [activeThread?.approvals],
-  );
+  const activePendingApprovals = useMemo(() => {
+    const approvals = activeThread?.approvals.filter((approval) => approval.state === "pending") ?? [];
+    if (
+      questionPreviewApproval?.state === "pending" &&
+      questionPreviewApproval.threadId === activeThreadId
+    ) {
+      return [questionPreviewApproval, ...approvals];
+    }
+    return approvals;
+  }, [activeThread?.approvals, activeThreadId, questionPreviewApproval]);
+  const pendingApprovalsCount = activePendingApprovals.length;
   const activeUiApproval = approvalModeFromSettings(snapshot.settings);
   const activeExplorerPath = useMemo(() => {
     const cwd = activeThread?.thread.cwd ?? null;
@@ -3040,6 +3035,20 @@ export function WorkspacePage() {
         approval,
         questionAnswersByRequestId[approval.id] ?? {},
       );
+
+      if (approval.id.startsWith("question-preview:")) {
+        setQuestionPreviewApproval(null);
+        setQuestionAnswersByRequestId((current) => {
+          if (!(approval.id in current)) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[approval.id];
+          return next;
+        });
+        return;
+      }
 
       await actions.submitQuestion(approval.id, answers);
       setQuestionAnswersByRequestId((current) => {
@@ -4914,6 +4923,80 @@ export function WorkspacePage() {
           break;
         case "/ps":
           openPanel("terminal");
+          break;
+        case "/qpreview":
+          if (!activeThreadId) {
+            pushToast("Open a thread first.", "warn");
+            break;
+          }
+          setQuestionPreviewApproval({
+            id: `question-preview:${activeThreadId}`,
+            kind: "question",
+            title: "Questions by Codex Agent",
+            detail: "Previewing the structured question tray.",
+            risk: "low",
+            state: "pending",
+            threadId: activeThreadId,
+            turnId: null,
+            itemId: null,
+            questions: [
+              {
+                id: "stack",
+                header: "Stack",
+                question: "What stack should this use?",
+                isSecret: false,
+                isOther: false,
+                options: [
+                  {
+                    label: "Plain HTML/CSS/JS (Recommended)",
+                    description: "",
+                  },
+                  {
+                    label: "React + Vite",
+                    description: "",
+                  },
+                  {
+                    label: "Next.js",
+                    description: "",
+                  },
+                  {
+                    label: "No, and tell Codex what to do differently",
+                    description: "",
+                  },
+                ],
+              },
+              {
+                id: "style",
+                header: "Style",
+                question: "What level of detail should I use?",
+                isSecret: false,
+                isOther: false,
+                options: [
+                  {
+                    label: "Compact",
+                    description: "",
+                  },
+                  {
+                    label: "Balanced",
+                    description: "",
+                  },
+                  {
+                    label: "Detailed",
+                    description: "",
+                  },
+                ],
+              },
+              {
+                id: "notes",
+                header: "Notes",
+                question: "Anything else I should optimize for?",
+                isSecret: false,
+                isOther: true,
+                options: [],
+              },
+            ],
+          });
+          pushToast("Question preview opened", "ok");
           break;
         case "/diff":
           openPanel("diff");

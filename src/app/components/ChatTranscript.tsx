@@ -834,9 +834,13 @@ const MessageTextFlow = memo(function MessageTextFlow({
 const TurnPlanCard = memo(function TurnPlanCard({
   itemText,
   plan,
+  onOpenFile,
+  providerId,
 }: {
   itemText: string;
   plan: ThreadRecord["plan"] | null;
+  onOpenFile: (path: string, line?: number | null) => void;
+  providerId?: ProviderId;
 }) {
   const steps = plan?.steps ?? [];
   const explanation = plan?.explanation?.trim() || itemText.trim();
@@ -860,20 +864,86 @@ const TurnPlanCard = memo(function TurnPlanCard({
         </span>
       </div>
       {explanation ? (
-        <div className="turn-plan-card-summary">{explanation}</div>
+        <div className="turn-plan-card-summary">
+          <MessageMarkdownFlow
+            onOpenFile={onOpenFile}
+            providerId={providerId}
+            text={explanation}
+          />
+        </div>
       ) : null}
       <ol className="turn-plan-card-list">
         {steps.map((step, index) => (
           <li className={clsx("turn-plan-card-step", `is-${step.status}`)} key={`${index}-${step.step}`}>
             <span className="turn-plan-card-step-marker" aria-hidden="true" />
             <span className="turn-plan-card-step-index">{index + 1}.</span>
-            <span className="turn-plan-card-step-text">{step.step}</span>
+            <div className="turn-plan-card-step-text">
+              <MessageMarkdownFlow
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+                text={step.step}
+              />
+            </div>
           </li>
         ))}
       </ol>
     </div>
   );
 });
+
+const parsePlanLikeAgentMessage = (text: string) => {
+  const normalized = text.replace(/\r\n?/gu, "\n").trim();
+  if (!normalized || normalized.includes("```")) {
+    return null;
+  }
+
+  const lines = normalized.split("\n");
+  const firstStepIndex = lines.findIndex((line) => /^\s*\d+\.\s+/u.test(line));
+  if (firstStepIndex === -1) {
+    return null;
+  }
+
+  const summary = lines
+    .slice(0, firstStepIndex)
+    .join("\n")
+    .trim();
+  const steps: string[] = [];
+  let current = "";
+
+  for (const rawLine of lines.slice(firstStepIndex)) {
+    const line = rawLine.trim();
+    const numberedMatch = line.match(/^\d+\.\s+(.*)$/u);
+    if (numberedMatch) {
+      if (current.trim()) {
+        steps.push(current.trim());
+      }
+      current = numberedMatch[1] ?? "";
+      continue;
+    }
+
+    if (!line) {
+      continue;
+    }
+
+    current = current ? `${current}\n${line}` : line;
+  }
+
+  if (current.trim()) {
+    steps.push(current.trim());
+  }
+
+  if (steps.length < 2) {
+    return null;
+  }
+
+  return {
+    explanation: summary,
+    steps: steps.map((step) => ({
+      step,
+      status: "pending" as const,
+    })),
+  };
+};
 
 const ThreadItemView = memo(function ThreadItemView({
   item,
@@ -1131,6 +1201,8 @@ const ThreadItemView = memo(function ThreadItemView({
   if (item.type === "agentMessage") {
     const text =
       typeof textVisible === "number" ? item.text.slice(0, textVisible) : item.text;
+    const derivedPlan =
+      !streaming && text.length > 220 ? parsePlanLikeAgentMessage(text) : null;
 
     return (
       <div
@@ -1143,7 +1215,14 @@ const ThreadItemView = memo(function ThreadItemView({
         </div>
         <div className="mb" ref={messageBodyRef}>
           {text ? (
-            streaming ? (
+            derivedPlan ? (
+              <TurnPlanCard
+                itemText={derivedPlan.explanation || text}
+                plan={derivedPlan}
+                onOpenFile={onOpenFile}
+                providerId={providerId}
+              />
+            ) : streaming ? (
               <MessageMarkdownFlow
                 onOpenFile={onOpenFile}
                 providerId={providerId}
@@ -1185,7 +1264,14 @@ const ThreadItemView = memo(function ThreadItemView({
   }
 
   if (item.type === "plan") {
-    return <TurnPlanCard itemText={item.text} plan={plan} />;
+    return (
+      <TurnPlanCard
+        itemText={item.text}
+        onOpenFile={onOpenFile}
+        plan={plan}
+        providerId={providerId}
+      />
+    );
   }
 
   if (item.type === "commandExecution") {

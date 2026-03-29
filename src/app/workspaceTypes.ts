@@ -32,6 +32,13 @@ export type UiThemeOption = {
   swatches: [string, string, string];
 };
 
+export type QuestionAnswerPayload = Record<
+  string,
+  {
+    answers: string[];
+  }
+>;
+
 export type PanelTab = "files" | "graph" | "diff" | "terminal" | "agents" | "config";
 export type QuickMode = "slash" | "mention" | "skill";
 export type RouteSection =
@@ -180,7 +187,7 @@ export type WorkspaceActions = {
   resolveApproval: (requestId: string, decision: ApprovalDecision) => Promise<void>;
   submitQuestion: (
     requestId: string,
-    answers: Record<string, string[]>,
+    answers: QuestionAnswerPayload,
   ) => Promise<void>;
   submitMcp: (
     requestId: string,

@@ -1039,6 +1039,13 @@ code {
   min-width: 0;
 }
 
+.file-change-summary-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .file-change-summary-title {
   min-width: 0;
   font-size: 10px;
@@ -1053,10 +1060,55 @@ code {
   color: var(--tx3);
 }
 
+.file-change-summary-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx3);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.file-change-summary-toggle:hover,
+.file-change-summary-toggle:focus-visible {
+  color: var(--tx);
+  outline: none;
+}
+
 .file-change-summary-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.file-change-summary-list-live {
+  align-content: flex-start;
+}
+
+.file-change-summary-list-live.collapsed {
+  max-height: 96px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.file-change-summary-list-live.expanded {
+  max-height: 208px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.file-change-summary-list-live::-webkit-scrollbar {
+  width: 4px;
+}
+
+.file-change-summary-list-live::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ac) 38%, var(--bdr2));
+  border-radius: 999px;
+}
+
+.file-change-summary-list-live::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .file-change-summary-item {
@@ -4875,6 +4927,8 @@ pre::-webkit-scrollbar-thumb {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: min(100%, 620px);
+  margin-inline: auto;
 }
 
 .approval-request-card {
@@ -5072,47 +5126,79 @@ pre::-webkit-scrollbar-thumb {
 }
 
 .question-request-card {
-  background: var(--bg2);
-  border: 1px solid var(--bdr);
-  border-radius: var(--r);
-  padding: 12px;
+  background: color-mix(in srgb, var(--bg2) 96%, black 4%);
+  border: 1px solid color-mix(in srgb, var(--bdr) 84%, white 16%);
+  border-radius: 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.18);
 }
 
 .question-request-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
 }
 
-.question-request-copy {
+.question-request-title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
+  flex: 1;
 }
 
-.question-request-copy strong {
-  font-size: 12px;
+.question-request-title {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--tx);
-}
-
-.question-request-copy span {
-  font-size: 11px;
-  color: var(--tx2);
   line-height: 1.45;
 }
 
-.question-request-state {
-  border: 1px solid var(--bdr2);
-  border-radius: 999px;
-  padding: 3px 8px;
+.question-request-meta {
   font-size: 10px;
-  color: var(--tx2);
-  white-space: nowrap;
+  color: var(--tx3);
+  line-height: 1.4;
+}
+
+.question-request-pager {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.question-request-pager-button {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--tx3);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.question-request-pager-button:hover,
+.question-request-pager-button:focus-visible {
+  background: rgb(255 255 255 / 0.05);
+  color: var(--tx);
+  outline: none;
+}
+
+.question-request-pager-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.question-request-pager-value {
+  font-size: 10px;
+  color: var(--tx3);
+  min-width: 42px;
+  text-align: center;
 }
 
 .question-request-body {
@@ -5127,57 +5213,32 @@ pre::-webkit-scrollbar-thumb {
   gap: 10px;
 }
 
-.question-request-item-head {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.question-request-index {
-  font-size: 11px;
-  color: var(--tx3);
-  min-width: 14px;
-}
-
-.question-request-item-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
 .question-request-header {
   font-size: 10px;
   color: var(--tx3);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-}
-
-.question-request-text {
-  font-size: 12px;
-  color: var(--tx);
-  line-height: 1.45;
+  font-weight: 600;
 }
 
 .question-request-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
 
 .question-request-option {
-  border: 1px solid var(--bdr);
-  background: var(--bg3);
+  border: none;
   border-radius: 10px;
-  padding: 10px 11px;
+  padding: 8px 10px;
   text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
   color: var(--tx);
   cursor: pointer;
   transition:
-    border-color 140ms ease,
     background-color 140ms ease,
     color 140ms ease;
 }
@@ -5185,25 +5246,38 @@ pre::-webkit-scrollbar-thumb {
 .question-request-option:hover,
 .question-request-option:focus-visible,
 .question-request-option.active {
-  border-color: var(--ac);
-  background: color-mix(in srgb, var(--bg3) 80%, var(--ac) 20%);
+  background: rgb(255 255 255 / 0.05);
   outline: none;
 }
 
+.question-request-option-index {
+  font-size: 11px;
+  color: var(--tx3);
+  padding-top: 1px;
+}
+
+.question-request-option-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .question-request-option-label {
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .question-request-option-description {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--tx2);
   line-height: 1.4;
 }
 
 .question-request-input {
   width: 100%;
-  border: 1px solid var(--bdr);
-  background: var(--bg3);
+  border: 1px solid color-mix(in srgb, var(--bdr) 84%, white 16%);
+  background: rgb(255 255 255 / 0.03);
   border-radius: 10px;
   padding: 10px 11px;
   color: var(--tx);
@@ -5217,22 +5291,70 @@ pre::-webkit-scrollbar-thumb {
 
 .question-request-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.question-request-dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: var(--tx3);
+}
+
+.question-request-dismiss span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 18px;
+  padding-inline: 6px;
+  border: 1px solid color-mix(in srgb, var(--bdr) 84%, white 16%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.03);
+  color: var(--tx2);
 }
 
 .question-request-submit {
-  border: 1px solid var(--ac);
-  background: color-mix(in srgb, var(--ac) 14%, var(--bg3) 86%);
-  color: var(--tx);
-  border-radius: 9px;
-  padding: 8px 12px;
+  min-width: 106px;
+  border: 1px solid color-mix(in srgb, #89c3ff 76%, white 24%);
+  background: linear-gradient(180deg, #8bc6ff, #6eaef1);
+  color: #102030;
+  border-radius: 999px;
+  padding: 8px 14px;
   font: inherit;
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .question-request-submit:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .question-request-card {
+    padding: 11px 12px;
+  }
+
+  .question-request-head {
+    gap: 10px;
+  }
+
+  .question-request-title {
+    font-size: 12px;
+  }
+
+  .question-request-actions {
+    flex-wrap: wrap;
+  }
+
+  .question-request-submit {
+    margin-left: auto;
+  }
 }
 
 .empty-panel,
@@ -7695,6 +7817,16 @@ pre::-webkit-scrollbar-thumb {
   color: var(--tx);
 }
 
+.turn-plan-card-summary .message-text-flow,
+.turn-plan-card-step-text .message-text-flow {
+  gap: 8px;
+}
+
+.turn-plan-card-summary .message-markdown,
+.turn-plan-card-step-text .message-markdown {
+  gap: 8px;
+}
+
 .turn-plan-card-list {
   display: flex;
   flex-direction: column;
@@ -7740,10 +7872,29 @@ pre::-webkit-scrollbar-thumb {
 .turn-plan-card-step-text {
   font-size: 12px;
   line-height: 1.5;
+  min-width: 0;
 }
 
 .turn-plan-card-step.is-completed .turn-plan-card-step-text {
   color: var(--tx3);
+}
+
+.turn-plan-card-step.is-completed .turn-plan-card-step-text .message-markdown {
+  opacity: 0.78;
+}
+
+.turn-plan-card-step.is-completed .turn-plan-card-step-text .message-markdown :is(
+    p,
+    li,
+    blockquote,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6
+  ) {
+  color: inherit;
   text-decoration: line-through;
 }
 
@@ -7998,6 +8149,14 @@ pre::-webkit-scrollbar-thumb {
 
   .file-change-summary-path {
     max-width: min(52vw, 180px);
+  }
+
+  .file-change-summary-list-live.collapsed {
+    max-height: 74px;
+  }
+
+  .file-change-summary-list-live.expanded {
+    max-height: 156px;
   }
 
   .composer-meta-main {
