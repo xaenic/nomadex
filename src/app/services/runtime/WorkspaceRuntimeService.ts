@@ -1349,6 +1349,12 @@ const upsertThreadRecord = (snapshot: DashboardData, record: ThreadRecord) => {
   snapshot.threads = sortThreads(snapshot.threads.map((entry, index) => (index === existingIndex ? record : entry)));
 };
 
+const isPlaceholderHydrationThread = (thread: Thread) =>
+  thread.turns.length === 0 &&
+  thread.status.type === "idle" &&
+  !thread.name?.trim() &&
+  !thread.preview?.trim();
+
 const mergeThread = (thread: Thread, current?: ThreadRecord): ThreadRecord => {
   const existingTurns = current?.thread.turns ?? [];
   const mergedTurns =
@@ -1363,6 +1369,8 @@ const mergeThread = (thread: Thread, current?: ThreadRecord): ThreadRecord => {
     ? {
         ...current.thread,
         ...thread,
+        name: isPlaceholderHydrationThread(thread) ? current.thread.name : thread.name,
+        preview: isPlaceholderHydrationThread(thread) ? current.thread.preview : thread.preview,
         turns: mergedTurns,
       }
     : {
@@ -3439,7 +3447,9 @@ export class WorkspaceRuntimeService {
         upsertThreadRecord(snapshot, mergeThread(response.thread, current));
       });
 
-      this.resumedThreads.add(threadId);
+      if (!isPlaceholderHydrationThread(response.thread)) {
+        this.resumedThreads.add(threadId);
+      }
     } catch (error) {
       if (isFreshThreadUnavailableError(error)) {
         return;
